@@ -4,21 +4,21 @@
     "type": "split",
     "children": [
       {
-        "id": "10c5251148e47591",
+        "id": "75872692f8bb1acf",
         "type": "tabs",
         "children": [
           {
-            "id": "29d76c5de6bf040d",
+            "id": "122559d693e2e61f",
             "type": "leaf",
             "state": {
               "type": "markdown",
               "state": {
-                "file": "命令文集.md",
+                "file": "20_Literature/20260117_chatgpt_自社株買い動向調査.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "命令文集"
+              "title": "20260117_chatgpt_自社株買い動向調査"
             }
           }
         ]
@@ -53,12 +53,12 @@
             "state": {
               "type": "search",
               "state": {
-                "query": "",
+                "query": "tag:#アシロ（7378）",
                 "matchingCase": false,
                 "explainSearch": false,
                 "collapseAll": false,
                 "extraContext": false,
-                "sortOrder": "alphabetical"
+                "sortOrder": "byModifiedTime"
               },
               "icon": "lucide-search",
               "title": "検索"
@@ -78,7 +78,7 @@
       }
     ],
     "direction": "horizontal",
-    "width": 278.5
+    "width": 577.5
   },
   "right": {
     "id": "133f40d0e7725810",
@@ -94,7 +94,6 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "命令文集.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -104,7 +103,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "命令文集へのバックリンク"
+              "title": "バックリンク"
             }
           },
           {
@@ -113,12 +112,12 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "命令文集.md",
+                "file": "20_Literature/20260117_chatgpt_株式投資_Arent(5254)銘柄調査.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "命令文集からのアウトゴーイングリンク"
+              "title": "20260117_chatgpt_株式投資_Arent(5254)銘柄調査からのアウトゴーイングリンク"
             }
           },
           {
@@ -156,20 +155,21 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "命令文集.md",
+                "file": "00_Inbox/FRB.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "命令文集のアウトライン"
+              "title": "FRBのアウトライン"
             }
           }
-        ]
+        ],
+        "currentTab": 1
       }
     ],
     "direction": "horizontal",
-    "width": 300,
+    "width": 200,
     "collapsed": true
   },
   "left-ribbon": {
@@ -183,44 +183,45 @@
       "bases:Create new base": false
     }
   },
-  "active": "29d76c5de6bf040d",
+  "active": "122559d693e2e61f",
   "lastOpenFiles": [
-    "TODO.md",
-    "命令文集.md",
-    "00_Inbox/株式投資_株主構成の見方とアクティビスト.md",
-    "00_Inbox/無題のファイル 5.md",
-    "00_Inbox/無題のファイル 4.md",
-    "10_Fleeting/無題のファイル 3.md",
-    "10_Fleeting/無題のファイル 2.md",
-    "10_Fleeting/無題のファイル 1.md",
-    "Attachments/IMG_6773.png",
-    "00_Inbox/無題のファイル.md",
-    "00_Inbox/無題のファイル 3.md",
+    "20_Literature/20260118_chatgpt_銘柄調査_アシロ（7378）.md",
+    "20_Literature/20260118_chatgpt_銘柄調査_戸田建設（1860）.md",
+    "20_Literature/20260117_chatgpt_銘柄調査_三井金属（5706）.md",
+    "20_Literature/20260117_chatgpt_銘柄調査_ドウシシャ（7483）.md",
+    "20_Literature/20260117_chatgpt_銘柄調査_大成温調大成温調（1904）.md",
+    "20_Literature/20260117_chatgpt_銘柄調査_富士紡ホールディングス（3104）.md",
+    "20_Literature/20260118_chatgpt_銘柄調査_熊谷組（1861）.md",
+    "20_Literature/20260118_chatgpt_銘柄調査_ドーン（2303）.md",
+    "20_Literature/20260118_chatgpt_銘柄調査_きんでん（1944）.md",
+    "20_Literature/20260117_chatgpt_銘柄調査_Arent（5254）_.md",
+    "20_Literature/20260117_エモリ_米国株_1月中旬市場動向とコモディティスーパーサイクル.md",
+    "20_Literature/20260117_chatgpt_銘柄調査_日本製鉄（5401）.md",
+    "20_Literature/20260117_chatgpt_銘柄調査_日本触媒（4114）.md",
     "00_Inbox/無題のファイル 2.md",
+    "00_Inbox/無題のファイル.md",
     "00_Inbox/無題のファイル 1.md",
-    "00_Inbox/株式投資_機関投資家の動きを読む方法.md",
-    "00_Inbox/株式投資_メジャーSQとは_先物オプション取引の基礎.md",
-    "00_Inbox/株式投資_おすすめ無料株サイト5選.md",
-    "10_Fleeting/_README.md",
-    "00_Inbox/2026年1月_ベネズエラ侵攻と貴金属市場への影響.md",
-    "00_Inbox/2026年1月_高市首相解散検討で日経平均が史上最高値更新.md",
-    "00_Inbox/2025年1月_石破首相解散検討で日経平均が史上最高値更新.md",
-    "10_Fleeting/無題のファイル.md",
-    "Templates/MOC.md",
-    "Templates/Daily Note.md",
-    "Templates/Permanent Note.md",
-    "Templates/Literature Note.md",
-    "Templates/Fleeting Note.md",
-    "無題のファイル 2.md",
+    "00_Inbox/無題のファイル 3.md",
+    "20_Literature/20260117_chatgpt_銘柄調査_グンゼ（3002）.md",
+    "20_Literature/20260117_chatgpt_銘柄調査_エクシオグループ（1951）.md",
+    "20_Literature/_README.md",
+    "00_Inbox/無題のファイル 10.md",
+    "00_Inbox/無題のファイル 9.md",
+    "00_Inbox/無題のファイル 8.md",
+    "00_Inbox/無題のファイル 7.md",
+    "00_Inbox/無題のファイル 5.md",
+    "00_Inbox/無題のファイル 6.md",
+    "20_Literature/Untitled",
+    "50_Projects/Attack list/Attacklist.xlsx",
+    "30_Permanent/調査レポート",
+    "50_Projects/Untitled",
+    "50_Projects/Attack list/Untitled",
+    "50_Projects/Attack list/Attacklist.ver2.xlsx",
+    "50_Projects/Attack list",
+    "無題のファイル.canvas",
+    "70_src",
+    "Attachments/IMG_6773.png",
     "Attachments",
-    "Templates",
-    "90_Archives",
-    "50_Projects",
-    "40_MOCs",
-    "30_Permanent",
-    "20_Literature",
-    "10_Fleeting",
-    "00_Inbox",
-    "test"
+    "Templates"
   ]
 }

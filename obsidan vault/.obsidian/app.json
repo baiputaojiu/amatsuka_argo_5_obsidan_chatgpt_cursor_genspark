@@ -1,6 +1,9 @@
 {
   "newFileLocation": "folder",
   "attachmentFolderPath": "Attachments",
-  "newFileFolderPath": "10_Fleeting",
-  "promptDelete": false
+  "newFileFolderPath": "00_Inbox",
+  "promptDelete": false,
+  "showLineNumber": false,
+  "readableLineLength": true,
+  "alwaysUpdateLinks": true
 }
