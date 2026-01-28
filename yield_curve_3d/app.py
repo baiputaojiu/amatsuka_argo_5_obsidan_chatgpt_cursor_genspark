@@ -182,7 +182,7 @@ def create_surface_figure(country_key: str) -> go.Figure:
     return fig
 
 
-def create_curve_figure(country_key: str, row_index: int) -> go.Figure:
+def create_curve_figure(country_key: str, row_index: int, col_index: int) -> go.Figure:
     data = DATASETS[country_key]
     dates = data["dates"]
     maturity_years = data["maturity_years"]
@@ -190,8 +190,13 @@ def create_curve_figure(country_key: str, row_index: int) -> go.Figure:
     z = data["z"]
 
     row_index = max(0, min(row_index, len(dates) - 1))
+    col_index = max(0, min(col_index, len(maturity_years) - 1))
+
     y_values = z[row_index, :]
     date_label = dates[row_index]
+    maturity_label = maturity_labels[col_index]
+    maturity_x = maturity_years[col_index]
+    current_y = y_values[col_index]
 
     fig = go.Figure()
     fig.add_trace(
@@ -203,23 +208,47 @@ def create_curve_figure(country_key: str, row_index: int) -> go.Figure:
             hovertemplate="残存期間: %{text}<br>利回り: %{y:.3f}%<extra></extra>",
         )
     )
+
+    # ホバーしている残存期間を強調表示（縦線 + 赤丸）
+    fig.add_vline(
+        x=maturity_x,
+        line=dict(color="red", width=1, dash="dash"),
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=[maturity_x],
+            y=[current_y],
+            mode="markers",
+            marker=dict(color="red", size=10),
+            showlegend=False,
+            hovertext=[maturity_label],
+            hovertemplate="残存期間: %{hovertext}<br>利回り: %{y:.3f}%<extra></extra>",
+        )
+    )
+
     fig.update_layout(
         margin=dict(l=40, r=10, t=30, b=40),
         xaxis_title="残存期間 (年)",
         yaxis_title="利回り (%)",
         template="plotly_white",
-        title=f"{date_label} のイールドカーブ断面",
+        title=f"{date_label} のイールドカーブ断面（{maturity_label} を強調）",
     )
     return fig
 
 
-def create_timeseries_figure(country_key: str, row_index: int) -> go.Figure:
+def create_timeseries_figure(country_key: str, col_index: int, row_index: int) -> go.Figure:
     data = DATASETS[country_key]
     dates = data["dates"]
     z = data["z"]
-    ts_col_index = data["ts_col_index"]
+    maturity_years = data["maturity_years"]
+    maturity_labels = data["maturity_labels"]
 
-    y_values = z[:, ts_col_index]
+    # インデックスの安全な範囲チェック
+    col_index = max(0, min(col_index, len(maturity_years) - 1))
+    row_index = max(0, min(row_index, len(dates) - 1))
+
+    y_values = z[:, col_index]
+    maturity_label = maturity_labels[col_index]
 
     fig = go.Figure()
     fig.add_trace(
@@ -232,11 +261,26 @@ def create_timeseries_figure(country_key: str, row_index: int) -> go.Figure:
         )
     )
 
-    # 現在のホバー位置に縦線を描く
-    row_index = max(0, min(row_index, len(dates) - 1))
+    # 現在のホバー位置を強調表示
+    current_y = y_values[row_index]
+
+    # 縦線
     fig.add_vline(
         x=row_index,
         line=dict(color="red", width=1, dash="dash"),
+    )
+
+    # 該当ポイントに赤いマーカー
+    fig.add_trace(
+        go.Scatter(
+            x=[row_index],
+            y=[current_y],
+            mode="markers",
+            marker=dict(color="red", size=10),
+            showlegend=False,
+            hovertext=[dates[row_index]],
+            hovertemplate="日付: %{hovertext}<br>利回り: %{y:.3f}%<extra></extra>",
+        )
     )
 
     fig.update_layout(
@@ -247,9 +291,9 @@ def create_timeseries_figure(country_key: str, row_index: int) -> go.Figure:
             tickvals=list(range(0, len(dates), max(1, len(dates) // 10))),
             ticktext=[dates[i] for i in range(0, len(dates), max(1, len(dates) // 10))],
         ),
-        yaxis_title="10年金利 (%)",
+        yaxis_title="利回り (%)",
         template="plotly_white",
-        title="10年金利の推移",
+        title=f"{maturity_label} の利回りの推移（{dates[row_index]} を強調）",
     )
     return fig
 
@@ -325,10 +369,13 @@ def update_surface(country_key: str):
 def update_2d_graphs(country_key: str, hover_data: Dict[str, Any] | None):
     data = DATASETS[country_key]
     num_dates = len(data["dates"])
-    num_maturities = len(data["maturity_years"])
+    maturity_years = data["maturity_years"]
+    maturity_labels = data["maturity_labels"]
+    num_maturities = len(maturity_years)
 
-    # hoverData が無ければ最新の日付を使う
+    # hoverData が無ければ「最新日 × デフォルト（10 年付近）の残存期間」を使う
     row_index = num_dates - 1
+    col_index = data.get("ts_col_index", 0)
 
     if hover_data and "points" in hover_data and hover_data["points"]:
         point = hover_data["points"][0]
@@ -358,11 +405,33 @@ def update_2d_graphs(country_key: str, hover_data: Dict[str, Any] | None):
         if isinstance(point_number, int) and num_maturities > 0:
             row_index = int(point_number // num_maturities)
 
+        # === 列インデックス（col_index）の推定 ===
+        # 1) x 値（残存期間の年数）から、一番近いカラムを選ぶ
+        x_val = point.get("x", None)
+        if isinstance(x_val, (int, float)) and num_maturities > 0:
+            col_index = int(np.argmin(np.abs(maturity_years - float(x_val))))
+
+        # 2) x がラベル文字列の場合（ほぼ無いが一応）
+        elif isinstance(x_val, str):
+            try:
+                col_index = maturity_labels.index(x_val)
+            except ValueError:
+                pass
+
+        # 3) pointIndex = [row, col] の col を使う
+        if isinstance(point_index, (list, tuple)) and len(point_index) >= 2:
+            col_index = int(point_index[1])
+
+        # 4) pointNumber から列インデックスを復元する
+        if isinstance(point_number, int) and num_maturities > 0:
+            col_index = int(point_number % num_maturities)
+
     # インデックスが範囲外に出ないようにクランプ
     row_index = max(0, min(row_index, num_dates - 1))
+    col_index = max(0, min(col_index, num_maturities - 1))
 
-    curve_fig = create_curve_figure(country_key, row_index)
-    ts_fig = create_timeseries_figure(country_key, row_index)
+    curve_fig = create_curve_figure(country_key, row_index, col_index)
+    ts_fig = create_timeseries_figure(country_key, col_index, row_index)
     return curve_fig, ts_fig
 
 
