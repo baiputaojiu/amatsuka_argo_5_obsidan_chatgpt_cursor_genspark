@@ -279,6 +279,7 @@ def create_curve_figure(country_key: str, row_index: int, col_index: int) -> go.
             mode="lines+markers",
             text=maturity_labels,
             hovertemplate="残存期間: %{text}<br>利回り: %{y:.3f}%<extra></extra>",
+            showlegend=False,
         )
     )
 
@@ -303,7 +304,8 @@ def create_curve_figure(country_key: str, row_index: int, col_index: int) -> go.
         margin=dict(l=40, r=10, t=30, b=40),
         xaxis_title="残存期間 (年)",
         yaxis_title="利回り (%)",
-        template="plotly_white",
+        template="plotly_dark",
+        showlegend=False,
         title=f"{date_label} のイールドカーブ断面（{maturity_label} を強調）",
     )
     return fig
@@ -331,6 +333,7 @@ def create_timeseries_figure(country_key: str, col_index: int, row_index: int) -
             mode="lines",
             hovertext=dates,
             hovertemplate="日付: %{hovertext}<br>利回り: %{y:.3f}%<extra></extra>",
+            showlegend=False,
         )
     )
 
@@ -365,7 +368,8 @@ def create_timeseries_figure(country_key: str, col_index: int, row_index: int) -
             ticktext=[dates[i] for i in range(0, len(dates), max(1, len(dates) // 10))],
         ),
         yaxis_title="利回り (%)",
-        template="plotly_white",
+        template="plotly_dark",
+        showlegend=False,
         title=f"{maturity_label} の利回りの推移（{dates[row_index]} を強調）",
     )
     return fig
@@ -373,8 +377,21 @@ def create_timeseries_figure(country_key: str, col_index: int, row_index: int) -
 
 app = Dash(__name__)
 
+# ドラッグ時にテキスト選択・コピーにならないよう選択を無効化
+_NO_SELECT = {
+    "userSelect": "none",
+    "WebkitUserSelect": "none",
+    "MozUserSelect": "none",
+    "msUserSelect": "none",
+}
+
 app.layout = html.Div(
-    style={"display": "flex", "height": "100vh", "backgroundColor": "#111"},
+    style={
+        "display": "flex",
+        "height": "100vh",
+        "backgroundColor": "#111",
+        **_NO_SELECT,
+    },
     children=[
         # 左側: 2D グラフ
         html.Div(
@@ -383,11 +400,12 @@ app.layout = html.Div(
                 "display": "flex",
                 "flexDirection": "column",
                 "padding": "10px",
-                "backgroundColor": "#f5f5f5",
+                "backgroundColor": "#111",
+                **_NO_SELECT,
             },
             children=[
                 html.Div(
-                    style={"marginBottom": "10px"},
+                    style={"marginBottom": "10px", **_NO_SELECT},
                     children=[
                         html.Label("国を選択"),
                         dcc.RadioItems(
@@ -417,21 +435,25 @@ app.layout = html.Div(
                 ),
                 dcc.Graph(
                     id="curve-graph",
-                    style={"flex": "1 1 50%"},
+                    style={"flex": "1 1 50%", "marginTop": "16px", **_NO_SELECT},
                 ),
                 dcc.Graph(
                     id="ts-graph",
-                    style={"flex": "1 1 50%"},
+                    style={"flex": "1 1 50%", "marginTop": "20px", **_NO_SELECT},
                 ),
             ],
         ),
-        # 右側: 3D サーフェス
+        # 右側: 3D サーフェス（ドラッグで回転するため選択無効）
         html.Div(
-            style={"flex": "1 1 60%", "padding": "10px"},
+            style={
+                "flex": "1 1 60%",
+                "padding": "10px",
+                **_NO_SELECT,
+            },
             children=[
                 dcc.Graph(
                     id="surface-graph",
-                    style={"height": "100%"},
+                    style={"height": "100%", **_NO_SELECT},
                 )
             ],
         ),
@@ -463,25 +485,27 @@ def init_date_slider(country_key: str):
     max_idx = n - 1
     # だいたい 10 個くらいの目盛りを出す
     step = max(1, n // 10)
+    def _mark_style():
+        # 文字のお尻（右端）とスライダーの点が同じになるよう、1.2ラベル分左にずらしてから回転
+        return {
+            "transform": "translateX(-100%) rotate(-45deg)",
+            "transformOrigin": "100% 50%",
+            "textAlign": "right",
+            "whiteSpace": "nowrap",
+            "fontSize": "10px",
+            "display": "inline-block",
+        }
+
     marks = {
         i: {
             "label": dates[i],
-            "style": {
-                # ラベルを斜めにして重なりを軽減
-                "transform": "rotate(-45deg)",
-                "whiteSpace": "nowrap",
-                "fontSize": "10px",
-            },
+            "style": _mark_style(),
         }
         for i in range(0, n, step)
     }
     marks[max_idx] = {
         "label": dates[max_idx],
-        "style": {
-            "transform": "rotate(-45deg)",
-            "whiteSpace": "nowrap",
-            "fontSize": "10px",
-        },
+        "style": _mark_style(),
     }
     out_value = [min_idx, max_idx]
     # #region agent log
