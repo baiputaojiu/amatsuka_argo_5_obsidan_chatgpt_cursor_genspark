@@ -168,6 +168,9 @@ def create_surface_figure(country_key: str) -> go.Figure:
         margin=dict(l=0, r=0, t=30, b=0),
         scene=dict(
             xaxis_title="残存期間 (年)",
+            xaxis=dict(
+                autorange="reversed",  # 残存期間軸を反転（短期→長期 を右方向に）
+            ),
             yaxis_title="日付",
             zaxis_title="利回り (%)",
             yaxis=dict(
