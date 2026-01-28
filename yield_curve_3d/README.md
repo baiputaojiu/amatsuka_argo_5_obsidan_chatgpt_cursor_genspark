@@ -98,6 +98,31 @@ pip install -r requirements.txt
 
 これらの形式であれば、`app.py` が自動的に読み込んで 3D 表示を行います。
 
+### 4.1 米国データを 2000 年〜現在にする
+
+米国データを 2000 年〜現在まで拡張するには、`fetch_usa_data.py` を使います。
+
+**方法 A: 自動ダウンロード（ネットワークが通る場合）**
+
+```powershell
+cd D:\workspace\amatsuka_argo_5_obsidan_chatgpt_cursor_genspark\yield_curve_3d
+python fetch_usa_data.py
+```
+
+**方法 B: 手動ダウンロードしてから正規化**
+
+1. ブラウザで以下を開き、Par Yield Curve の CSV をダウンロードします。
+   - [U.S. Treasury Interest Rates Data CSV Archive](https://home.treasury.gov/interest-rates-data-csv-archive)
+   - 例: **Daily Treasury Par Yield Curve Rates** の `par-yield-curve-rates-1990-2022.csv`
+2. ダウンロードした CSV を `yield_curve_3d` フォルダなどに保存します。
+3. 次のコマンドで 2000 年以降だけを正規化し、`data/usa_yield_curve.csv` に保存します。既存の `usa_yield_curve.csv` がある場合は、その中でアーカイブより新しい日付（例: 2023 年以降）はそのまま残してマージされます。
+
+   ```powershell
+   python fetch_usa_data.py ダウンロードしたファイル.csv
+   ```
+
+これで米国データが 2000 年〜現在（既存分とマージされた範囲）で表示されます。
+
 ---
 
 ## 5. よくあるトラブルと対処
