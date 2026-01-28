@@ -98,6 +98,17 @@ pip install -r requirements.txt
 
 これらの形式であれば、`app.py` が自動的に読み込んで 3D 表示を行います。
 
+### 日本のデータを取得し直す
+
+財務省の国債金利情報（昭和49年〜）を取得して `japan_yield_curve.csv` を上書きするには、仮想環境を有効にした状態で次を実行します。
+
+```powershell
+cd D:\workspace\amatsuka_argo_5_obsidan_chatgpt_cursor_genspark\yield_curve_3d
+python fetch_japan_data.py
+```
+
+取得元: [財務省 国債金利情報](https://www.mof.go.jp/jgbs/reference/interest_rate/index.htm)
+
 ---
 
 ## 5. よくあるトラブルと対処

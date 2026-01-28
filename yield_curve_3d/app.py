@@ -11,6 +11,39 @@ BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
 
 
+def _parse_japanese_era_date(s: str) -> pd.Timestamp:
+    """
+    \"S49.9.24\" や \"R7.12.30\" のような元号表記を西暦の Timestamp に変換する。
+    対応: S(昭和), H(平成), R(令和)
+    """
+    if not isinstance(s, str) or not s:
+        return pd.NaT
+    s = s.strip()
+    era = s[0]
+    try:
+        rest = s[1:]
+        y_str, m_str, d_str = rest.split(".")
+        era_year = int(y_str)
+        month = int(m_str)
+        day = int(d_str)
+    except Exception:
+        return pd.NaT
+
+    if era == "S":  # 昭和 (1926-01-01〜)
+        year = 1925 + era_year  # S1=1926
+    elif era == "H":  # 平成 (1989-01-08〜)
+        year = 1988 + era_year  # H1=1989
+    elif era == "R":  # 令和 (2019-05-01〜)
+        year = 2018 + era_year  # R1=2019
+    else:
+        return pd.NaT
+
+    try:
+        return pd.Timestamp(year=year, month=month, day=day)
+    except Exception:
+        return pd.NaT
+
+
 def _load_japan() -> Dict[str, Any]:
     """
     日本国債イールドカーブを読み込み、3D サーフェス用に整形する。
@@ -21,10 +54,14 @@ def _load_japan() -> Dict[str, Any]:
       3 行目以降: データ
     """
     df = pd.read_csv(DATA_DIR / "japan_yield_curve.csv", header=1)
-    df = df.rename(columns={"基準日": "date"})
+    # 日本国債の基準日（元号表記）を西暦 Timestamp に変換
+    df = df.rename(columns={"基準日": "date_raw"})
+    date_values = df["date_raw"].map(_parse_japanese_era_date)
+    # 表示用は YYYY-MM-DD
+    date_labels = date_values.dt.strftime("%Y-%m-%d").tolist()
 
     # 残存期間カラム（"1年", "2年", ...）を抽出
-    maturity_cols = [c for c in df.columns if c != "date"]
+    maturity_cols = [c for c in df.columns if c != "date_raw"]
 
     # パーセント表記を float に変換（"-" 等は NaN にしておく）
     for c in maturity_cols:
@@ -47,8 +84,6 @@ def _load_japan() -> Dict[str, Any]:
     # 行: 日付, 列: 残存期間 の 2D 配列
     z = df[maturity_cols].to_numpy(dtype=float)
 
-    dates = df["date"].astype(str).tolist()
-
     # 10 年物カラム（なければ最も近い年限）
     target_label = None
     for label in maturity_labels:
@@ -65,7 +100,8 @@ def _load_japan() -> Dict[str, Any]:
     return {
         "country": "japan",
         "display_name": "日本",
-        "dates": dates,
+        "dates": date_labels,
+        "date_values": date_values,
         "maturity_years": maturity_years,
         "maturity_labels": maturity_labels,
         "z": z,
@@ -82,9 +118,9 @@ def _load_usa() -> Dict[str, Any]:
       2 行目以降: データ
     """
     df = pd.read_csv(DATA_DIR / "usa_yield_curve.csv")
-    df = df.rename(columns={"Date": "date"})
+    df = df.rename(columns={"Date": "date_raw"})
 
-    maturity_cols = [c for c in df.columns if c != "date"]
+    maturity_cols = [c for c in df.columns if c != "date_raw"]
 
     for c in maturity_cols:
         df[c] = pd.to_numeric(df[c], errors="coerce")
@@ -112,7 +148,8 @@ def _load_usa() -> Dict[str, Any]:
     maturity_years = np.array([_col_to_years(c) for c in maturity_cols], dtype=float)
     maturity_labels = maturity_cols
     z = df[maturity_cols].to_numpy(dtype=float)
-    dates = df["date"].astype(str).tolist()
+    date_values = pd.to_datetime(df["date_raw"])
+    date_labels = date_values.dt.strftime("%Y-%m-%d").tolist()
 
     # 10 年物
     target_label = None
@@ -130,7 +167,8 @@ def _load_usa() -> Dict[str, Any]:
     return {
         "country": "usa",
         "display_name": "米国",
-        "dates": dates,
+        "dates": date_labels,
+        "date_values": date_values,
         "maturity_years": maturity_years,
         "maturity_labels": maturity_labels,
         "z": z,
@@ -144,7 +182,7 @@ DATASETS: Dict[str, Dict[str, Any]] = {
 }
 
 
-def create_surface_figure(country_key: str) -> go.Figure:
+def create_surface_figure(country_key: str, y_start: int | None = None, y_end: int | None = None) -> go.Figure:
     data = DATASETS[country_key]
     dates = data["dates"]
     maturity_years = data["maturity_years"]
@@ -164,6 +202,13 @@ def create_surface_figure(country_key: str) -> go.Figure:
     )
 
     fig = go.Figure(data=[surface])
+
+    # 表示範囲（インデックス）の指定があれば yaxis.range に反映
+    if y_start is None:
+        y_start = int(y_indices[0]) if len(y_indices) > 0 else 0
+    if y_end is None:
+        y_end = int(y_indices[-1]) if len(y_indices) > 0 else 0
+
     fig.update_layout(
         margin=dict(l=0, r=0, t=30, b=0),
         scene=dict(
@@ -177,6 +222,7 @@ def create_surface_figure(country_key: str) -> go.Figure:
                 tickmode="array",
                 tickvals=y_indices[:: max(1, len(y_indices) // 10)],
                 ticktext=[dates[i] for i in y_indices[:: max(1, len(y_indices) // 10)]],
+                range=[y_start, y_end],
             ),
         ),
         template="plotly_dark",
@@ -239,7 +285,13 @@ def create_curve_figure(country_key: str, row_index: int, col_index: int) -> go.
     return fig
 
 
-def create_timeseries_figure(country_key: str, col_index: int, row_index: int) -> go.Figure:
+def create_timeseries_figure(
+    country_key: str,
+    col_index: int,
+    row_index: int,
+    y_start: int | None = None,
+    y_end: int | None = None,
+) -> go.Figure:
     data = DATASETS[country_key]
     dates = data["dates"]
     z = data["z"]
@@ -286,6 +338,12 @@ def create_timeseries_figure(country_key: str, col_index: int, row_index: int) -
         )
     )
 
+    # x 軸の表示範囲（インデックス）を指定
+    if y_start is None:
+        y_start = 0
+    if y_end is None:
+        y_end = len(dates) - 1
+
     fig.update_layout(
         margin=dict(l=40, r=10, t=30, b=40),
         xaxis=dict(
@@ -293,6 +351,7 @@ def create_timeseries_figure(country_key: str, col_index: int, row_index: int) -
             tickmode="array",
             tickvals=list(range(0, len(dates), max(1, len(dates) // 10))),
             ticktext=[dates[i] for i in range(0, len(dates), max(1, len(dates) // 10))],
+            range=[y_start, y_end],
         ),
         yaxis_title="利回り (%)",
         template="plotly_white",
@@ -329,6 +388,16 @@ app.layout = html.Div(
                             value="japan",
                             labelStyle={"display": "inline-block", "marginRight": "10px"},
                         ),
+                        html.Div(
+                            style={"marginTop": "10px"},
+                            children=[
+                                html.Label("日付範囲（西暦）"),
+                                dcc.DatePickerRange(
+                                    id="date-range",
+                                    display_format="YYYY-MM-DD",
+                                ),
+                            ],
+                        ),
                     ],
                 ),
                 dcc.Graph(
@@ -356,11 +425,56 @@ app.layout = html.Div(
 
 
 @app.callback(
-    Output("surface-graph", "figure"),
+    Output("date-range", "min_date_allowed"),
+    Output("date-range", "max_date_allowed"),
+    Output("date-range", "start_date"),
+    Output("date-range", "end_date"),
     Input("country-radio", "value"),
 )
-def update_surface(country_key: str):
-    return create_surface_figure(country_key)
+def sync_date_range(country_key: str):
+    data = DATASETS[country_key]
+    date_values = data["date_values"]
+    if len(date_values) == 0:
+        return None, None, None, None
+    start = date_values.iloc[0]
+    end = date_values.iloc[-1]
+    # 初期値: 全期間
+    return (
+        start.date(),
+        end.date(),
+        start.date(),
+        end.date(),
+    )
+
+
+@app.callback(
+    Output("surface-graph", "figure"),
+    Input("country-radio", "value"),
+    Input("date-range", "start_date"),
+    Input("date-range", "end_date"),
+)
+def update_surface(country_key: str, start_date: str | None, end_date: str | None):
+    data = DATASETS[country_key]
+    date_values = data["date_values"]
+    num_dates = len(date_values)
+    if num_dates == 0:
+        return create_surface_figure(country_key)
+
+    y_start = 0
+    y_end = num_dates - 1
+
+    # start_date, end_date は \"YYYY-MM-DD\" 形式
+    if start_date:
+        start_ts = pd.to_datetime(start_date)
+        y_start = int(np.searchsorted(date_values.values, start_ts.to_datetime64(), side="left"))
+    if end_date:
+        end_ts = pd.to_datetime(end_date)
+        y_end = int(np.searchsorted(date_values.values, end_ts.to_datetime64(), side="right") - 1)
+
+    y_start = max(0, min(y_start, num_dates - 1))
+    y_end = max(y_start, min(y_end, num_dates - 1))
+
+    return create_surface_figure(country_key, y_start, y_end)
 
 
 @app.callback(
@@ -368,16 +482,41 @@ def update_surface(country_key: str):
     Output("ts-graph", "figure"),
     Input("country-radio", "value"),
     Input("surface-graph", "hoverData"),
+    Input("date-range", "start_date"),
+    Input("date-range", "end_date"),
 )
-def update_2d_graphs(country_key: str, hover_data: Dict[str, Any] | None):
+def update_2d_graphs(
+    country_key: str,
+    hover_data: Dict[str, Any] | None,
+    start_date: str | None,
+    end_date: str | None,
+):
     data = DATASETS[country_key]
-    num_dates = len(data["dates"])
+    dates = data["dates"]
+    date_values = data["date_values"]
     maturity_years = data["maturity_years"]
     maturity_labels = data["maturity_labels"]
+    num_dates = len(dates)
     num_maturities = len(maturity_years)
 
-    # hoverData が無ければ「最新日 × デフォルト（10 年付近）の残存期間」を使う
-    row_index = num_dates - 1
+    if num_dates == 0 or num_maturities == 0:
+        empty_fig = go.Figure()
+        return empty_fig, empty_fig
+
+    # 日付範囲に対応するインデックス（y_start, y_end）を算出
+    y_start = 0
+    y_end = num_dates - 1
+    if start_date:
+        start_ts = pd.to_datetime(start_date)
+        y_start = int(np.searchsorted(date_values.values, start_ts.to_datetime64(), side="left"))
+    if end_date:
+        end_ts = pd.to_datetime(end_date)
+        y_end = int(np.searchsorted(date_values.values, end_ts.to_datetime64(), side="right") - 1)
+    y_start = max(0, min(y_start, num_dates - 1))
+    y_end = max(y_start, min(y_end, num_dates - 1))
+
+    # hoverData が無ければ「範囲の最後の日 × デフォルト（10 年付近）の残存期間」を使う
+    row_index = y_end
     col_index = data.get("ts_col_index", 0)
 
     if hover_data and "points" in hover_data and hover_data["points"]:
@@ -394,7 +533,7 @@ def update_2d_graphs(country_key: str, hover_data: Dict[str, Any] | None):
         # 2) y が日付文字列で返ってくる場合
         elif isinstance(y_val, str):
             try:
-                row_index = data["dates"].index(y_val)
+                row_index = dates.index(y_val)
             except ValueError:
                 pass
 
@@ -429,12 +568,12 @@ def update_2d_graphs(country_key: str, hover_data: Dict[str, Any] | None):
         if isinstance(point_number, int) and num_maturities > 0:
             col_index = int(point_number % num_maturities)
 
-    # インデックスが範囲外に出ないようにクランプ
-    row_index = max(0, min(row_index, num_dates - 1))
+    # インデックスが範囲外に出ないようにクランプ（かつ選択範囲内に制限）
+    row_index = max(y_start, min(row_index, y_end))
     col_index = max(0, min(col_index, num_maturities - 1))
 
     curve_fig = create_curve_figure(country_key, row_index, col_index)
-    ts_fig = create_timeseries_figure(country_key, col_index, row_index)
+    ts_fig = create_timeseries_figure(country_key, col_index, row_index, y_start, y_end)
     return curve_fig, ts_fig
 
 
