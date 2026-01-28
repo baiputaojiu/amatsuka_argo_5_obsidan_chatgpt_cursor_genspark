@@ -228,6 +228,11 @@ def create_surface_figure(country_key: str, y_start=None, y_end=None) -> go.Figu
     if y_end is not None:
         y_max = min(y_max, int(y_end))
 
+    # 可視範囲の長さに応じて y 軸ラベルの間隔を調整
+    visible_indices = np.arange(y_min, y_max + 1) if y_max >= y_min else np.array([y_min])
+    y_step = max(1, len(visible_indices) // 10)
+    tick_indices = visible_indices[::y_step]
+
     fig.update_layout(
         margin=dict(l=0, r=0, t=30, b=0),
         scene=dict(
@@ -239,8 +244,8 @@ def create_surface_figure(country_key: str, y_start=None, y_end=None) -> go.Figu
             zaxis_title="利回り (%)",
             yaxis=dict(
                 tickmode="array",
-                tickvals=y_indices[:: max(1, len(y_indices) // 10)],
-                ticktext=[dates[i] for i in y_indices[:: max(1, len(y_indices) // 10)]],
+                tickvals=tick_indices,
+                ticktext=[dates[int(i)] for i in tick_indices],
                 range=[y_min, y_max],
             ),
         ),
@@ -458,8 +463,26 @@ def init_date_slider(country_key: str):
     max_idx = n - 1
     # だいたい 10 個くらいの目盛りを出す
     step = max(1, n // 10)
-    marks = {i: dates[i] for i in range(0, n, step)}
-    marks[max_idx] = dates[max_idx]
+    marks = {
+        i: {
+            "label": dates[i],
+            "style": {
+                # ラベルを斜めにして重なりを軽減
+                "transform": "rotate(-45deg)",
+                "whiteSpace": "nowrap",
+                "fontSize": "10px",
+            },
+        }
+        for i in range(0, n, step)
+    }
+    marks[max_idx] = {
+        "label": dates[max_idx],
+        "style": {
+            "transform": "rotate(-45deg)",
+            "whiteSpace": "nowrap",
+            "fontSize": "10px",
+        },
+    }
     out_value = [min_idx, max_idx]
     # #region agent log
     _dlog("app.py:init_date_slider", "exit", {"n": n, "min": min_idx, "max": max_idx, "value": out_value, "marks_type": str(type(marks)), "marks_keys_sample": list(marks.keys())[:3]}, "H2")
