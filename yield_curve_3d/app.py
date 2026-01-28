@@ -1,7 +1,19 @@
+import json
 from pathlib import Path
 from typing import Dict, Any
 
 import numpy as np
+
+# #region agent log
+DEBUG_LOG = Path(__file__).resolve().parent.parent / ".cursor" / "debug.log"
+def _dlog(location: str, message: str, data: dict, hypothesis_id: str):
+    try:
+        payload = {"sessionId": "debug-session", "runId": "run1", "hypothesisId": hypothesis_id, "location": location, "message": message, "data": data, "timestamp": __import__("time").time() * 1000}
+        with open(DEBUG_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+# #endregion
 import pandas as pd
 from dash import Dash, dcc, html, Input, Output
 import plotly.graph_objs as go
@@ -9,6 +21,39 @@ import plotly.graph_objs as go
 
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
+
+
+def _parse_japanese_era_date(s: str) -> pd.Timestamp:
+    """
+    "S49.9.24" や "R7.12.30" のような元号表記を西暦 Timestamp に変換する。
+    対応: S(昭和), H(平成), R(令和)
+    """
+    if not isinstance(s, str) or not s:
+        return pd.NaT
+    s = s.strip()
+    era = s[0]
+    try:
+        rest = s[1:]
+        y_str, m_str, d_str = rest.split(".")
+        era_year = int(y_str)
+        month = int(m_str)
+        day = int(d_str)
+    except Exception:
+        return pd.NaT
+
+    if era == "S":  # 昭和 (1926-01-01〜)
+        year = 1925 + era_year  # S1=1926
+    elif era == "H":  # 平成 (1989-01-08〜)
+        year = 1988 + era_year  # H1=1989
+    elif era == "R":  # 令和 (2019-05-01〜)
+        year = 2018 + era_year  # R1=2019
+    else:
+        return pd.NaT
+
+    try:
+        return pd.Timestamp(year=year, month=month, day=day)
+    except Exception:
+        return pd.NaT
 
 
 def _load_japan() -> Dict[str, Any]:
@@ -21,10 +66,13 @@ def _load_japan() -> Dict[str, Any]:
       3 行目以降: データ
     """
     df = pd.read_csv(DATA_DIR / "japan_yield_curve.csv", header=1)
-    df = df.rename(columns={"基準日": "date"})
+    # 元号表記の基準日を西暦 Timestamp に変換
+    df = df.rename(columns={"基準日": "date_raw"})
+    date_values = df["date_raw"].map(_parse_japanese_era_date)
+    date_labels = date_values.dt.strftime("%Y-%m-%d").tolist()
 
     # 残存期間カラム（"1年", "2年", ...）を抽出
-    maturity_cols = [c for c in df.columns if c != "date"]
+    maturity_cols = [c for c in df.columns if c != "date_raw"]
 
     # パーセント表記を float に変換（"-" 等は NaN にしておく）
     for c in maturity_cols:
@@ -47,8 +95,6 @@ def _load_japan() -> Dict[str, Any]:
     # 行: 日付, 列: 残存期間 の 2D 配列
     z = df[maturity_cols].to_numpy(dtype=float)
 
-    dates = df["date"].astype(str).tolist()
-
     # 10 年物カラム（なければ最も近い年限）
     target_label = None
     for label in maturity_labels:
@@ -65,7 +111,10 @@ def _load_japan() -> Dict[str, Any]:
     return {
         "country": "japan",
         "display_name": "日本",
-        "dates": dates,
+        # 画面表示用は西暦 YYYY-MM-DD
+        "dates": date_labels,
+        # 範囲指定などに使う生の Timestamp
+        "date_values": date_values,
         "maturity_years": maturity_years,
         "maturity_labels": maturity_labels,
         "z": z,
@@ -82,9 +131,9 @@ def _load_usa() -> Dict[str, Any]:
       2 行目以降: データ
     """
     df = pd.read_csv(DATA_DIR / "usa_yield_curve.csv")
-    df = df.rename(columns={"Date": "date"})
+    df = df.rename(columns={"Date": "date_raw"})
 
-    maturity_cols = [c for c in df.columns if c != "date"]
+    maturity_cols = [c for c in df.columns if c != "date_raw"]
 
     for c in maturity_cols:
         df[c] = pd.to_numeric(df[c], errors="coerce")
@@ -112,7 +161,8 @@ def _load_usa() -> Dict[str, Any]:
     maturity_years = np.array([_col_to_years(c) for c in maturity_cols], dtype=float)
     maturity_labels = maturity_cols
     z = df[maturity_cols].to_numpy(dtype=float)
-    dates = df["date"].astype(str).tolist()
+    date_values = pd.to_datetime(df["date_raw"])
+    date_labels = date_values.dt.strftime("%Y-%m-%d").tolist()
 
     # 10 年物
     target_label = None
@@ -130,7 +180,8 @@ def _load_usa() -> Dict[str, Any]:
     return {
         "country": "usa",
         "display_name": "米国",
-        "dates": dates,
+        "dates": date_labels,
+        "date_values": date_values,
         "maturity_years": maturity_years,
         "maturity_labels": maturity_labels,
         "z": z,
@@ -144,7 +195,7 @@ DATASETS: Dict[str, Dict[str, Any]] = {
 }
 
 
-def create_surface_figure(country_key: str) -> go.Figure:
+def create_surface_figure(country_key: str, y_start=None, y_end=None) -> go.Figure:
     data = DATASETS[country_key]
     dates = data["dates"]
     maturity_years = data["maturity_years"]
@@ -164,6 +215,19 @@ def create_surface_figure(country_key: str) -> go.Figure:
     )
 
     fig = go.Figure(data=[surface])
+
+    # 日付範囲（インデックス）指定があれば、そこにズーム
+    if y_indices.size == 0:
+        y_min = 0
+        y_max = 0
+    else:
+        y_min = int(y_indices[0])
+        y_max = int(y_indices[-1])
+    if y_start is not None:
+        y_min = max(y_min, int(y_start))
+    if y_end is not None:
+        y_max = min(y_max, int(y_end))
+
     fig.update_layout(
         margin=dict(l=0, r=0, t=30, b=0),
         scene=dict(
@@ -177,6 +241,7 @@ def create_surface_figure(country_key: str) -> go.Figure:
                 tickmode="array",
                 tickvals=y_indices[:: max(1, len(y_indices) // 10)],
                 ticktext=[dates[i] for i in y_indices[:: max(1, len(y_indices) // 10)]],
+                range=[y_min, y_max],
             ),
         ),
         template="plotly_dark",
@@ -329,6 +394,20 @@ app.layout = html.Div(
                             value="japan",
                             labelStyle={"display": "inline-block", "marginRight": "10px"},
                         ),
+                        html.Div(
+                            style={"marginTop": "10px"},
+                            children=[
+                                html.Label("日付範囲（インデックス）"),
+                                dcc.RangeSlider(
+                                    id="date-range-slider",
+                                    min=0,
+                                    max=0,
+                                    value=[0, 0],
+                                    allowCross=False,
+                                    tooltip={"placement": "bottom", "always_visible": False},
+                                ),
+                            ],
+                        ),
                     ],
                 ),
                 dcc.Graph(
@@ -356,11 +435,60 @@ app.layout = html.Div(
 
 
 @app.callback(
-    Output("surface-graph", "figure"),
+    Output("date-range-slider", "min"),
+    Output("date-range-slider", "max"),
+    Output("date-range-slider", "value"),
+    Output("date-range-slider", "marks"),
     Input("country-radio", "value"),
 )
-def update_surface(country_key: str):
-    return create_surface_figure(country_key)
+def init_date_slider(country_key: str):
+    # #region agent log
+    _dlog("app.py:init_date_slider", "entry", {"country_key": country_key}, "H2")
+    # #endregion
+    data = DATASETS[country_key]
+    dates = data["dates"]
+    n = len(dates)
+    if n == 0:
+        # #region agent log
+        _dlog("app.py:init_date_slider", "exit n==0", {"min": 0, "max": 0, "value": [0, 0], "marks_len": 0}, "H2")
+        # #endregion
+        return 0, 0, [0, 0], {}
+
+    min_idx = 0
+    max_idx = n - 1
+    # だいたい 10 個くらいの目盛りを出す
+    step = max(1, n // 10)
+    marks = {i: dates[i] for i in range(0, n, step)}
+    marks[max_idx] = dates[max_idx]
+    out_value = [min_idx, max_idx]
+    # #region agent log
+    _dlog("app.py:init_date_slider", "exit", {"n": n, "min": min_idx, "max": max_idx, "value": out_value, "marks_type": str(type(marks)), "marks_keys_sample": list(marks.keys())[:3]}, "H2")
+    # #endregion
+    return min_idx, max_idx, out_value, marks
+
+
+@app.callback(
+    Output("surface-graph", "figure"),
+    Input("country-radio", "value"),
+    Input("date-range-slider", "value"),
+)
+def update_surface(country_key: str, slider_value):
+    # #region agent log
+    _dlog("app.py:update_surface", "entry", {"country_key": country_key, "slider_value": repr(slider_value), "slider_value_is_none": slider_value is None}, "H1")
+    # #endregion
+    data = DATASETS[country_key]
+    n = len(data["dates"])
+    if not slider_value or n == 0:
+        # #region agent log
+        _dlog("app.py:update_surface", "branch no_slider_or_n0", {"returning_full_figure": True}, "H3")
+        # #endregion
+        return create_surface_figure(country_key)
+    start_idx = max(0, min(int(slider_value[0]), n - 1))
+    end_idx = max(start_idx, min(int(slider_value[1]), n - 1))
+    # #region agent log
+    _dlog("app.py:update_surface", "before_create", {"start_idx": start_idx, "end_idx": end_idx}, "H3")
+    # #endregion
+    return create_surface_figure(country_key, start_idx, end_idx)
 
 
 @app.callback(
@@ -368,16 +496,31 @@ def update_surface(country_key: str):
     Output("ts-graph", "figure"),
     Input("country-radio", "value"),
     Input("surface-graph", "hoverData"),
+    Input("date-range-slider", "value"),
 )
-def update_2d_graphs(country_key: str, hover_data: Dict[str, Any] | None):
+def update_2d_graphs(country_key: str, hover_data: Dict[str, Any] | None, slider_value):
+    # #region agent log
+    _dlog("app.py:update_2d_graphs", "entry", {"country_key": country_key, "slider_value": repr(slider_value), "has_hover": hover_data is not None and bool(hover_data.get("points"))}, "H4")
+    # #endregion
     data = DATASETS[country_key]
     num_dates = len(data["dates"])
     maturity_years = data["maturity_years"]
     maturity_labels = data["maturity_labels"]
     num_maturities = len(maturity_years)
 
-    # hoverData が無ければ「最新日 × デフォルト（10 年付近）の残存期間」を使う
-    row_index = num_dates - 1
+    # スライダーの範囲（インデックス）
+    if not slider_value or num_dates == 0:
+        y_start = 0
+        y_end = max(0, num_dates - 1)
+    else:
+        y_start = max(0, min(int(slider_value[0]), num_dates - 1))
+        y_end = max(y_start, min(int(slider_value[1]), num_dates - 1))
+    # #region agent log
+    _dlog("app.py:update_2d_graphs", "after_range", {"y_start": y_start, "y_end": y_end, "slider_was_none": slider_value is None}, "H4")
+    # #endregion
+
+    # hoverData が無ければ「範囲の最後の日 × デフォルト（10 年付近）の残存期間」を使う
+    row_index = y_end
     col_index = data.get("ts_col_index", 0)
 
     if hover_data and "points" in hover_data and hover_data["points"]:
@@ -429,8 +572,8 @@ def update_2d_graphs(country_key: str, hover_data: Dict[str, Any] | None):
         if isinstance(point_number, int) and num_maturities > 0:
             col_index = int(point_number % num_maturities)
 
-    # インデックスが範囲外に出ないようにクランプ
-    row_index = max(0, min(row_index, num_dates - 1))
+    # インデックスが範囲外に出ないようにクランプ（かつスライダー範囲内に制限）
+    row_index = max(y_start, min(row_index, y_end))
     col_index = max(0, min(col_index, num_maturities - 1))
 
     curve_fig = create_curve_figure(country_key, row_index, col_index)
