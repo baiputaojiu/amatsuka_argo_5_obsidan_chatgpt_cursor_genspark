@@ -453,7 +453,7 @@ def create_surface_figure(country_key: str, y_start=None, y_end=None) -> go.Figu
                 tickmode="array",
                 tickvals=tick_indices,
                 ticktext=[dates[int(i)] for i in tick_indices],
-                range=[y_min, y_max],
+                range=[y_max, y_min] if country_key == "usa" else [y_min, y_max],
             ),
         ),
         template="plotly_dark",
