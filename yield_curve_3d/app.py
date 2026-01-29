@@ -189,10 +189,214 @@ def _load_usa() -> Dict[str, Any]:
     }
 
 
+def _col_to_years_generic(col: str) -> float:
+    """残存期間列名を年数に変換（UK, Euro, China, India 用）。"""
+    col = col.strip()
+    if "M" in col.upper() and "Y" not in col.upper():
+        num = "".join(ch for ch in col if ch.isdigit() or ch == ".")
+        try:
+            return float(num or 0) / 12.0
+        except ValueError:
+            return np.nan
+    if "Y" in col.upper() or "Yr" in col or "Year" in col:
+        num = "".join(ch for ch in col if ch.isdigit() or ch == ".")
+        try:
+            return float(num or 0)
+        except ValueError:
+            return np.nan
+    return np.nan
+
+
+def _empty_dataset(country_key: str, display_name: str) -> Dict[str, Any]:
+    """CSV が無い場合の空データセット。"""
+    return {
+        "country": country_key,
+        "display_name": display_name,
+        "dates": [],
+        "date_values": pd.Series(dtype="datetime64[ns]"),
+        "maturity_years": np.array([], dtype=float),
+        "maturity_labels": [],
+        "z": np.zeros((0, 0), dtype=float),
+        "ts_col_index": 0,
+    }
+
+
+def _load_uk() -> Dict[str, Any]:
+    """
+    英国国債イールドカーブを読み込む。
+    CSV: Date + 残存期間列（例: 5Y, 10Y, 30Y）。DMO/BoE 形式。
+    """
+    try:
+        df = pd.read_csv(DATA_DIR / "uk_yield_curve.csv")
+    except FileNotFoundError:
+        return _empty_dataset("uk", "英国")
+    df = df.rename(columns={df.columns[0]: "date_raw"})
+    maturity_cols = [c for c in df.columns if c != "date_raw"]
+    for c in maturity_cols:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    maturity_years = np.array([_col_to_years_generic(c) for c in maturity_cols], dtype=float)
+    maturity_labels = maturity_cols
+    date_values = pd.to_datetime(df["date_raw"], errors="coerce")
+    df = df.dropna(subset=["date_raw"])
+    date_values = pd.to_datetime(df["date_raw"], errors="coerce")
+    date_labels = date_values.dt.strftime("%Y-%m-%d").tolist()
+    z = df[maturity_cols].to_numpy(dtype=float)
+    if len(date_labels) == 0:
+        return _empty_dataset("uk", "英国")
+    ts_col_index = 0
+    for i, lbl in enumerate(maturity_labels):
+        if abs(_col_to_years_generic(lbl) - 10.0) < 0.5:
+            ts_col_index = i
+            break
+    return {
+        "country": "uk",
+        "display_name": "英国",
+        "dates": date_labels,
+        "date_values": date_values,
+        "maturity_years": maturity_years,
+        "maturity_labels": maturity_labels,
+        "z": z,
+        "ts_col_index": ts_col_index,
+    }
+
+
+def _load_euro() -> Dict[str, Any]:
+    """
+    ユーロ圏（ECB AAA 国債）イールドカーブを読み込む。
+    CSV: 日付列 + 残存期間列。ECB 形式。データは 2004年9月〜。
+    """
+    try:
+        df = pd.read_csv(DATA_DIR / "euro_yield_curve.csv")
+    except FileNotFoundError:
+        return _empty_dataset("euro", "ユーロ圏")
+    df = df.rename(columns={df.columns[0]: "date_raw"})
+    maturity_cols = [c for c in df.columns if c != "date_raw"]
+    for c in maturity_cols:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    maturity_years = np.array([_col_to_years_generic(c) for c in maturity_cols], dtype=float)
+    maturity_labels = maturity_cols
+    date_values = pd.to_datetime(df["date_raw"], errors="coerce")
+    df = df.dropna(subset=["date_raw"])
+    date_values = pd.to_datetime(df["date_raw"], errors="coerce")
+    date_labels = date_values.dt.strftime("%Y-%m-%d").tolist()
+    z = df[maturity_cols].to_numpy(dtype=float)
+    if len(date_labels) == 0:
+        return _empty_dataset("euro", "ユーロ圏")
+    ts_col_index = 0
+    for i, lbl in enumerate(maturity_labels):
+        if abs(_col_to_years_generic(lbl) - 10.0) < 0.5:
+            ts_col_index = i
+            break
+    return {
+        "country": "euro",
+        "display_name": "ユーロ圏",
+        "dates": date_labels,
+        "date_values": date_values,
+        "maturity_years": maturity_years,
+        "maturity_labels": maturity_labels,
+        "z": z,
+        "ts_col_index": ts_col_index,
+    }
+
+
+def _load_china() -> Dict[str, Any]:
+    """
+    中国国債イールドカーブを読み込む。
+    CSV: Date + 3M, 6M, 1Y, 2Y, ... など。ChinaBond 形式。
+    """
+    try:
+        df = pd.read_csv(DATA_DIR / "china_yield_curve.csv")
+    except FileNotFoundError:
+        return _empty_dataset("china", "中国")
+    df = df.rename(columns={df.columns[0]: "date_raw"})
+    maturity_cols = [c for c in df.columns if c != "date_raw"]
+    for c in maturity_cols:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    maturity_years = np.array([_col_to_years_generic(c) for c in maturity_cols], dtype=float)
+    maturity_labels = maturity_cols
+    date_values = pd.to_datetime(df["date_raw"], errors="coerce")
+    df = df.dropna(subset=["date_raw"])
+    date_values = pd.to_datetime(df["date_raw"], errors="coerce")
+    date_labels = date_values.dt.strftime("%Y-%m-%d").tolist()
+    z = df[maturity_cols].to_numpy(dtype=float)
+    if len(date_labels) == 0:
+        return _empty_dataset("china", "中国")
+    ts_col_index = 0
+    for i, lbl in enumerate(maturity_labels):
+        if abs(_col_to_years_generic(lbl) - 10.0) < 0.5:
+            ts_col_index = i
+            break
+    return {
+        "country": "china",
+        "display_name": "中国",
+        "dates": date_labels,
+        "date_values": date_values,
+        "maturity_years": maturity_years,
+        "maturity_labels": maturity_labels,
+        "z": z,
+        "ts_col_index": ts_col_index,
+    }
+
+
+def _load_india() -> Dict[str, Any]:
+    """
+    インド国債イールドカーブを読み込む。
+    CSV: Date + 1Y, 5Y, 10Y など。RBI 等の形式。フルカーブが無い場合は 10Y のみでも可。
+    """
+    try:
+        df = pd.read_csv(DATA_DIR / "india_yield_curve.csv")
+    except FileNotFoundError:
+        return _empty_dataset("india", "インド")
+    df = df.rename(columns={df.columns[0]: "date_raw"})
+    maturity_cols = [c for c in df.columns if c != "date_raw"]
+    for c in maturity_cols:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    maturity_years = np.array([_col_to_years_generic(c) for c in maturity_cols], dtype=float)
+    maturity_labels = maturity_cols
+    date_values = pd.to_datetime(df["date_raw"], errors="coerce")
+    df = df.dropna(subset=["date_raw"])
+    date_values = pd.to_datetime(df["date_raw"], errors="coerce")
+    date_labels = date_values.dt.strftime("%Y-%m-%d").tolist()
+    z = df[maturity_cols].to_numpy(dtype=float)
+    if len(date_labels) == 0:
+        return _empty_dataset("india", "インド")
+    ts_col_index = 0
+    for i, lbl in enumerate(maturity_labels):
+        if abs(_col_to_years_generic(lbl) - 10.0) < 0.5:
+            ts_col_index = i
+            break
+    return {
+        "country": "india",
+        "display_name": "インド",
+        "dates": date_labels,
+        "date_values": date_values,
+        "maturity_years": maturity_years,
+        "maturity_labels": maturity_labels,
+        "z": z,
+        "ts_col_index": ts_col_index,
+    }
+
+
 DATASETS: Dict[str, Dict[str, Any]] = {
     "japan": _load_japan(),
     "usa": _load_usa(),
+    "uk": _load_uk(),
+    "euro": _load_euro(),
+    "china": _load_china(),
+    "india": _load_india(),
 }
+
+
+def _no_data_figure(title: str = "データがありません") -> go.Figure:
+    """データが無い場合に表示する空の Figure（注釈のみ）。"""
+    fig = go.Figure()
+    fig.add_annotation(
+        text=f"{title}<br>READMEの手順でCSVを用意してください。",
+        xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False,
+        font=dict(size=14), align="center",
+    )
+    fig.update_layout(template="plotly_dark", margin=dict(t=40, b=40, l=40, r=40))
+    return fig
 
 
 def create_surface_figure(country_key: str, y_start=None, y_end=None) -> go.Figure:
@@ -200,6 +404,9 @@ def create_surface_figure(country_key: str, y_start=None, y_end=None) -> go.Figu
     dates = data["dates"]
     maturity_years = data["maturity_years"]
     z = data["z"]
+
+    if len(dates) == 0:
+        return _no_data_figure(f"{data['display_name']}のデータがありません")
 
     # y 軸はインデックス（0,1,2,...) を使い、ラベルに日付を表示
     y_indices = np.arange(len(dates))
@@ -246,7 +453,7 @@ def create_surface_figure(country_key: str, y_start=None, y_end=None) -> go.Figu
                 tickmode="array",
                 tickvals=tick_indices,
                 ticktext=[dates[int(i)] for i in tick_indices],
-                range=[y_max, y_min] if country_key == "usa" else [y_min, y_max],
+                range=[y_min, y_max],
             ),
         ),
         template="plotly_dark",
@@ -262,6 +469,8 @@ def create_curve_figure(country_key: str, row_index: int, col_index: int) -> go.
     maturity_labels = data["maturity_labels"]
     z = data["z"]
 
+    if len(dates) == 0:
+        return _no_data_figure(f"{data['display_name']}のデータがありません")
     row_index = max(0, min(row_index, len(dates) - 1))
     col_index = max(0, min(col_index, len(maturity_years) - 1))
 
@@ -318,6 +527,8 @@ def create_timeseries_figure(country_key: str, col_index: int, row_index: int) -
     maturity_years = data["maturity_years"]
     maturity_labels = data["maturity_labels"]
 
+    if len(dates) == 0:
+        return _no_data_figure(f"{data['display_name']}のデータがありません")
     # インデックスの安全な範囲チェック
     col_index = max(0, min(col_index, len(maturity_years) - 1))
     row_index = max(0, min(row_index, len(dates) - 1))
@@ -408,14 +619,24 @@ app.layout = html.Div(
                     style={"marginBottom": "10px", **_NO_SELECT},
                     children=[
                         html.Label("国を選択"),
-                        dcc.RadioItems(
-                            id="country-radio",
+                        dcc.Dropdown(
+                            id="country-dropdown",
                             options=[
                                 {"label": "日本", "value": "japan"},
                                 {"label": "米国", "value": "usa"},
+                                {"label": "英国", "value": "uk"},
+                                {"label": "ユーロ圏", "value": "euro"},
+                                {"label": "中国", "value": "china"},
+                                {"label": "インド", "value": "india"},
                             ],
                             value="japan",
-                            labelStyle={"display": "inline-block", "marginRight": "10px"},
+                            clearable=False,
+                            style={
+                                "minWidth": "140px",
+                                "color": "#111",
+                                "backgroundColor": "#fff",
+                            },
+                            className="country-dropdown-dark-text",
                         ),
                         html.Div(
                             style={"marginTop": "10px"},
@@ -466,12 +687,14 @@ app.layout = html.Div(
     Output("date-range-slider", "max"),
     Output("date-range-slider", "value"),
     Output("date-range-slider", "marks"),
-    Input("country-radio", "value"),
+    Input("country-dropdown", "value"),
 )
 def init_date_slider(country_key: str):
     # #region agent log
     _dlog("app.py:init_date_slider", "entry", {"country_key": country_key}, "H2")
     # #endregion
+    if country_key not in DATASETS:
+        country_key = "japan"
     data = DATASETS[country_key]
     dates = data["dates"]
     n = len(dates)
@@ -516,13 +739,15 @@ def init_date_slider(country_key: str):
 
 @app.callback(
     Output("surface-graph", "figure"),
-    Input("country-radio", "value"),
+    Input("country-dropdown", "value"),
     Input("date-range-slider", "value"),
 )
 def update_surface(country_key: str, slider_value):
     # #region agent log
     _dlog("app.py:update_surface", "entry", {"country_key": country_key, "slider_value": repr(slider_value), "slider_value_is_none": slider_value is None}, "H1")
     # #endregion
+    if country_key not in DATASETS:
+        country_key = "japan"
     data = DATASETS[country_key]
     n = len(data["dates"])
     if not slider_value or n == 0:
@@ -541,7 +766,7 @@ def update_surface(country_key: str, slider_value):
 @app.callback(
     Output("curve-graph", "figure"),
     Output("ts-graph", "figure"),
-    Input("country-radio", "value"),
+    Input("country-dropdown", "value"),
     Input("surface-graph", "hoverData"),
     Input("date-range-slider", "value"),
 )
@@ -549,6 +774,8 @@ def update_2d_graphs(country_key: str, hover_data: Dict[str, Any] | None, slider
     # #region agent log
     _dlog("app.py:update_2d_graphs", "entry", {"country_key": country_key, "slider_value": repr(slider_value), "has_hover": hover_data is not None and bool(hover_data.get("points"))}, "H4")
     # #endregion
+    if country_key not in DATASETS:
+        country_key = "japan"
     data = DATASETS[country_key]
     num_dates = len(data["dates"])
     maturity_years = data["maturity_years"]
