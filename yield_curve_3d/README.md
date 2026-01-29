@@ -155,14 +155,17 @@ python fetch_usa_data.py
 
 **英国（UK）**
 
-- **自動取得スクリプト**（`yield_curve_3d` で実行）:
+- **自動取得**（当月分のみ・BoE ZIP 内 xlsx）:
   ```powershell
   python fetch_uk_data.py
   ```
-- 手動: [Bank of England Yield curves](https://www.bankofengland.co.uk/statistics/yield-curves) または [DMO Historical Gilt Yields (D4H)](https://www.dmo.gov.uk/data/ExportReport?reportCode=D4H) から CSV/Excel をダウンロードし、1 列目を日付・2 列目以降を残存期間（例: 5Y, 10Y, 30Y）に揃えた CSV を用意してから、次のスクリプトで `data/uk_yield_curve.csv` に保存します。
+- **1998年4月〜現在（月次・5Y/10Y/30Y/50Y）**: [DMO D4H（Historical Average Daily Conventional Gilt Yields）](https://www.dmo.gov.uk/data/ExportReport?reportCode=D4H) で **Excel** をダウンロードし、次のコマンドで正規化します。  
+  **注意**: DMO サイトは CAPTCHA のため自動取得はできません。ブラウザで手動ダウンロードしてください。
   ```powershell
-  python fetch_uk_data.py ダウンロードしたファイル.csv
+  python fetch_uk_data.py ダウンロードしたD4H.xlsx
   ```
+  → D4H 形式として認識され、**1998年4月〜** の月次データが `data/uk_yield_curve.csv` に保存されます。
+- **1990年〜**: D4H は **1998年4月〜** のため、1990–1998 年は D4H では取得できません。[Bank of England のアーカイブ](https://www.bankofengland.co.uk/statistics/yield-curves) に過去データがある場合は、手動で CSV/Excel を取得し、`python fetch_uk_data.py ファイル.csv` または `python fetch_uk_data.py ファイル.xlsx` で正規化できます。
 
 **ユーロ圏（ECB）**
 

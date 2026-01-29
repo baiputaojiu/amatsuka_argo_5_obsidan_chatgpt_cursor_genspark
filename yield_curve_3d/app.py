@@ -189,9 +189,11 @@ def _load_usa() -> Dict[str, Any]:
     }
 
 
-def _col_to_years_generic(col: str) -> float:
-    """残存期間列名を年数に変換（UK, Euro, China, India 用）。"""
-    col = col.strip()
+def _col_to_years_generic(col) -> float:
+    """残存期間列名を年数に変換（UK, Euro, China, India 用）。数値列名(0.5, 1, 10 等)も可。"""
+    if isinstance(col, (int, float)):
+        return float(col)
+    col = str(col).strip()
     if "M" in col.upper() and "Y" not in col.upper():
         num = "".join(ch for ch in col if ch.isdigit() or ch == ".")
         try:
@@ -204,7 +206,10 @@ def _col_to_years_generic(col: str) -> float:
             return float(num or 0)
         except ValueError:
             return np.nan
-    return np.nan
+    try:
+        return float(col)
+    except (ValueError, TypeError):
+        return np.nan
 
 
 def _empty_dataset(country_key: str, display_name: str) -> Dict[str, Any]:
@@ -453,7 +458,7 @@ def create_surface_figure(country_key: str, y_start=None, y_end=None) -> go.Figu
                 tickmode="array",
                 tickvals=tick_indices,
                 ticktext=[dates[int(i)] for i in tick_indices],
-                range=[y_max, y_min] if country_key == "usa" else [y_min, y_max],
+                range=[y_max, y_min] if country_key in ("usa", "uk", "euro") else [y_min, y_max],
             ),
         ),
         template="plotly_dark",

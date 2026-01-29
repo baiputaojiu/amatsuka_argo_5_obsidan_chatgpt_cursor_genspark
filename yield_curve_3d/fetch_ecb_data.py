@@ -24,15 +24,32 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 OUTPUT_CSV = DATA_DIR / "euro_yield_curve.csv"
 
-# ECB SDMX API: YC = Yield curves, B.U2.EUR.4F = Euro area, G_N_A = Par curve AAA
-# 残存期間ごとに別シリーズになるため、複数リクエストまたは一括CSVを利用
-ECB_CSV_BASE = "https://data-api.ecb.europa.eu/service/data/YC"
-
-# app.py が期待する形式: Date + 残存期間列（例: 1Y, 2Y, 5Y, 10Y, 30Y）
+# ECB SDMX API: YC = Yield curves, B.U2.EUR.4F.G_N_A = AAA, SV_C_YM = Svensson, SR_* = spot rate
+ECB_API_BASE = "https://data-api.ecb.europa.eu/service/data/YC/B.U2.EUR.4F.G_N_A.SV_C_YM"
+# 残存期間コード → 列表示名（app.py の _col_to_years_generic で解釈可能）
+ECB_MATURITY_CODES = [
+    ("SR_3M", "3M"),
+    ("SR_6M", "6M"),
+    ("SR_1Y", "1Y"),
+    ("SR_2Y", "2Y"),
+    ("SR_3Y", "3Y"),
+    ("SR_4Y", "4Y"),
+    ("SR_5Y", "5Y"),
+    ("SR_6Y", "6Y"),
+    ("SR_7Y", "7Y"),
+    ("SR_8Y", "8Y"),
+    ("SR_9Y", "9Y"),
+    ("SR_10Y", "10Y"),
+    ("SR_15Y", "15Y"),
+    ("SR_20Y", "20Y"),
+    ("SR_25Y", "25Y"),
+    ("SR_30Y", "30Y"),
+]
 
 
 def _download_csv(url: str, timeout: int = 120) -> bytes:
     try:
+        import ssl
         import urllib.request
         req = urllib.request.Request(
             url,
@@ -41,7 +58,10 @@ def _download_csv(url: str, timeout: int = 120) -> bytes:
                 "Accept": "text/csv,*/*",
             },
         )
-        with urllib.request.urlopen(req, timeout=timeout) as res:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as res:
             return res.read()
     except Exception as e:
         raise RuntimeError(f"ダウンロードに失敗しました: {url}") from e
@@ -70,28 +90,40 @@ def _normalize_ecb_csv(df: pd.DataFrame, since_year: int = 2004) -> pd.DataFrame
     return df
 
 
-def _fetch_from_ecb(since_year: int = 2004) -> pd.DataFrame | None:
-    """ECB API からイールドカーブを取得する。複数残存期間を1つの表にまとめる。"""
-    # ECB の YC データは残存期間ごとに別シリーズのため、ここでは単一シリーズのみ試すか、
-    # または一括ダウンロードページのURLを試す。実装が複雑なため、手動DLを主とする。
-    # 簡易: 全期間をリクエストする CSV URL（ECB が提供している場合）
-    url = (
-        "https://data-api.ecb.europa.eu/service/data/YC/"
-        "B.U2.EUR.4F.G_N_A.SV_C_YM.IR_1?"
-        "startPeriod=2004-09-01&format=csvdata"
-    )
+def _fetch_one_series(code: str, since_year: int) -> pd.DataFrame | None:
+    """1残存期間のシリーズを取得し、Date と OBS_VALUE の DataFrame を返す。"""
+    url = f"{ECB_API_BASE}.{code}?startPeriod={since_year}-01-01&format=csvdata"
     try:
-        raw = _download_csv(url)
+        raw = _download_csv(url, timeout=90)
         text = raw.decode("utf-8", errors="replace")
         df = pd.read_csv(StringIO(text))
-        if df.empty or len(df.columns) < 2:
+        if df.empty or "TIME_PERIOD" not in df.columns or "OBS_VALUE" not in df.columns:
             return None
-        df = _normalize_ecb_csv(df, since_year=since_year)
-        if len(df) > 0:
-            return df
+        df = df[["TIME_PERIOD", "OBS_VALUE"]].copy()
+        df = df.rename(columns={"TIME_PERIOD": "Date", "OBS_VALUE": code})
+        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+        df = df.dropna(subset=["Date"])
+        df[code] = pd.to_numeric(df[code], errors="coerce")
+        return df
     except Exception:
-        pass
-    return None
+        return None
+
+
+def _fetch_from_ecb(since_year: int = 2004) -> pd.DataFrame | None:
+    """ECB API から各残存期間を取得し、Date × 残存期間の表にまとめる。"""
+    merged = None
+    for api_code, col_name in ECB_MATURITY_CODES:
+        df = _fetch_one_series(api_code, since_year)
+        if df is None or len(df) == 0:
+            continue
+        df = df.rename(columns={api_code: col_name})
+        if merged is None:
+            merged = df
+        else:
+            merged = merged.merge(df[["Date", col_name]], on="Date", how="outer")
+    if merged is None or len(merged) == 0:
+        return None
+    return _normalize_ecb_csv(merged, since_year=since_year)
 
 
 def main() -> None:
