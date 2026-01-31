@@ -5,6 +5,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import yfinance as yf
+from scipy.ndimage import gaussian_filter
 from dash import Dash, dcc, html, Input, Output, State
 import plotly.graph_objs as go
 
@@ -203,6 +204,7 @@ def create_surface_figure(
     x_range: tuple[float, float] | None = None,
     y_range: tuple[int, int] | None = None,
     z_range: tuple[float, float] | None = None,
+    smoothing_mode: str = "current",
 ) -> go.Figure:
     if data is None or data["n_dates"] == 0 or data["n_bins"] == 0:
         return _no_data_figure("データがありません")
@@ -242,14 +244,44 @@ def create_surface_figure(
         z_lo, z_hi = float(z_range[0]), float(z_range[1])
         Z_slice = np.clip(Z_slice, z_lo, z_hi)
 
+    # 平滑化: ①なし / ②現在の処理（制約付き反復＋角丸め） / ③ガウスぼかしのみ（高さ維持なし）
+    Z_draw = Z_slice.astype(float).copy()
+    branch = "none"
+    if smoothing_mode == "current":
+        branch = "current"
+        mask_nonzero = Z_slice > 0
+        for _ in range(20):
+            Z_draw[:] = gaussian_filter(Z_draw, sigma=(2.0, 0.6), mode="constant", cval=0.0)
+            Z_draw[mask_nonzero] = Z_slice[mask_nonzero]
+        Z_draw[:] = gaussian_filter(Z_draw, sigma=(1.2, 1.2), mode="constant", cval=0.0)
+        Z_draw = np.maximum(Z_draw, 0.0)
+    elif smoothing_mode == "gaussian_only":
+        branch = "gaussian_only"
+        # Y方向の裾を②と同程度に広げるため sigma=(2.0, 0.6)（日付方向=Y, 株価方向=X）
+        Z_draw = gaussian_filter(Z_draw, sigma=(2.0, 0.6), mode="constant", cval=0.0)
+        Z_draw = np.maximum(Z_draw, 0.0)
+    # "none" のときは Z_draw をそのまま（平滑化なし）
+    # #region agent log
+    try:
+        import json as _json
+        with open(BASE_DIR.parent / ".cursor" / "debug.log", "a", encoding="utf-8") as _f:
+            _f.write(_json.dumps({"hypothesisId":"C","location":"create_surface_figure:smoothing","message":"branch","data":{"smoothing_mode":smoothing_mode,"branch":branch}, "timestamp": __import__("time").time()}, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # #endregion
+
+    z_max_val = float(np.nanmax(Z_draw)) if Z_draw.size else 1.0
+    vol_M = Z_draw / 1e6
     surface = go.Surface(
         x=price_slice,
         y=y_indices,
-        z=Z_slice,
-        colorscale="Viridis",
-        colorbar=dict(title="出来高"),
+        z=Z_draw,
+        surfacecolor=vol_M,
+        cmin=0,
+        cmax=z_max_val / 1e6,
+        colorscale="Turbo",
+        colorbar=dict(title="出来高 (M)", thickness=20, len=0.7),
         showscale=True,
-        hovertemplate="株価: %{x:.2f}<br>日付: %{y}<br>出来高: %{z:.0f}<extra></extra>",
     )
     traces: list = [surface]
 
@@ -262,7 +294,7 @@ def create_surface_figure(
             z_lo, z_hi = float(z_range[0]), float(z_range[1])
             z_max = z_hi * 3
         else:
-            z_max = float(np.nanmax(Z_slice)) * 1.1 if Z_slice.size else 1.0
+            z_max = float(np.nanmax(Z_draw)) * 1.1 if Z_draw.size else 1.0
         wall_x = [[last_close, last_close], [last_close, last_close]]
         wall_y = [[0, 0], [y_max, y_max]]
         wall_z = [[0, z_max], [0, z_max]]
@@ -287,7 +319,7 @@ def create_surface_figure(
     if y_tick_indices and y_tick_indices[-1] != len(date_slice) - 1:
         y_tick_indices.append(len(date_slice) - 1)
     y_tickvals = y_tick_indices
-    y_ticktext = [date_slice[i] for i in y_tickvals]
+    y_ticktext = [date_slice[i] for i in y_tick_indices]
 
     layout_scene = dict(
         xaxis_title="X: 株価",
@@ -532,28 +564,50 @@ app.layout = html.Div(
                             ],
                         ),
                         html.Div(
-                            style={"marginTop": "4px"},
+                            style={"marginTop": "8px"},
                             children=[
                                 html.Label("Y軸(株価)範囲"),
-                                html.Div(
-                                    style={"display": "flex", "gap": "8px", "alignItems": "center"},
-                                    children=[
-                                        dcc.Input(id="range-y-min", type="number", placeholder="最小", style={"width": "80px", "color": "#111"}),
-                                        dcc.Input(id="range-y-max", type="number", placeholder="最大", style={"width": "80px", "color": "#111"}),
-                                    ],
+                                dcc.RangeSlider(
+                                    id="range-y-slider",
+                                    min=0,
+                                    max=100,
+                                    value=[0, 100],
+                                    step=None,
+                                    tooltip={"placement": "bottom", "always_visible": True},
+                                    updatemode="drag",
                                 ),
                             ],
                         ),
                         html.Div(
-                            style={"marginTop": "4px"},
+                            style={"marginTop": "8px"},
                             children=[
                                 html.Label("Z軸(出来高)範囲"),
-                                html.Div(
-                                    style={"display": "flex", "gap": "8px", "alignItems": "center"},
-                                    children=[
-                                        dcc.Input(id="range-z-min", type="number", placeholder="最小", style={"width": "80px", "color": "#111"}),
-                                        dcc.Input(id="range-z-max", type="number", placeholder="最大", style={"width": "80px", "color": "#111"}),
+                                dcc.RangeSlider(
+                                    id="range-z-slider",
+                                    min=0,
+                                    max=1,
+                                    value=[0, 1],
+                                    step=None,
+                                    tooltip={"placement": "bottom", "always_visible": True},
+                                    updatemode="drag",
+                                ),
+                            ],
+                        ),
+                        html.Div(
+                            style={"marginTop": "8px"},
+                            children=[
+                                html.Label("平滑化"),
+                                dcc.Dropdown(
+                                    id="smoothing-dropdown",
+                                    options=[
+                                        {"label": "平滑化なし", "value": "none"},
+                                        {"label": "現在の平滑化（高さ維持＋角丸め）", "value": "current"},
+                                        {"label": "ガウスぼかしのみ（高さ維持なし）", "value": "gaussian_only"},
                                     ],
+                                    value="current",
+                                    clearable=False,
+                                    style={"minWidth": "200px", "color": "#111", "backgroundColor": "#fff"},
+                                    className="ticker-dropdown-dark-text",
                                 ),
                             ],
                         ),
@@ -702,10 +756,12 @@ def on_add_favorite(n, ticker):
     Output("range-x-date", "end_date"),
     Output("range-x-date", "min_date_allowed"),
     Output("range-x-date", "max_date_allowed"),
-    Output("range-y-min", "value"),
-    Output("range-y-max", "value"),
-    Output("range-z-min", "value"),
-    Output("range-z-max", "value"),
+    Output("range-y-slider", "min"),
+    Output("range-y-slider", "max"),
+    Output("range-y-slider", "value"),
+    Output("range-z-slider", "min"),
+    Output("range-z-slider", "max"),
+    Output("range-z-slider", "value"),
     Output("store-current-range", "data"),
     Input("store-display-data", "data"),
     State("store-ticker", "data"),
@@ -713,7 +769,7 @@ def on_add_favorite(n, ticker):
 def init_axis_inputs(_display_data, ticker):
     data = _get_cached_data(ticker)
     if data is None or data.get("n_dates", 0) == 0:
-        return None, None, None, None, None, None, None, None, None
+        return None, None, None, None, 0, 100, [0, 100], 0, 1, [0, 1], None
     date_labels = data["date_labels"]
     Z_arr = np.array(data["Z"])
     row_sums = np.sum(Z_arr, axis=1)
@@ -727,14 +783,15 @@ def init_axis_inputs(_display_data, ticker):
         first_date = date_labels[i0]
         last_date = date_labels[i1]
     pb = data["price_bins"]
-    price_min = float(min(pb)) if pb else None
-    price_max = float(max(pb)) if pb else None
-    z_min = float(np.nanmin(Z_arr)) if Z_arr.size else None
-    z_max = float(np.nanmax(Z_arr)) if Z_arr.size else None
+    price_min = float(min(pb)) if pb else 0
+    price_max = float(max(pb)) if pb else 100
+    z_min = float(np.nanmin(Z_arr)) if Z_arr.size else 0
+    z_max = float(np.nanmax(Z_arr)) if Z_arr.size else 1
     range_data = {"y_range": [i0, i1], "x_range": [price_min, price_max], "z_range": [z_min, z_max]}
     return (
         first_date, last_date, date_labels[0], date_labels[-1],
-        price_min, price_max, z_min, z_max,
+        price_min, price_max, [price_min, price_max],
+        z_min, z_max, [z_min, z_max],
         range_data,
     )
 
@@ -742,10 +799,8 @@ def init_axis_inputs(_display_data, ticker):
 @app.callback(
     Output("range-x-date", "start_date", allow_duplicate=True),
     Output("range-x-date", "end_date", allow_duplicate=True),
-    Output("range-y-min", "value", allow_duplicate=True),
-    Output("range-y-max", "value", allow_duplicate=True),
-    Output("range-z-min", "value", allow_duplicate=True),
-    Output("range-z-max", "value", allow_duplicate=True),
+    Output("range-y-slider", "value", allow_duplicate=True),
+    Output("range-z-slider", "value", allow_duplicate=True),
     Input("btn-reset-range", "n_clicks"),
     State("store-ticker", "data"),
     prevent_initial_call=True,
@@ -753,34 +808,43 @@ def init_axis_inputs(_display_data, ticker):
 def on_reset_range(n, ticker):
     data = _get_cached_data(ticker)
     if data is None or data.get("n_dates", 0) == 0:
-        return None, None, None, None, None, None
+        return None, None, [0, 100], [0, 1]
     date_labels = data["date_labels"]
     pb = data["price_bins"]
     z_arr = np.array(data["Z"])
-    z_min = float(np.nanmin(z_arr)) if z_arr.size else None
-    z_max = float(np.nanmax(z_arr)) if z_arr.size else None
+    z_min = float(np.nanmin(z_arr)) if z_arr.size else 0
+    z_max = float(np.nanmax(z_arr)) if z_arr.size else 1
     return (
         date_labels[0], date_labels[-1],
-        float(min(pb)) if pb else None, float(max(pb)) if pb else None,
-        z_min, z_max,
+        [float(min(pb)) if pb else 0, float(max(pb)) if pb else 100],
+        [z_min, z_max],
     )
 
-# 3D サーフェス更新＋現在範囲を store に保存（「範囲を適用」クリック or 銘柄変更時）
+# 3D サーフェス更新＋現在範囲を store に保存（スライダー・平滑化・日付・銘柄変更で即時反映）
 @app.callback(
     Output("surface-graph", "figure"),
     Output("store-current-range", "data", allow_duplicate=True),
     Input("btn-apply-range", "n_clicks"),
     Input("store-display-data", "data"),
     Input("store-ticker", "data"),
+    Input("smoothing-dropdown", "value"),
+    Input("range-y-slider", "value"),
+    Input("range-z-slider", "value"),
     State("range-x-date", "start_date"),
     State("range-x-date", "end_date"),
-    State("range-y-min", "value"),
-    State("range-y-max", "value"),
-    State("range-z-min", "value"),
-    State("range-z-max", "value"),
     prevent_initial_call="initial_duplicate",
 )
-def update_surface(_apply_clicks, _display_data, ticker, start_date, end_date, y_min_val, y_max_val, z_min_val, z_max_val):
+def update_surface(_apply_clicks, _display_data, ticker, smoothing_mode, y_slider_val, z_slider_val, start_date, end_date):
+    # #region agent log
+    import json
+    from dash import ctx
+    _log = BASE_DIR.parent / ".cursor" / "debug.log"
+    try:
+        with open(_log, "a", encoding="utf-8") as _f:
+            _f.write(json.dumps({"hypothesisId":"A,B,E","location":"update_surface:entry","message":"triggered","data":{"triggered_id":getattr(ctx,"triggered_id",None),"smoothing_mode":smoothing_mode,"ticker":ticker}, "timestamp": __import__("time").time()}, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # #endregion
     data = _get_cached_data(ticker)
     if data is None or not ticker:
         return _no_data_figure(), None
@@ -809,25 +873,37 @@ def update_surface(_apply_clicks, _display_data, ticker, start_date, end_date, y
         except (ValueError, TypeError, AttributeError):
             pass
 
-    # Y軸(株価): 数値入力（片方だけの場合はデータ範囲で補う）
+    # Y軸(株価): スライダー値 [min, max]
     x_range = None
     p_data_min = float(min(pb)) if pb else 0.0
     p_data_max = float(max(pb)) if pb else 0.0
-    if pb is not None and len(pb) > 0:
-        p_min = float(y_min_val) if y_min_val is not None and str(y_min_val).strip() != "" else p_data_min
-        p_max = float(y_max_val) if y_max_val is not None and str(y_max_val).strip() != "" else p_data_max
+    if pb is not None and len(pb) > 0 and y_slider_val is not None and len(y_slider_val) >= 2:
+        p_min = float(y_slider_val[0])
+        p_max = float(y_slider_val[1])
         x_range = (min(p_min, p_max), max(p_min, p_max))
 
-    # Z軸(出来高): 数値入力（片方だけの場合はデータ範囲で補う）
-    z_min_in = float(z_min_val) if z_min_val is not None and str(z_min_val).strip() != "" else data_z_min
-    z_max_in = float(z_max_val) if z_max_val is not None and str(z_max_val).strip() != "" else data_z_max
-    z_range = (min(z_min_in, z_max_in), max(z_min_in, z_max_in))
+    # Z軸(出来高): スライダー値 [min, max]
+    if z_slider_val is not None and len(z_slider_val) >= 2:
+        z_min_in = float(z_slider_val[0])
+        z_max_in = float(z_slider_val[1])
+        z_range = (min(z_min_in, z_max_in), max(z_min_in, z_max_in))
+    else:
+        z_range = (data_z_min, data_z_max)
 
     range_data = {"y_range": list(y_range), "x_range": list(x_range) if x_range else [p_data_min, p_data_max], "z_range": list(z_range)}
     date_slice, price_slice, Z_slice, _, _ = _sliced_display_data(data, range_data)
     if date_slice is not None and price_slice is not None and Z_slice is not None:
         _save_graph_data_csv(ticker, date_slice, price_slice, Z_slice)
-    return create_surface_figure(data, ticker, x_range=x_range, y_range=y_range, z_range=z_range), range_data
+    sm = smoothing_mode if smoothing_mode in ("none", "current", "gaussian_only") else "current"
+    # #region agent log
+    try:
+        import json as _json
+        with open(BASE_DIR.parent / ".cursor" / "debug.log", "a", encoding="utf-8") as _f:
+            _f.write(_json.dumps({"hypothesisId":"B,C","location":"update_surface:sm","message":"sm passed to create_surface_figure","data":{"sm":sm,"smoothing_mode_raw":smoothing_mode}, "timestamp": __import__("time").time()}, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # #endregion
+    return create_surface_figure(data, ticker, x_range=x_range, y_range=y_range, z_range=z_range, smoothing_mode=sm), range_data
 
 # 2D グラフ更新（store + 3D hoverData）
 @app.callback(
