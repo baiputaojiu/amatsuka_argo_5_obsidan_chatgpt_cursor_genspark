@@ -1,11 +1,25 @@
-# イールドカーブ 3D 可視化アプリ（日本 / 米国）
+# イールドカーブ 3D 可視化アプリ（日本 / 米国 / 英国 / ユーロ圏 / 中国 / インド）
 
-日本と米国のイールドカーブを 3D サーフェスで表示し、マウスホバーした日付の断面カーブと、10 年金利の推移を表示する Dash アプリです。
+日本・米国・英国・ユーロ圏・中国・インドのイールドカーブを 3D サーフェスで表示し、マウスホバーした日付の断面カーブと、10 年金利の推移を表示する Dash アプリです。
 
 - 右側: 3D イールドカーブ（時間 × 残存期間 × 利回り）
 - 左上: 選択日（ホバーした日）のイールドカーブ断面
 - 左下: 10 年金利の時系列（ホバー位置に縦線）
-- 上部ラジオボタン: 「日本 / 米国」の切替
+- 上部ドロップダウン: 国・地域の選択（日本 / 米国 / 英国 / ユーロ圏 / 中国 / インド）
+
+---
+
+## 目次
+
+- [前提](#前提)
+- [1. 仮想環境の作成](#1-仮想環境の作成)
+- [2. 依存パッケージのインストール](#2-依存パッケージのインストール)
+- [3. アプリの起動方法](#3-アプリの起動方法)
+- [4. データファイルについて](#4-データファイルについて)
+  - [4.1 米国データを 1990 年〜現在にする](#41-米国データを-1990-年現在にする)
+  - [4.2 英国・ユーロ圏・中国・インドのデータ](#42-英国ユーロ圏中国インドのデータ)
+- [5. よくあるトラブルと対処](#5-よくあるトラブルと対処)
+- [6. カスタマイズのヒント](#6-カスタマイズのヒント)
 
 ---
 
@@ -80,7 +94,7 @@ pip install -r requirements.txt
 4. ブラウザで上記 URL（または表示されている URL）にアクセスするとアプリ画面が開きます。
    - 右側に 3D イールドカーブ
    - 左に 2 つの 2D グラフ（断面 / 10 年金利）
-   - 上部ラジオボタンで「日本 / 米国」を選択
+   - 上部ドロップダウンで国・地域を選択
 
 ---
 
@@ -95,8 +109,88 @@ pip install -r requirements.txt
 - `usa_yield_curve.csv`
   - 1 行目: ヘッダー行（`Date,1 Mo,1.5 Month,2 Mo,...,30 Yr`）
   - 2 行目以降: 日付ごとの利回りデータ
+- `uk_yield_curve.csv`（英国）
+  - 1 行目: ヘッダー行（`Date` + 残存期間列。例: `5Y`, `10Y`, `30Y`）
+  - 2 行目以降: 日付ごとの利回りデータ
+- `euro_yield_curve.csv`（ユーロ圏・ECB AAA 国債）
+  - 1 行目: ヘッダー行（日付列 + 残存期間列）。**データは 2004 年 9 月〜** のみ公表
+  - 2 行目以降: 日付ごとの利回りデータ
+- `china_yield_curve.csv`（中国）
+  - 1 行目: ヘッダー行（`Date` + 残存期間列。例: `3M`, `6M`, `1Y`, `10Y`）
+  - 2 行目以降: 日付ごとの利回りデータ
+- `india_yield_curve.csv`（インド）
+  - 1 行目: ヘッダー行（`Date` + 残存期間列。例: `1Y`, `5Y`, `10Y`）
+  - 2 行目以降: 日付ごとの利回りデータ
 
-これらの形式であれば、`app.py` が自動的に読み込んで 3D 表示を行います。
+これらの形式であれば、`app.py` が自動的に読み込んで 3D 表示を行います。ファイルが無い国・地域を選んだ場合は「データがありません」と表示されます。
+
+### 4.1 米国データを 1990 年〜現在にする
+
+米国データを 1990 年〜現在まで拡張するには、`fetch_usa_data.py` を使います。
+
+**方法 A: 自動ダウンロード（ネットワークが通る場合）**
+
+```powershell
+cd D:\workspace\amatsuka_argo_5_obsidan_chatgpt_cursor_genspark\yield_curve_3d
+python fetch_usa_data.py
+```
+
+**方法 B: 手動ダウンロードしてから正規化**
+
+1. ブラウザで以下を開き、Par Yield Curve の CSV をダウンロードします。
+   - [U.S. Treasury Interest Rates Data CSV Archive](https://home.treasury.gov/interest-rates-data-csv-archive)
+   - 例: **Daily Treasury Par Yield Curve Rates** の `par-yield-curve-rates-1990-2022.csv`
+2. ダウンロードした CSV を `yield_curve_3d` フォルダなどに保存します。
+3. 次のスクリプトで 1990 年以降だけを正規化し、`data/usa_yield_curve.csv` に保存します。既存の `usa_yield_curve.csv` がある場合は、その中でアーカイブより新しい日付（例: 2023 年以降）はそのまま残してマージされます。
+
+   ```powershell
+   python fetch_usa_data.py ダウンロードしたファイル.csv
+   ```
+
+これで米国データが 1990 年〜現在（既存分とマージされた範囲）で表示されます。
+
+### 4.2 英国・ユーロ圏・中国・インドのデータ
+
+英国・ユーロ圏・中国・インドのデータを追加する手順です。
+
+**英国（UK）**
+
+- **自動取得**（当月分のみ・BoE ZIP 内 xlsx）:
+  ```powershell
+  python fetch_uk_data.py
+  ```
+- **1998年4月〜現在（月次・5Y/10Y/30Y/50Y）**: [DMO D4H（Historical Average Daily Conventional Gilt Yields）](https://www.dmo.gov.uk/data/ExportReport?reportCode=D4H) で **Excel** をダウンロードし、次のコマンドで正規化します。  
+  **注意**: DMO サイトは CAPTCHA のため自動取得はできません。ブラウザで手動ダウンロードしてください。
+  ```powershell
+  python fetch_uk_data.py ダウンロードしたD4H.xlsx
+  ```
+  → D4H 形式として認識され、**1998年4月〜** の月次データが `data/uk_yield_curve.csv` に保存されます。
+- **1990年〜**: D4H は **1998年4月〜** のため、1990–1998 年は D4H では取得できません。[Bank of England のアーカイブ](https://www.bankofengland.co.uk/statistics/yield-curves) に過去データがある場合は、手動で CSV/Excel を取得し、`python fetch_uk_data.py ファイル.csv` または `python fetch_uk_data.py ファイル.xlsx` で正規化できます。
+
+**ユーロ圏（ECB）**
+
+- データは **2004 年 9 月〜** のみ公表されています。
+- **自動取得スクリプト**（`yield_curve_3d` で実行）:
+  ```powershell
+  python fetch_ecb_data.py
+  ```
+- 手動: [ECB Data Portal - Par curve (AAA-rated government bonds)](https://data.ecb.europa.eu/data/data-categories/financial-markets-and-interest-rates/euro-area-yield-curves/aaa-rated-government-bonds-yield-curve/par-curve) から CSV をダウンロードし、次のスクリプトで `data/euro_yield_curve.csv` に保存します。
+  ```powershell
+  python fetch_ecb_data.py ダウンロードしたファイル.csv
+  ```
+
+**中国**
+
+- 自動ダウンロードは未実装または接続に失敗しやすいため、手動を推奨します。
+- [ChinaBond 中国債券信息網](https://yield.chinabond.com.cn/cbweb-mn/yc/downYearBzqxList) 等から年別 CSV をダウンロードし、日付列 + 残存期間列（例: 3M, 6M, 1Y, 10Y）に揃えた CSV を用意してから、次のスクリプトで `data/china_yield_curve.csv` に保存します。
+  ```powershell
+  python fetch_china_data.py ダウンロードしたファイル.csv
+  ```
+
+**インド**
+
+- 公的にはフルイールドカーブの日次 CSV が限られているため、手動で CSV を用意する前提です。
+- [Reserve Bank of India](https://rbi.org.in/scripts/bs_viewcontent.aspx?Id=1956) や [FRED (India government bond yields)](https://fred.stlouisfed.org/tags/series?t=bonds%3Bindia%3Binterest+rate) 等からデータを取得し、`Date` + 残存期間列（例: `1Y`, `5Y`, `10Y`）の形式で `data/india_yield_curve.csv` に保存してください。列名は英語（例: Date, 1Y, 5Y, 10Y）にすると `app.py` がそのまま読みます。（インド用の自動取得スクリプトはありません。）
 
 ### 日本のデータを取得し直す
 
