@@ -92,7 +92,7 @@ def create_3d_figure(
     y_end: int | None = None,
     ticker_label: str = "",
 ) -> go.Figure:
-    """3D: X=日付インデックス, Y=Volume, Z=VWAP, 線でつなぐ。"""
+    """3D: X=VWAP, Y=日付, Z=出来高。日付×VWAPのグリッドで、データがある点だけ出来高を立て、他は0にして Surface で表示。"""
     if data is None or data["n"] == 0:
         return _no_data_figure()
     n = data["n"]
@@ -108,22 +108,51 @@ def create_3d_figure(
     if y_start > y_end:
         y_start, y_end = y_end, y_start
     idx_slice = slice(y_start, y_end + 1)
-    x = data["vwap"][idx_slice]
-    y = indices[idx_slice]
-    z = data["volume"][idx_slice]
+    vwap_vals = data["vwap"][idx_slice]
+    date_indices = indices[idx_slice].astype(float)
+    volume_vals = data["volume"][idx_slice]
     labels = data["date_labels"]
 
-    trace = go.Scatter3d(
-        x=x,
-        y=y,
-        z=z,
-        mode="lines+markers",
-        line=dict(width=4, color="cyan"),
-        marker=dict(size=3),
-        text=[labels[i] for i in range(y_start, y_end + 1)],
-        hovertemplate="日付: %{text}<br>VWAP: %{x:.2f}<br>出来高: %{z:,.0f}<extra></extra>",
+    n_dates = len(date_indices)
+    n_vwap_bins = min(50, max(20, n_dates))
+    vwap_min = float(np.min(vwap_vals))
+    vwap_max = float(np.max(vwap_vals))
+    if vwap_max <= vwap_min:
+        vwap_max = vwap_min + 1.0
+    vwap_edges = np.linspace(vwap_min, vwap_max, n_vwap_bins + 1)
+    vwap_centers = (vwap_edges[:-1] + vwap_edges[1:]) / 2.0
+    vwap_range = vwap_max - vwap_min
+
+    # 各日付の出来高をVWAP方向にガウスで広げ、滑らかな山脈状にする
+    sigma_vwap = max(vwap_range * 0.08, (vwap_edges[1] - vwap_edges[0]) * 2.0)
+    z_grid = np.zeros((len(vwap_centers), n_dates), dtype=float)
+    for i in range(n_dates):
+        w = np.exp(-0.5 * ((vwap_centers - vwap_vals[i]) / sigma_vwap) ** 2)
+        w_sum = w.sum()
+        if w_sum > 1e-12:
+            z_grid[:, i] = volume_vals[i] * (w / w_sum)
+        else:
+            j = int(np.digitize(vwap_vals[i], vwap_edges)) - 1
+            j = max(0, min(j, len(vwap_centers) - 1))
+            z_grid[j, i] = volume_vals[i]
+
+    # 日付軸方向にも軽く平滑化して山脈が滑らかに繋がるようにする
+    kernel_size = min(5, max(3, n_dates // 20))
+    if kernel_size >= 3:
+        k = np.arange(kernel_size) - (kernel_size - 1) / 2.0
+        kernel = np.exp(-0.5 * (k / (kernel_size * 0.3)) ** 2)
+        kernel /= kernel.sum()
+        z_grid = np.apply_along_axis(lambda row: np.convolve(row, kernel, mode="same"), 1, z_grid)
+
+    surface = go.Surface(
+        x=date_indices,
+        y=vwap_centers,
+        z=z_grid,
+        colorscale="Viridis",
+        colorbar=dict(title="出来高"),
+        showscale=True,
     )
-    fig = go.Figure(data=[trace])
+    fig = go.Figure(data=[surface])
     step = max(1, (y_end - y_start + 1) // 10)
     tick_indices = list(range(y_start, y_end + 1, step))
     if tick_indices and tick_indices[-1] != y_end:
@@ -131,13 +160,13 @@ def create_3d_figure(
     fig.update_layout(
         margin=dict(l=0, r=0, t=30, b=0),
         scene=dict(
-            xaxis_title="VWAP",
-            yaxis_title="日付（インデックス）",
+            xaxis_title="日付（インデックス）",
+            yaxis_title="VWAP",
             zaxis_title="出来高",
-            yaxis=dict(tickmode="array", tickvals=tick_indices, ticktext=[labels[i] for i in tick_indices]),
+            xaxis=dict(tickmode="array", tickvals=tick_indices, ticktext=[labels[i] for i in tick_indices]),
         ),
         template="plotly_dark",
-        title=f"{ticker_label} VWAP × 日付 × 出来高（3D）",
+        title=f"{ticker_label} VWAP × 日付 × 出来高（3D面）",
     )
     return fig
 
@@ -464,9 +493,9 @@ def update_2d(ticker: str, interval: str, period: str, hover_data: dict | None, 
     point_index = y_end
     if hover_data and hover_data.get("points"):
         pt = hover_data["points"][0]
-        # Scatter3d の pointNumber が点のインデックス
+        # 3D はスライス表示のため pointNumber はスライス内インデックス → グローバルは y_start + pointNumber
         if "pointNumber" in pt:
-            point_index = int(pt["pointNumber"])
+            point_index = y_start + int(pt["pointNumber"])
         elif "x" in pt and isinstance(pt["x"], (int, float)):
             point_index = int(round(pt["x"]))
     point_index = max(y_start, min(point_index, y_end))
