@@ -535,14 +535,6 @@ app.layout = html.Div(
                                 html.Button("全体表示に戻す", id="btn-reset-range", n_clicks=0),
                             ],
                         ),
-                        html.Div(
-                            style={"marginTop": "12px", "padding": "8px", "backgroundColor": "#222", "borderRadius": "4px"},
-                            children=[
-                                html.Label("描画データ", style={"fontWeight": "bold", "color": "#ccc"}),
-                                html.Div(id="graph-data-summary", style={"marginTop": "6px", "fontSize": "11px", "color": "#aaa"}),
-                                html.Div(id="graph-data-preview", style={"marginTop": "6px", "maxHeight": "200px", "overflowY": "auto", "fontSize": "11px"}),
-                            ],
-                        ),
                     ],
                 ),
                 dcc.Graph(id="graph-date-volume", style={"flex": "1 1 33%", "minHeight": "120px", **_NO_SELECT}),
@@ -745,14 +737,6 @@ def on_reset_range(n, ticker):
     )
 
 # 3D サーフェス更新＋現在範囲を store に保存（「範囲を適用」クリック or 銘柄変更時）
-# #region agent log
-_DEBUG_LOG = Path(__file__).resolve().parent.parent / ".cursor" / "debug.log"
-try:
-    with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
-        _f.write('{"hypothesisId":"H1","message":"registering update_surface","data":{"allow_duplicate":true,"prevent_initial_call":false},"timestamp":0}\n')
-except Exception:
-    pass
-# #endregion
 @app.callback(
     Output("surface-graph", "figure"),
     Output("store-current-range", "data", allow_duplicate=True),
@@ -768,13 +752,6 @@ except Exception:
     prevent_initial_call="initial_duplicate",
 )
 def update_surface(_apply_clicks, _display_data, ticker, start_date, end_date, y_min_val, y_max_val, z_min_val, z_max_val):
-    # #region agent log
-    try:
-        with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
-            _f.write('{"hypothesisId":"H4","runId":"post-fix","message":"update_surface ran"}\n')
-    except Exception:
-        pass
-    # #endregion
     data = _get_cached_data(ticker)
     if data is None or not ticker:
         return _no_data_figure(), None
