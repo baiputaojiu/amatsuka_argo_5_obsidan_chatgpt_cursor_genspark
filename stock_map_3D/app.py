@@ -121,7 +121,7 @@ def compute_display_data(df: pd.DataFrame) -> dict[str, Any] | None:
     df = df.sort_index()
     typical = (df["Open"] + df["High"] + df["Low"] + df["Close"]) / 4.0
     last_close = float(df["Close"].iloc[-1])
-    step = max(last_close * 0.05, 1e-6)
+    step = max(last_close * 0.01, 1e-6)
     t_min = typical.min()
     t_max = typical.max()
     bins_start = np.floor(t_min / step) * step
@@ -201,7 +201,7 @@ def create_surface_figure(
     data: dict[str, Any] | None,
     ticker: str,
     x_range: tuple[float, float] | None = None,
-    y_range: tuple[float, float] | None = None,
+    y_range: tuple[int, int] | None = None,
     z_range: tuple[float, float] | None = None,
 ) -> go.Figure:
     if data is None or data["n_dates"] == 0 or data["n_bins"] == 0:
@@ -209,12 +209,43 @@ def create_surface_figure(
     date_labels = data["date_labels"]
     price_bins = np.array(data["price_bins"])
     Z = np.array(data["Z"])
-    y_indices = np.arange(len(date_labels))
+
+    # 範囲でスライス（描画データを絞るので確実に反映される）
+    i0 = int(y_range[0]) if y_range is not None else 0
+    i1 = int(y_range[1]) if y_range is not None else len(date_labels) - 1
+    i0 = max(0, min(i0, len(date_labels) - 1))
+    i1 = max(0, min(i1, len(date_labels) - 1))
+    if i0 > i1:
+        i0, i1 = i1, i0
+    date_slice = date_labels[i0 : i1 + 1]
+    Z_date = Z[i0 : i1 + 1, :]
+
+    if x_range is not None:
+        p_min, p_max = float(x_range[0]), float(x_range[1])
+        if p_min > p_max:
+            p_min, p_max = p_max, p_min
+        j_mask = (price_bins >= p_min) & (price_bins <= p_max)
+        if not np.any(j_mask):
+            j_mask = np.ones(len(price_bins), dtype=bool)
+        price_slice = price_bins[j_mask]
+        Z_slice = Z_date[:, j_mask]
+    else:
+        price_slice = price_bins
+        Z_slice = Z_date
+
+    if len(date_slice) == 0 or len(price_slice) == 0:
+        return _no_data_figure("データがありません")
+    y_indices = np.arange(len(date_slice))
+
+    # Z軸範囲でクリップ（表示用）
+    if z_range is not None:
+        z_lo, z_hi = float(z_range[0]), float(z_range[1])
+        Z_slice = np.clip(Z_slice, z_lo, z_hi)
 
     surface = go.Surface(
-        x=price_bins,
+        x=price_slice,
         y=y_indices,
-        z=Z,
+        z=Z_slice,
         colorscale="Viridis",
         colorbar=dict(title="出来高"),
         showscale=True,
@@ -222,40 +253,28 @@ def create_surface_figure(
     )
     fig = go.Figure(data=[surface])
 
-    # 日付軸: 表示範囲（y_range）に合わせて tickvals / ticktext を設定
-    y_min = int(y_range[0]) if y_range is not None else 0
-    y_max = int(y_range[1]) if y_range is not None else max(0, len(date_labels) - 1)
-    y_min = max(0, min(y_min, len(date_labels) - 1))
-    y_max = max(0, min(y_max, len(date_labels) - 1))
-    if y_min > y_max:
-        y_min, y_max = y_max, y_min
-    visible_len = y_max - y_min + 1
-    y_step = max(1, visible_len // 10)
-    y_tick_indices = list(range(y_min, y_max + 1, y_step))
-    if y_tick_indices and y_tick_indices[-1] != y_max:
-        y_tick_indices.append(y_max)
-    y_tickvals = [i for i in y_tick_indices if i < len(date_labels)]
-    y_ticktext = [date_labels[i] for i in y_tickvals]
+    y_step = max(1, len(date_slice) // 10)
+    y_tick_indices = list(range(0, len(date_slice), y_step))
+    if y_tick_indices and y_tick_indices[-1] != len(date_slice) - 1:
+        y_tick_indices.append(len(date_slice) - 1)
+    y_tickvals = y_tick_indices
+    y_ticktext = [date_slice[i] for i in y_tickvals]
 
     layout_scene = dict(
         xaxis_title="X: 株価",
         yaxis_title="Y: 日付",
         zaxis_title="Z: 出来高",
+        xaxis=dict(autorange="reversed", tickmode="auto"),
         yaxis=dict(
             tickmode="array",
             tickvals=y_tickvals,
             ticktext=y_ticktext,
-            range=[y_min, y_max],
         ),
     )
-    if x_range is not None:
-        layout_scene["xaxis"] = layout_scene.get("xaxis", {}) or {}
-        layout_scene["xaxis"]["range"] = list(x_range)
-    if y_range is not None:
-        layout_scene["yaxis"] = layout_scene.get("yaxis", {}) or {}
-        layout_scene["yaxis"]["range"] = list(y_range)
     if z_range is not None:
-        layout_scene["zaxis"] = dict(layout_scene.get("zaxis", {}), range=list(z_range), title="Z: 出来高")
+        z_lo, z_hi = float(z_range[0]), float(z_range[1])
+        # 表示上限を3倍に広げて山を1/3の高さで表示
+        layout_scene["zaxis"] = dict(range=[z_lo, z_hi * 3], title="Z: 出来高")
 
     fig.update_layout(
         margin=dict(l=0, r=0, t=30, b=0),
@@ -271,11 +290,24 @@ def create_surface_figure(
 def create_date_volume_figure(
     data: dict[str, Any] | None,
     hover_date_idx: int | None,
+    date_range: tuple[int, int] | None = None,
 ) -> go.Figure:
     if data is None or not data["date_labels"]:
         return _no_data_figure()
-    x = list(range(len(data["date_labels"])))
-    y = data["daily_volume"]
+    labels = data["date_labels"]
+    vol = data["daily_volume"]
+    if date_range is not None:
+        i0, i1 = max(0, date_range[0]), min(len(labels) - 1, date_range[1])
+        if i0 > i1:
+            i0, i1 = i1, i0
+        labels = labels[i0 : i1 + 1]
+        vol = vol[i0 : i1 + 1]
+        if hover_date_idx is not None and i0 <= hover_date_idx <= i1:
+            hover_date_idx = hover_date_idx - i0
+        else:
+            hover_date_idx = None
+    x = list(range(len(labels)))
+    y = vol
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
@@ -292,7 +324,7 @@ def create_date_volume_figure(
                 x=[hover_date_idx], y=[y[hover_date_idx]],
                 mode="markers", marker=dict(color="red", size=10),
                 hovertemplate="日付: %{text}<br>出来高: %{y:,.0f}<extra></extra>",
-                text=[data["date_labels"][hover_date_idx]],
+                text=[labels[hover_date_idx]],
                 showlegend=False,
             )
         )
@@ -300,18 +332,31 @@ def create_date_volume_figure(
         margin=dict(l=40, r=10, t=30, b=40),
         xaxis_title="日付", yaxis_title="出来高",
         template="plotly_dark", title="日付-出来高",
-        xaxis=dict(tickmode="array", tickvals=x[:: max(1, len(x) // 8)], ticktext=[data["date_labels"][i] for i in range(0, len(x), max(1, len(x) // 8))]),
+        xaxis=dict(tickmode="array", tickvals=x[:: max(1, len(x) // 8)], ticktext=[labels[i] for i in range(0, len(x), max(1, len(x) // 8))]),
     )
     return fig
 
 def create_date_price_figure(
     data: dict[str, Any] | None,
     hover_date_idx: int | None,
+    date_range: tuple[int, int] | None = None,
 ) -> go.Figure:
     if data is None or not data["date_labels"]:
         return _no_data_figure()
-    x = list(range(len(data["date_labels"])))
-    y = data["daily_price"]
+    labels = data["date_labels"]
+    price = data["daily_price"]
+    if date_range is not None:
+        i0, i1 = max(0, date_range[0]), min(len(labels) - 1, date_range[1])
+        if i0 > i1:
+            i0, i1 = i1, i0
+        labels = labels[i0 : i1 + 1]
+        price = price[i0 : i1 + 1]
+        if hover_date_idx is not None and i0 <= hover_date_idx <= i1:
+            hover_date_idx = hover_date_idx - i0
+        else:
+            hover_date_idx = None
+    x = list(range(len(labels)))
+    y = price
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
@@ -335,7 +380,7 @@ def create_date_price_figure(
                 x=[hover_date_idx], y=[y[hover_date_idx]],
                 mode="markers", marker=dict(color="red", size=10),
                 hovertemplate="日付: %{text}<br>株価: %{y:.2f}<extra></extra>",
-                text=[data["date_labels"][hover_date_idx]],
+                text=[labels[hover_date_idx]],
                 showlegend=False,
             )
         )
@@ -343,7 +388,7 @@ def create_date_price_figure(
         margin=dict(l=40, r=10, t=30, b=40),
         xaxis_title="日付", yaxis_title="株価",
         template="plotly_dark", title="日付-株価",
-        xaxis=dict(tickmode="array", tickvals=x[:: max(1, len(x) // 8)], ticktext=[data["date_labels"][i] for i in range(0, len(x), max(1, len(x) // 8))]),
+        xaxis=dict(tickmode="array", tickvals=x[:: max(1, len(x) // 8)], ticktext=[labels[i] for i in range(0, len(x), max(1, len(x) // 8))]),
     )
     return fig
 
@@ -448,24 +493,56 @@ app.layout = html.Div(
                             style={"marginTop": "8px"},
                             children=[
                                 html.Label("X軸(日付)範囲"),
-                                dcc.RangeSlider(id="range-x", min=0, max=1, value=[0, 1], allowCross=False, tooltip={"placement": "bottom"}),
+                                dcc.DatePickerRange(
+                                    id="range-x-date",
+                                    start_date=None,
+                                    end_date=None,
+                                    display_format="YYYY-MM-DD",
+                                    style={"color": "#111"},
+                                ),
                             ],
                         ),
                         html.Div(
                             style={"marginTop": "4px"},
                             children=[
                                 html.Label("Y軸(株価)範囲"),
-                                dcc.RangeSlider(id="range-y", min=0, max=1, value=[0, 1], allowCross=False, tooltip={"placement": "bottom"}),
+                                html.Div(
+                                    style={"display": "flex", "gap": "8px", "alignItems": "center"},
+                                    children=[
+                                        dcc.Input(id="range-y-min", type="number", placeholder="最小", style={"width": "80px", "color": "#111"}),
+                                        dcc.Input(id="range-y-max", type="number", placeholder="最大", style={"width": "80px", "color": "#111"}),
+                                    ],
+                                ),
                             ],
                         ),
                         html.Div(
                             style={"marginTop": "4px"},
                             children=[
                                 html.Label("Z軸(出来高)範囲"),
-                                dcc.RangeSlider(id="range-z", min=0, max=1, value=[0, 1], allowCross=False, tooltip={"placement": "bottom"}),
+                                html.Div(
+                                    style={"display": "flex", "gap": "8px", "alignItems": "center"},
+                                    children=[
+                                        dcc.Input(id="range-z-min", type="number", placeholder="最小", style={"width": "80px", "color": "#111"}),
+                                        dcc.Input(id="range-z-max", type="number", placeholder="最大", style={"width": "80px", "color": "#111"}),
+                                    ],
+                                ),
                             ],
                         ),
-                        html.Button("全体表示に戻す", id="btn-reset-range", n_clicks=0, style={"marginTop": "4px"}),
+                        html.Div(
+                            style={"display": "flex", "gap": "8px", "marginTop": "4px"},
+                            children=[
+                                html.Button("範囲を適用", id="btn-apply-range", n_clicks=0),
+                                html.Button("全体表示に戻す", id="btn-reset-range", n_clicks=0),
+                            ],
+                        ),
+                        html.Div(
+                            style={"marginTop": "12px", "padding": "8px", "backgroundColor": "#222", "borderRadius": "4px"},
+                            children=[
+                                html.Label("描画データ", style={"fontWeight": "bold", "color": "#ccc"}),
+                                html.Div(id="graph-data-summary", style={"marginTop": "6px", "fontSize": "11px", "color": "#aaa"}),
+                                html.Div(id="graph-data-preview", style={"marginTop": "6px", "maxHeight": "200px", "overflowY": "auto", "fontSize": "11px"}),
+                            ],
+                        ),
                     ],
                 ),
                 dcc.Graph(id="graph-date-volume", style={"flex": "1 1 33%", "minHeight": "120px", **_NO_SELECT}),
@@ -479,6 +556,7 @@ app.layout = html.Div(
         ),
         dcc.Store(id="store-ticker", data=None),
         dcc.Store(id="store-display-data", data=None),
+        dcc.Store(id="store-current-range", data=None),
     ],
 )
 
@@ -522,7 +600,7 @@ def on_fetch_or_select(n_fetch, fav_value, input_ticker, current_ticker):
         if data is None:
             return ticker, None, "データなし", [{"label": t, "value": t} for t in load_favorites()]
         _DISPLAY_CACHE[ticker] = data
-        return ticker, {"ticker": ticker}, f"価格刻み: {data['step']:.2f}（直近終値 {data['last_close']:.2f} の5%）", [{"label": t, "value": t} for t in load_favorites()]
+        return ticker, {"ticker": ticker}, f"価格刻み: {data['step']:.2f}（直近終値 {data['last_close']:.2f} の1%）", [{"label": t, "value": t} for t in load_favorites()]
 
     # お気に入り選択 or 起動時: 既存CSVのみ読む
     df = load_csv(ticker)
@@ -532,13 +610,25 @@ def on_fetch_or_select(n_fetch, fav_value, input_ticker, current_ticker):
     if data is None:
         return ticker, None, "", [{"label": t, "value": t} for t in load_favorites()]
     _DISPLAY_CACHE[ticker] = data
-    return ticker, {"ticker": ticker}, f"価格刻み: {data['step']:.2f}（直近終値 {data['last_close']:.2f} の5%）", [{"label": t, "value": t} for t in load_favorites()]
+    return ticker, {"ticker": ticker}, f"価格刻み: {data['step']:.2f}（直近終値 {data['last_close']:.2f} の1%）", [{"label": t, "value": t} for t in load_favorites()]
 
 
 def _get_cached_data(ticker: str | None) -> dict[str, Any] | None:
     if not ticker:
         return None
     return _DISPLAY_CACHE.get(ticker)
+
+
+def _save_graph_data_csv(ticker: str, date_slice: list, price_slice: np.ndarray, Z_slice: np.ndarray) -> None:
+    """描画用Z行列を data/{ticker}_graph_data.csv に保存する。"""
+    if not date_slice or price_slice is None or Z_slice is None or len(Z_slice) == 0:
+        return
+    safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in ticker)
+    path = DATA_DIR / f"{safe}_graph_data.csv"
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    df = pd.DataFrame(Z_slice, index=date_slice, columns=[f"{p:.2f}" for p in price_slice])
+    df.index.name = "日付"
+    df.to_csv(path, encoding="utf-8-sig")
 
 
 @app.callback(
@@ -572,7 +662,7 @@ def on_update(n, current_ticker):
     if data is None:
         return current_ticker, None, ""
     _DISPLAY_CACHE[current_ticker] = data
-    return current_ticker, {"ticker": current_ticker}, f"価格刻み: {data['step']:.2f}（直近終値 {data['last_close']:.2f} の5%）"
+    return current_ticker, {"ticker": current_ticker}, f"価格刻み: {data['step']:.2f}（直近終値 {data['last_close']:.2f} の1%）"
 
 @app.callback(
     Output("favorites-dropdown", "options", allow_duplicate=True),
@@ -585,68 +675,153 @@ def on_add_favorite(n, ticker):
         add_favorite(ticker)
     return [{"label": t, "value": t} for t in load_favorites()]
 
-# 軸範囲スライダー初期化（データ変更時）
+# 軸範囲入力の初期化（データ変更時）。X初期範囲は山脈が0でない範囲
 @app.callback(
-    Output("range-x", "min"), Output("range-x", "max"), Output("range-x", "value"),
-    Output("range-y", "min"), Output("range-y", "max"), Output("range-y", "value"),
-    Output("range-z", "min"), Output("range-z", "max"), Output("range-z", "value"),
+    Output("range-x-date", "start_date"),
+    Output("range-x-date", "end_date"),
+    Output("range-x-date", "min_date_allowed"),
+    Output("range-x-date", "max_date_allowed"),
+    Output("range-y-min", "value"),
+    Output("range-y-max", "value"),
+    Output("range-z-min", "value"),
+    Output("range-z-max", "value"),
+    Output("store-current-range", "data"),
     Input("store-display-data", "data"),
     State("store-ticker", "data"),
 )
-def init_axis_sliders(_display_data, ticker):
+def init_axis_inputs(_display_data, ticker):
     data = _get_cached_data(ticker)
     if data is None or data.get("n_dates", 0) == 0:
-        return 0, 1, [0, 1], 0, 1, [0, 1], 0, 1, [0, 1]
-    n_d = data["n_dates"]
+        return None, None, None, None, None, None, None, None, None
+    date_labels = data["date_labels"]
+    Z_arr = np.array(data["Z"])
+    row_sums = np.sum(Z_arr, axis=1)
+    nonzero = np.where(row_sums > 0)[0]
+    if len(nonzero) == 0:
+        first_date = date_labels[0]
+        last_date = date_labels[-1]
+        i0, i1 = 0, len(date_labels) - 1
+    else:
+        i0, i1 = int(nonzero[0]), int(nonzero[-1])
+        first_date = date_labels[i0]
+        last_date = date_labels[i1]
     pb = data["price_bins"]
-    z_arr = np.array(data["Z"])
-    z_min = float(np.nanmin(z_arr)) if z_arr.size else 0.0
-    z_max = float(np.nanmax(z_arr)) if z_arr.size else 1.0
+    price_min = float(min(pb)) if pb else None
+    price_max = float(max(pb)) if pb else None
+    z_min = float(np.nanmin(Z_arr)) if Z_arr.size else None
+    z_max = float(np.nanmax(Z_arr)) if Z_arr.size else None
+    range_data = {"y_range": [i0, i1], "x_range": [price_min, price_max], "z_range": [z_min, z_max]}
     return (
-        0, max(0, n_d - 1), [0, max(0, n_d - 1)],
-        0, max(0, len(pb) - 1), [0, max(0, len(pb) - 1)],
-        0, 1, [0, 1],
+        first_date, last_date, date_labels[0], date_labels[-1],
+        price_min, price_max, z_min, z_max,
+        range_data,
     )
 
 # 全体表示に戻す
 @app.callback(
-    Output("range-x", "value", allow_duplicate=True),
-    Output("range-y", "value", allow_duplicate=True),
-    Output("range-z", "value", allow_duplicate=True),
+    Output("range-x-date", "start_date", allow_duplicate=True),
+    Output("range-x-date", "end_date", allow_duplicate=True),
+    Output("range-y-min", "value", allow_duplicate=True),
+    Output("range-y-max", "value", allow_duplicate=True),
+    Output("range-z-min", "value", allow_duplicate=True),
+    Output("range-z-max", "value", allow_duplicate=True),
     Input("btn-reset-range", "n_clicks"),
-    State("range-x", "max"), State("range-y", "max"), State("range-z", "max"),
+    State("store-ticker", "data"),
     prevent_initial_call=True,
 )
-def on_reset_range(n, x_max, y_max, z_max):
-    return [0, max(0, x_max)], [0, max(0, y_max)], [0, 1]
+def on_reset_range(n, ticker):
+    data = _get_cached_data(ticker)
+    if data is None or data.get("n_dates", 0) == 0:
+        return None, None, None, None, None, None
+    date_labels = data["date_labels"]
+    pb = data["price_bins"]
+    z_arr = np.array(data["Z"])
+    z_min = float(np.nanmin(z_arr)) if z_arr.size else None
+    z_max = float(np.nanmax(z_arr)) if z_arr.size else None
+    return (
+        date_labels[0], date_labels[-1],
+        float(min(pb)) if pb else None, float(max(pb)) if pb else None,
+        z_min, z_max,
+    )
 
-# 3D サーフェス更新（store + 軸範囲）
+# 3D サーフェス更新＋現在範囲を store に保存（「範囲を適用」クリック or 銘柄変更時）
+# #region agent log
+_DEBUG_LOG = Path(__file__).resolve().parent.parent / ".cursor" / "debug.log"
+try:
+    with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+        _f.write('{"hypothesisId":"H1","message":"registering update_surface","data":{"allow_duplicate":true,"prevent_initial_call":false},"timestamp":0}\n')
+except Exception:
+    pass
+# #endregion
 @app.callback(
     Output("surface-graph", "figure"),
+    Output("store-current-range", "data", allow_duplicate=True),
+    Input("btn-apply-range", "n_clicks"),
     Input("store-display-data", "data"),
     Input("store-ticker", "data"),
-    Input("range-x", "value"),
-    Input("range-y", "value"),
-    Input("range-z", "value"),
+    State("range-x-date", "start_date"),
+    State("range-x-date", "end_date"),
+    State("range-y-min", "value"),
+    State("range-y-max", "value"),
+    State("range-z-min", "value"),
+    State("range-z-max", "value"),
+    prevent_initial_call="initial_duplicate",
 )
-def update_surface(_display_data, ticker, rx, ry, rz):
+def update_surface(_apply_clicks, _display_data, ticker, start_date, end_date, y_min_val, y_max_val, z_min_val, z_max_val):
+    # #region agent log
+    try:
+        with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+            _f.write('{"hypothesisId":"H4","runId":"post-fix","message":"update_surface ran"}\n')
+    except Exception:
+        pass
+    # #endregion
     data = _get_cached_data(ticker)
     if data is None or not ticker:
-        return _no_data_figure()
+        return _no_data_figure(), None
+    date_labels = data["date_labels"]
     pb = data["price_bins"]
-    nb = len(pb)
-    j0 = max(0, min(int(ry[0]), nb - 1)) if ry else 0
-    j1 = max(0, min(int(ry[1]), nb - 1)) if ry else max(0, nb - 1)
-    x_range = (float(pb[j0]), float(pb[j1])) if nb else None
-    y_range = (int(rx[0]), int(rx[1])) if rx else None
     Z_arr = np.array(data["Z"])
-    z_max = float(np.nanmax(Z_arr)) if Z_arr.size else 1.0
-    z_min = float(np.nanmin(Z_arr)) if Z_arr.size else 0.0
-    if rz and len(rz) == 2:
-        z_range = (z_min + (z_max - z_min) * rz[0], z_min + (z_max - z_min) * rz[1])
-    else:
-        z_range = (z_min, z_max)
-    return create_surface_figure(data, ticker, x_range=x_range, y_range=y_range, z_range=z_range)
+    data_z_min = float(np.nanmin(Z_arr)) if Z_arr.size else 0.0
+    data_z_max = float(np.nanmax(Z_arr)) if Z_arr.size else 1.0
+
+    # X軸(日付): カレンダーで選択した日付をインデックスに変換
+    y_range = (0, len(date_labels) - 1)
+    if start_date is not None and end_date is not None:
+        try:
+            start_s = (start_date[:10] if isinstance(start_date, str) else str(start_date)[:10]).strip()
+            end_s = (end_date[:10] if isinstance(end_date, str) else str(end_date)[:10]).strip()
+            if start_s in date_labels and end_s in date_labels:
+                i0 = date_labels.index(start_s)
+                i1 = date_labels.index(end_s)
+                y_range = (min(i0, i1), max(i0, i1))
+            elif start_s in date_labels:
+                i0 = date_labels.index(start_s)
+                y_range = (i0, len(date_labels) - 1)
+            elif end_s in date_labels:
+                i1 = date_labels.index(end_s)
+                y_range = (0, i1)
+        except (ValueError, TypeError, AttributeError):
+            pass
+
+    # Y軸(株価): 数値入力（片方だけの場合はデータ範囲で補う）
+    x_range = None
+    p_data_min = float(min(pb)) if pb else 0.0
+    p_data_max = float(max(pb)) if pb else 0.0
+    if pb is not None and len(pb) > 0:
+        p_min = float(y_min_val) if y_min_val is not None and str(y_min_val).strip() != "" else p_data_min
+        p_max = float(y_max_val) if y_max_val is not None and str(y_max_val).strip() != "" else p_data_max
+        x_range = (min(p_min, p_max), max(p_min, p_max))
+
+    # Z軸(出来高): 数値入力（片方だけの場合はデータ範囲で補う）
+    z_min_in = float(z_min_val) if z_min_val is not None and str(z_min_val).strip() != "" else data_z_min
+    z_max_in = float(z_max_val) if z_max_val is not None and str(z_max_val).strip() != "" else data_z_max
+    z_range = (min(z_min_in, z_max_in), max(z_min_in, z_max_in))
+
+    range_data = {"y_range": list(y_range), "x_range": list(x_range) if x_range else [p_data_min, p_data_max], "z_range": list(z_range)}
+    date_slice, price_slice, Z_slice, _, _ = _sliced_display_data(data, range_data)
+    if date_slice is not None and price_slice is not None and Z_slice is not None:
+        _save_graph_data_csv(ticker, date_slice, price_slice, Z_slice)
+    return create_surface_figure(data, ticker, x_range=x_range, y_range=y_range, z_range=z_range), range_data
 
 # 2D グラフ更新（store + 3D hoverData）
 @app.callback(
@@ -677,6 +852,80 @@ def update_2d_graphs(_display_data, ticker, hover_data):
     f2 = create_date_price_figure(data, hover_idx)
     f3 = create_volume_price_figure(data, day_df, hover_idx)
     return f1, f2, f3
+
+
+def _sliced_display_data(data: dict[str, Any], range_data: dict | None):
+    """store-current-range に従って日付・株価でスライスしたデータを返す。"""
+    if not data or not data.get("date_labels"):
+        return None, None, None, None, None
+    date_labels = data["date_labels"]
+    price_bins = np.array(data["price_bins"])
+    Z = np.array(data["Z"])
+    daily_volume = data.get("daily_volume", [])
+    daily_price = data.get("daily_price", [])
+
+    i0, i1 = 0, len(date_labels) - 1
+    j0, j1 = 0, len(price_bins) - 1
+    if range_data:
+        yr = range_data.get("y_range")
+        if yr and len(yr) >= 2:
+            i0 = max(0, min(int(yr[0]), len(date_labels) - 1))
+            i1 = max(0, min(int(yr[1]), len(date_labels) - 1))
+            if i0 > i1:
+                i0, i1 = i1, i0
+        xr = range_data.get("x_range")
+        if xr and len(xr) >= 2 and len(price_bins) > 0:
+            p_min, p_max = float(xr[0]), float(xr[1])
+            j_mask = (price_bins >= p_min) & (price_bins <= p_max)
+            if np.any(j_mask):
+                j_idx = np.where(j_mask)[0]
+                j0, j1 = int(j_idx[0]), int(j_idx[-1])
+
+    date_slice = date_labels[i0 : i1 + 1]
+    price_slice = price_bins[j0 : j1 + 1]
+    Z_slice = Z[i0 : i1 + 1, j0 : j1 + 1]
+    vol_slice = daily_volume[i0 : i1 + 1] if daily_volume else []
+    price_slice_daily = daily_price[i0 : i1 + 1] if daily_price else []
+    return date_slice, price_slice, Z_slice, vol_slice, price_slice_daily
+
+
+@app.callback(
+    Output("graph-data-summary", "children"),
+    Output("graph-data-preview", "children"),
+    Input("store-display-data", "data"),
+    Input("store-current-range", "data"),
+    State("store-ticker", "data"),
+)
+def update_graph_data_preview(_display_data, range_data, ticker):
+    data = _get_cached_data(ticker)
+    if not data:
+        return "データがありません。銘柄を取得してください。", ""
+    date_slice, price_slice, Z_slice, vol_slice, price_slice_daily = _sliced_display_data(data, range_data)
+    if not date_slice or Z_slice is None:
+        return "描画データがありません。", ""
+    n_rows, n_cols = Z_slice.shape
+    safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in (ticker or ""))
+    summary = f"行(日付): {n_rows}, 列(株価帯): {n_cols}"
+    if date_slice:
+        summary += f"　日付: {date_slice[0]} ～ {date_slice[-1]}"
+    if price_slice is not None and len(price_slice) > 0:
+        summary += f"　株価帯: {float(price_slice[0]):.2f} ～ {float(price_slice[-1]):.2f}"
+    summary += f"　→ data/{safe}_graph_data.csv に保存"
+    preview_rows = []
+    preview_rows.append(html.Tr([html.Th("日付", style={"padding": "2px 6px"}), html.Th("日次出来高", style={"padding": "2px 6px"}), html.Th("終値", style={"padding": "2px 6px"})]))
+    for i in range(min(20, len(date_slice))):
+        vol = vol_slice[i] if i < len(vol_slice) else ""
+        pr = price_slice_daily[i] if i < len(price_slice_daily) else ""
+        if isinstance(vol, float):
+            vol = f"{vol:,.0f}"
+        if isinstance(pr, float):
+            pr = f"{pr:.2f}"
+        preview_rows.append(html.Tr([html.Td(date_slice[i], style={"padding": "2px 6px"}), html.Td(vol, style={"padding": "2px 6px"}), html.Td(pr, style={"padding": "2px 6px"})]))
+    if len(date_slice) > 20:
+        preview_rows.append(html.Tr([html.Td("…", colSpan=3, style={"padding": "2px 6px", "color": "#888"})]))
+    table = html.Table(preview_rows, style={"borderCollapse": "collapse", "color": "#ccc", "width": "100%"})
+    return summary, table
+
 
 if __name__ == "__main__":
     app.run(debug=True)
