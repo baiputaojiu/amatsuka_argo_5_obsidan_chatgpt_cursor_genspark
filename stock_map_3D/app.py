@@ -160,9 +160,9 @@ def create_3d_figure(
     fig.update_layout(
         margin=dict(l=0, r=0, t=30, b=0),
         scene=dict(
-            xaxis_title="日付（インデックス）",
-            yaxis_title="VWAP",
-            zaxis_title="出来高",
+            xaxis_title="日付（インデックス） (X)",
+            yaxis_title="VWAP (Y)",
+            zaxis_title="出来高 (Z)",
             xaxis=dict(tickmode="array", tickvals=tick_indices, ticktext=[labels[i] for i in tick_indices]),
         ),
         template="plotly_dark",
