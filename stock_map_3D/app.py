@@ -1,272 +1,399 @@
-"""
-日付・出来高・VWAP の 3D グラフ（1時間足・日足対応）Dash アプリ。
-データは CSV 優先、なければ yfinance で取得して保存。
-"""
-from __future__ import annotations
-
+# stock_map_3D: 日付×株価×出来高の3D山脈と2Dグラフ
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
+import yfinance as yf
 from dash import Dash, dcc, html, Input, Output, State
 import plotly.graph_objs as go
 
-from fetch_stock_data import fetch_and_save, compute_vwap
-
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
+FAVORITES_PATH = DATA_DIR / "favorites.json"
 
-# 銘柄リスト（ドロップダウン用）
-TICKER_OPTIONS = [
-    {"label": "AAPL (Apple)", "value": "AAPL"},
-    {"label": "MSFT (Microsoft)", "value": "MSFT"},
-    {"label": "7203.T (トヨタ)", "value": "7203.T"},
-    {"label": "GOOGL (Google)", "value": "GOOGL"},
-]
+# ---------------------------------------------------------------------------
+# お気に入り
+# ---------------------------------------------------------------------------
+def load_favorites() -> list[str]:
+    if not FAVORITES_PATH.exists():
+        FAVORITES_PATH.parent.mkdir(parents=True, exist_ok=True)
+        fav = ["7203.T"]
+        with open(FAVORITES_PATH, "w", encoding="utf-8") as f:
+            import json
+            json.dump(fav, f, ensure_ascii=False, indent=2)
+        return fav
+    with open(FAVORITES_PATH, "r", encoding="utf-8") as f:
+        import json
+        return json.load(f)
 
-INTERVAL_OPTIONS = [
-    {"label": "日足", "value": "1d"},
-    {"label": "1時間足（最大約60日）", "value": "1h"},
-]
+def save_favorites(fav: list[str]) -> None:
+    FAVORITES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(FAVORITES_PATH, "w", encoding="utf-8") as f:
+        import json
+        json.dump(fav, f, ensure_ascii=False, indent=2)
 
-PERIOD_OPTIONS = [
-    {"label": "1年", "value": "1y"},
-    {"label": "2年", "value": "2y"},
-    {"label": "5年", "value": "5y"},
-    {"label": "60日（1h用）", "value": "60d"},
-]
+def add_favorite(ticker: str) -> list[str]:
+    fav = load_favorites()
+    ticker = (ticker or "").strip().upper()
+    if ticker and ticker not in fav:
+        fav.append(ticker)
+        save_favorites(fav)
+    return load_favorites()
 
+# ---------------------------------------------------------------------------
+# 5分足取得・CSV
+# ---------------------------------------------------------------------------
+def _flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
+    if isinstance(df.columns, pd.MultiIndex):
+        df = df.copy()
+        df.columns = df.columns.get_level_values(0)
+    return df
 
-def load_from_csv(ticker: str, interval: str) -> dict[str, Any] | None:
-    """
-    data/{ticker}_{interval}.csv を読み込むのみ（取得は行わない）。
-    VWAP が無ければ (High+Low+Close)/3 で計算。
-    返却: {"date_labels": [...], "volume": ndarray, "vwap": ndarray} または None（ファイルなし・失敗時）
-    """
-    csv_path = DATA_DIR / f"{ticker}_{interval}.csv"
-    if not csv_path.exists():
-        return None
+def csv_path(ticker: str) -> Path:
+    # ファイル名に使えない文字を置換（. はそのまま）
+    safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in ticker)
+    return DATA_DIR / f"{safe}_5m.csv"
+
+def fetch_5m_full(ticker: str) -> pd.DataFrame | None:
     try:
-        df = pd.read_csv(csv_path)
+        df = yf.download(ticker, period="60d", interval="5m", group_by="column", progress=False, threads=False)
+        if df is None or df.empty:
+            return None
+        df = _flatten_columns(df)
+        df = df.dropna(how="all")
+        if df.empty:
+            return None
+        return df
     except Exception:
         return None
+
+def fetch_5m_incremental(ticker: str, last_ts: pd.Timestamp) -> pd.DataFrame | None:
+    try:
+        start = last_ts + pd.Timedelta(minutes=5)
+        end = pd.Timestamp.now(tz=start.tzinfo) if start.tz else pd.Timestamp.now()
+        if start >= end:
+            return pd.DataFrame()
+        df = yf.download(ticker, start=start, end=end, interval="5m", group_by="column", progress=False, threads=False)
+        if df is None or df.empty:
+            return pd.DataFrame()
+        df = _flatten_columns(df)
+        df = df.dropna(how="all")
+        return df
+    except Exception:
+        return None
+
+def load_csv(ticker: str) -> pd.DataFrame | None:
+    path = csv_path(ticker)
+    if not path.exists():
+        return None
+    try:
+        df = pd.read_csv(path, index_col=0)
+        df.index = pd.to_datetime(df.index, utc=True)
+        df = df.sort_index()
+        if df.empty:
+            return None
+        return df
+    except Exception:
+        return None
+
+def save_csv(ticker: str, df: pd.DataFrame) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    path = csv_path(ticker)
+    df.to_csv(path)
+
+def ensure_columns(df: pd.DataFrame) -> pd.DataFrame:
+    for c in ["Open", "High", "Low", "Close", "Volume"]:
+        if c not in df.columns:
+            return pd.DataFrame()
+    return df
+
+# サーバー側キャッシュ（dcc.Store のサイズ制限で全期間が切られないように）
+_DISPLAY_CACHE: dict[str, dict[str, Any]] = {}
+
+# ---------------------------------------------------------------------------
+# 描画用データ計算
+# ---------------------------------------------------------------------------
+def compute_display_data(df: pd.DataFrame) -> dict[str, Any] | None:
+    df = ensure_columns(df)
     if df.empty:
         return None
-    df = df.rename(columns={df.columns[0]: "Date"})
-    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-    df = df.dropna(subset=["Date"]).sort_values("Date").reset_index(drop=True)
-    for col in ("Open", "High", "Low", "Close", "Volume"):
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-    if "VWAP" not in df.columns and all(c in df.columns for c in ("High", "Low", "Close")):
-        df["VWAP"] = compute_vwap(df)
-    if "VWAP" not in df.columns or "Volume" not in df.columns:
-        return None
-    df = df.dropna(subset=["VWAP", "Volume"])
-    if len(df) == 0:
-        return None
-    date_labels = df["Date"].dt.strftime("%Y-%m-%d %H:%M").str.rstrip(" 00:00").tolist()
+    df = df.sort_index()
+    typical = (df["Open"] + df["High"] + df["Low"] + df["Close"]) / 4.0
+    last_close = float(df["Close"].iloc[-1])
+    step = max(last_close * 0.05, 1e-6)
+    t_min = typical.min()
+    t_max = typical.max()
+    bins_start = np.floor(t_min / step) * step
+    bins_end = np.ceil(t_max / step) * step
+    price_bins = np.arange(bins_start, bins_end + step * 0.5, step)
+    if len(price_bins) == 0:
+        price_bins = np.array([bins_start])
+
+    # 各行の日付（タイムゾーンはそのまま、日付のみ取得）
+    dates_in_data = [pd.Timestamp(ts).date() for ts in df.index]
+    min_date = min(dates_in_data)
+    max_date = max(dates_in_data)
+    all_dates = pd.date_range(min_date, max_date, freq="D").date.tolist()
+    date_to_idx = {d: i for i, d in enumerate(all_dates)}
+
+    Z = np.zeros((len(all_dates), len(price_bins)))
+    daily_volume = {d: 0.0 for d in all_dates}
+    daily_close = {}  # その日の最後の Close
+
+    for ts, row in df.iterrows():
+        d = pd.Timestamp(ts).date()
+        if d not in date_to_idx:
+            continue
+        i = date_to_idx[d]
+        vol = row["Volume"]
+        if pd.isna(vol):
+            vol = 0
+        tp = typical.loc[ts]
+        if pd.isna(tp):
+            continue
+        j = np.searchsorted(price_bins, tp) - 1
+        if j < 0:
+            j = 0
+        if j >= len(price_bins):
+            j = len(price_bins) - 1
+        Z[i, j] += vol
+        daily_volume[d] = daily_volume.get(d, 0) + vol
+        daily_close[d] = row["Close"]
+
+    date_labels = [str(d) for d in all_dates]
+    daily_vol_list = [float(daily_volume[d]) for d in all_dates]
+    daily_price_list = [float(daily_close.get(d, np.nan)) for d in all_dates]
+    for i, p in enumerate(daily_price_list):
+        if np.isnan(p) and i > 0:
+            daily_price_list[i] = daily_price_list[i - 1]
+
     return {
         "date_labels": date_labels,
-        "volume": df["Volume"].to_numpy(dtype=float),
-        "vwap": df["VWAP"].to_numpy(dtype=float),
-        "n": len(df),
+        "all_dates": date_labels,
+        "price_bins": price_bins.tolist(),
+        "Z": Z.tolist(),
+        "daily_volume": daily_vol_list,
+        "daily_price": daily_price_list,
+        "last_close": last_close,
+        "step": step,
+        "n_dates": len(all_dates),
+        "n_bins": len(price_bins),
     }
 
-
+# ---------------------------------------------------------------------------
+# 空グラフ
+# ---------------------------------------------------------------------------
 def _no_data_figure(title: str = "データがありません") -> go.Figure:
     fig = go.Figure()
     fig.add_annotation(
-        text=f"{title}<br>銘柄・時間足・期間を選び、左の「データを取得」ボタンで取得してください。",
+        text=title,
         xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False,
         font=dict(size=14), align="center",
     )
     fig.update_layout(template="plotly_dark", margin=dict(t=40, b=40, l=40, r=40))
     return fig
 
-
-def create_3d_figure(
-    data: dict[str, Any],
-    y_start: int | None = None,
-    y_end: int | None = None,
-    ticker_label: str = "",
+# ---------------------------------------------------------------------------
+# 3D サーフェス
+# ---------------------------------------------------------------------------
+def create_surface_figure(
+    data: dict[str, Any] | None,
+    ticker: str,
+    x_range: tuple[float, float] | None = None,
+    y_range: tuple[float, float] | None = None,
+    z_range: tuple[float, float] | None = None,
 ) -> go.Figure:
-    """3D: X=VWAP, Y=日付, Z=出来高。日付×VWAPのグリッドで、データがある点だけ出来高を立て、他は0にして Surface で表示。"""
-    if data is None or data["n"] == 0:
-        return _no_data_figure()
-    n = data["n"]
-    indices = np.arange(n)
-    if y_start is not None:
-        y_start = max(0, min(y_start, n - 1))
-    if y_end is not None:
-        y_end = max(0, min(y_end, n - 1))
-    if y_start is None:
-        y_start = 0
-    if y_end is None:
-        y_end = n - 1
-    if y_start > y_end:
-        y_start, y_end = y_end, y_start
-    idx_slice = slice(y_start, y_end + 1)
-    vwap_vals = data["vwap"][idx_slice]
-    date_indices = indices[idx_slice].astype(float)
-    volume_vals = data["volume"][idx_slice]
-    labels = data["date_labels"]
-
-    n_dates = len(date_indices)
-    n_vwap_bins = min(50, max(20, n_dates))
-    vwap_min = float(np.min(vwap_vals))
-    vwap_max = float(np.max(vwap_vals))
-    if vwap_max <= vwap_min:
-        vwap_max = vwap_min + 1.0
-    vwap_edges = np.linspace(vwap_min, vwap_max, n_vwap_bins + 1)
-    vwap_centers = (vwap_edges[:-1] + vwap_edges[1:]) / 2.0
-    vwap_range = vwap_max - vwap_min
-
-    # 各日付の出来高をVWAP方向にガウスで広げ、滑らかな山脈状にする
-    sigma_vwap = max(vwap_range * 0.08, (vwap_edges[1] - vwap_edges[0]) * 2.0)
-    z_grid = np.zeros((len(vwap_centers), n_dates), dtype=float)
-    for i in range(n_dates):
-        w = np.exp(-0.5 * ((vwap_centers - vwap_vals[i]) / sigma_vwap) ** 2)
-        w_sum = w.sum()
-        if w_sum > 1e-12:
-            z_grid[:, i] = volume_vals[i] * (w / w_sum)
-        else:
-            j = int(np.digitize(vwap_vals[i], vwap_edges)) - 1
-            j = max(0, min(j, len(vwap_centers) - 1))
-            z_grid[j, i] = volume_vals[i]
-
-    # 日付軸方向にも軽く平滑化して山脈が滑らかに繋がるようにする
-    kernel_size = min(5, max(3, n_dates // 20))
-    if kernel_size >= 3:
-        k = np.arange(kernel_size) - (kernel_size - 1) / 2.0
-        kernel = np.exp(-0.5 * (k / (kernel_size * 0.3)) ** 2)
-        kernel /= kernel.sum()
-        z_grid = np.apply_along_axis(lambda row: np.convolve(row, kernel, mode="same"), 1, z_grid)
+    if data is None or data["n_dates"] == 0 or data["n_bins"] == 0:
+        return _no_data_figure("データがありません")
+    date_labels = data["date_labels"]
+    price_bins = np.array(data["price_bins"])
+    Z = np.array(data["Z"])
+    y_indices = np.arange(len(date_labels))
 
     surface = go.Surface(
-        x=date_indices,
-        y=vwap_centers,
-        z=z_grid,
+        x=price_bins,
+        y=y_indices,
+        z=Z,
         colorscale="Viridis",
         colorbar=dict(title="出来高"),
         showscale=True,
+        hovertemplate="株価: %{x:.2f}<br>日付: %{y}<br>出来高: %{z:.0f}<extra></extra>",
     )
     fig = go.Figure(data=[surface])
-    step = max(1, (y_end - y_start + 1) // 10)
-    tick_indices = list(range(y_start, y_end + 1, step))
-    if tick_indices and tick_indices[-1] != y_end:
-        tick_indices.append(y_end)
+
+    # 日付軸: 表示範囲（y_range）に合わせて tickvals / ticktext を設定
+    y_min = int(y_range[0]) if y_range is not None else 0
+    y_max = int(y_range[1]) if y_range is not None else max(0, len(date_labels) - 1)
+    y_min = max(0, min(y_min, len(date_labels) - 1))
+    y_max = max(0, min(y_max, len(date_labels) - 1))
+    if y_min > y_max:
+        y_min, y_max = y_max, y_min
+    visible_len = y_max - y_min + 1
+    y_step = max(1, visible_len // 10)
+    y_tick_indices = list(range(y_min, y_max + 1, y_step))
+    if y_tick_indices and y_tick_indices[-1] != y_max:
+        y_tick_indices.append(y_max)
+    y_tickvals = [i for i in y_tick_indices if i < len(date_labels)]
+    y_ticktext = [date_labels[i] for i in y_tickvals]
+
+    layout_scene = dict(
+        xaxis_title="X: 株価",
+        yaxis_title="Y: 日付",
+        zaxis_title="Z: 出来高",
+        yaxis=dict(
+            tickmode="array",
+            tickvals=y_tickvals,
+            ticktext=y_ticktext,
+            range=[y_min, y_max],
+        ),
+    )
+    if x_range is not None:
+        layout_scene["xaxis"] = layout_scene.get("xaxis", {}) or {}
+        layout_scene["xaxis"]["range"] = list(x_range)
+    if y_range is not None:
+        layout_scene["yaxis"] = layout_scene.get("yaxis", {}) or {}
+        layout_scene["yaxis"]["range"] = list(y_range)
+    if z_range is not None:
+        layout_scene["zaxis"] = dict(layout_scene.get("zaxis", {}), range=list(z_range), title="Z: 出来高")
+
     fig.update_layout(
         margin=dict(l=0, r=0, t=30, b=0),
-        scene=dict(
-            xaxis_title="日付（インデックス） (X)",
-            yaxis_title="VWAP (Y)",
-            zaxis_title="出来高 (Z)",
-            xaxis=dict(tickmode="array", tickvals=tick_indices, ticktext=[labels[i] for i in tick_indices]),
-        ),
+        scene=layout_scene,
         template="plotly_dark",
-        title=f"{ticker_label} VWAP × 日付 × 出来高（3D面）",
+        title=f"{ticker} 日付×株価×出来高",
     )
     return fig
 
-
-def create_price_figure(data: dict[str, Any] | None, point_index: int, ticker_label: str = "") -> go.Figure:
-    """2D: 日付 × VWAP。point_index に縦線とマーカー。"""
-    if data is None or data["n"] == 0:
+# ---------------------------------------------------------------------------
+# 2D グラフ（日付-出来高、日付-株価、出来高-株価）
+# ---------------------------------------------------------------------------
+def create_date_volume_figure(
+    data: dict[str, Any] | None,
+    hover_date_idx: int | None,
+) -> go.Figure:
+    if data is None or not data["date_labels"]:
         return _no_data_figure()
-    n = data["n"]
-    idx = max(0, min(point_index, n - 1))
-    dates = data["date_labels"]
-    vwap = data["vwap"]
-
+    x = list(range(len(data["date_labels"])))
+    y = data["daily_volume"]
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
-            x=list(range(n)),
-            y=vwap,
-            mode="lines",
-            hovertext=dates,
-            hovertemplate="%{hovertext}<br>VWAP: %{y:.2f}<extra></extra>",
+            x=x, y=y, mode="lines",
+            hovertemplate="日付: %{text}<br>出来高: %{y:,.0f}<extra></extra>",
+            text=data["date_labels"],
             showlegend=False,
         )
     )
-    fig.add_vline(x=idx, line=dict(color="red", width=1, dash="dash"))
-    fig.add_trace(
-        go.Scatter(
-            x=[idx],
-            y=[vwap[idx]],
-            mode="markers",
-            marker=dict(color="red", size=10),
-            showlegend=False,
-            hovertext=[dates[idx]],
-            hovertemplate="%{hovertext}<br>VWAP: %{y:.2f}<extra></extra>",
+    if hover_date_idx is not None and 0 <= hover_date_idx < len(x):
+        fig.add_vline(x=hover_date_idx, line=dict(color="red", width=1, dash="dash"))
+        fig.add_trace(
+            go.Scatter(
+                x=[hover_date_idx], y=[y[hover_date_idx]],
+                mode="markers", marker=dict(color="red", size=10),
+                hovertemplate="日付: %{text}<br>出来高: %{y:,.0f}<extra></extra>",
+                text=[data["date_labels"][hover_date_idx]],
+                showlegend=False,
+            )
         )
-    )
     fig.update_layout(
         margin=dict(l=40, r=10, t=30, b=40),
-        xaxis=dict(
-            title="時間",
-            tickmode="array",
-            tickvals=list(range(0, n, max(1, n // 10))),
-            ticktext=[dates[i] for i in range(0, n, max(1, n // 10))],
-        ),
-        yaxis_title="VWAP",
-        template="plotly_dark",
-        showlegend=False,
-        title=f"{ticker_label} VWAP 時系列（{dates[idx]} を強調）",
+        xaxis_title="日付", yaxis_title="出来高",
+        template="plotly_dark", title="日付-出来高",
+        xaxis=dict(tickmode="array", tickvals=x[:: max(1, len(x) // 8)], ticktext=[data["date_labels"][i] for i in range(0, len(x), max(1, len(x) // 8))]),
     )
     return fig
 
-
-def create_volume_figure(data: dict[str, Any] | None, point_index: int, ticker_label: str = "") -> go.Figure:
-    """2D: 日付 × 出来高。point_index に縦線とマーカー。"""
-    if data is None or data["n"] == 0:
+def create_date_price_figure(
+    data: dict[str, Any] | None,
+    hover_date_idx: int | None,
+) -> go.Figure:
+    if data is None or not data["date_labels"]:
         return _no_data_figure()
-    n = data["n"]
-    idx = max(0, min(point_index, n - 1))
-    dates = data["date_labels"]
-    vol = data["volume"]
-
+    x = list(range(len(data["date_labels"])))
+    y = data["daily_price"]
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
-            x=list(range(n)),
-            y=vol,
-            mode="lines",
-            hovertext=dates,
-            hovertemplate="%{hovertext}<br>出来高: %{y:,.0f}<extra></extra>",
+            x=x, y=y, mode="lines",
+            hovertemplate="日付: %{text}<br>株価: %{y:.2f}<extra></extra>",
+            text=data["date_labels"],
             showlegend=False,
         )
     )
-    fig.add_vline(x=idx, line=dict(color="red", width=1, dash="dash"))
-    fig.add_trace(
-        go.Scatter(
-            x=[idx],
-            y=[vol[idx]],
-            mode="markers",
-            marker=dict(color="red", size=10),
-            showlegend=False,
-            hovertext=[dates[idx]],
-            hovertemplate="%{hovertext}<br>出来高: %{y:,.0f}<extra></extra>",
+    # 最新株価の緑点線
+    if data.get("last_close") is not None:
+        fig.add_hline(
+            y=data["last_close"],
+            line=dict(color="green", width=1, dash="dot"),
+            annotation_text="最新株価",
         )
-    )
+    if hover_date_idx is not None and 0 <= hover_date_idx < len(x):
+        fig.add_vline(x=hover_date_idx, line=dict(color="red", width=1, dash="dash"))
+        fig.add_trace(
+            go.Scatter(
+                x=[hover_date_idx], y=[y[hover_date_idx]],
+                mode="markers", marker=dict(color="red", size=10),
+                hovertemplate="日付: %{text}<br>株価: %{y:.2f}<extra></extra>",
+                text=[data["date_labels"][hover_date_idx]],
+                showlegend=False,
+            )
+        )
     fig.update_layout(
         margin=dict(l=40, r=10, t=30, b=40),
-        xaxis=dict(
-            title="時間",
-            tickmode="array",
-            tickvals=list(range(0, n, max(1, n // 10))),
-            ticktext=[dates[i] for i in range(0, n, max(1, n // 10))],
-        ),
-        yaxis_title="出来高",
-        template="plotly_dark",
-        showlegend=False,
-        title=f"{ticker_label} 出来高時系列（{dates[idx]} を強調）",
+        xaxis_title="日付", yaxis_title="株価",
+        template="plotly_dark", title="日付-株価",
+        xaxis=dict(tickmode="array", tickvals=x[:: max(1, len(x) // 8)], ticktext=[data["date_labels"][i] for i in range(0, len(x), max(1, len(x) // 8))]),
     )
     return fig
 
+def create_volume_price_figure(
+    data: dict[str, Any] | None,
+    df_day: pd.DataFrame | None,
+    hover_date_idx: int | None,
+) -> go.Figure:
+    if data is None:
+        return _no_data_figure()
+    if df_day is None or df_day.empty:
+        fig = go.Figure()
+        fig.add_annotation(text="ホバーした日のデータなし", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+        fig.update_layout(template="plotly_dark", title="出来高-株価")
+        return fig
+    typical = (df_day["Open"] + df_day["High"] + df_day["Low"] + df_day["Close"]) / 4.0
+    vol = df_day["Volume"].fillna(0)
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=vol, y=typical, mode="markers",
+            hovertemplate="出来高: %{x:,.0f}<br>株価: %{y:.2f}<extra></extra>",
+            showlegend=False,
+        )
+    )
+    if data.get("last_close") is not None:
+        fig.add_hline(
+            y=data["last_close"],
+            line=dict(color="green", width=1, dash="dot"),
+            annotation_text="最新株価",
+        )
+    fig.update_layout(
+        margin=dict(l=40, r=10, t=30, b=40),
+        xaxis_title="出来高", yaxis_title="株価",
+        template="plotly_dark", title="出来高-株価（ホバーした日）",
+    )
+    return fig
 
+# ホバーした日付インデックスから、その日の 5分足 DataFrame を返す（CSV 由来の df と all_dates から）
+def get_day_df(df: pd.DataFrame | None, date_labels: list, date_idx: int) -> pd.DataFrame | None:
+    if df is None or not date_labels or date_idx < 0 or date_idx >= len(date_labels):
+        return None
+    d_str = date_labels[date_idx]
+    idx = pd.to_datetime(df.index)
+    mask = idx.strftime("%Y-%m-%d") == d_str
+    return df.loc[mask] if mask.any() else None
+
+# ---------------------------------------------------------------------------
+# App
+# ---------------------------------------------------------------------------
 _NO_SELECT = {
     "userSelect": "none",
     "WebkitUserSelect": "none",
@@ -277,233 +404,279 @@ _NO_SELECT = {
 app = Dash(__name__)
 
 app.layout = html.Div(
-    style={
-        "display": "flex",
-        "height": "100vh",
-        "backgroundColor": "#111",
-        **_NO_SELECT,
-    },
+    style={"display": "flex", "height": "100vh", "backgroundColor": "#111", **_NO_SELECT},
     children=[
         html.Div(
+            id="updating-indicator",
             style={
-                "flex": "0 0 40%",
-                "display": "flex",
-                "flexDirection": "column",
-                "padding": "10px",
-                "backgroundColor": "#111",
-                **_NO_SELECT,
+                "position": "fixed", "bottom": "10px", "right": "10px",
+                "backgroundColor": "rgba(0,0,0,0.8)", "color": "#fff", "padding": "6px 12px",
+                "borderRadius": "4px", "fontSize": "12px", "zIndex": 9999,
+                "display": "none",
             },
+            children="更新中…",
+        ),
+        html.Div(
+            style={"flex": "0 0 40%", "display": "flex", "flexDirection": "column", "padding": "10px", "backgroundColor": "#111", **_NO_SELECT},
             children=[
                 html.Div(
-                    style={"marginBottom": "10px", **_NO_SELECT},
+                    style={"marginBottom": "8px", **_NO_SELECT},
                     children=[
-                        html.Label("銘柄"),
-                        dcc.Dropdown(
-                            id="ticker-dropdown",
-                            options=TICKER_OPTIONS,
-                            value="AAPL",
-                            clearable=False,
-                            style={"minWidth": "160px", "color": "#111", "backgroundColor": "#fff"},
-                            className="ticker-dropdown-dark-text",
-                        ),
-                        html.Label("時間足", style={"marginTop": "10px"}),
-                        dcc.Dropdown(
-                            id="interval-dropdown",
-                            options=INTERVAL_OPTIONS,
-                            value="1d",
-                            clearable=False,
-                            style={"minWidth": "160px", "color": "#111", "backgroundColor": "#fff"},
-                            className="ticker-dropdown-dark-text",
-                        ),
-                        html.Label("期間", style={"marginTop": "10px"}),
-                        dcc.Dropdown(
-                            id="period-dropdown",
-                            options=PERIOD_OPTIONS,
-                            value="1y",
-                            clearable=False,
-                            style={"minWidth": "120px", "color": "#111", "backgroundColor": "#fff"},
-                            className="ticker-dropdown-dark-text",
-                        ),
+                        html.Label("銘柄コード"),
                         html.Div(
-                            style={"marginTop": "12px"},
+                            style={"display": "flex", "gap": "8px", "alignItems": "center", "flexWrap": "wrap"},
                             children=[
-                                html.Button(
-                                    id="fetch-button",
-                                    children="データを取得",
-                                    style={
-                                        "padding": "8px 16px",
-                                        "backgroundColor": "#2196F3",
-                                        "color": "#fff",
-                                        "border": "none",
-                                        "borderRadius": "4px",
-                                        "cursor": "pointer",
-                                        "fontSize": "14px",
-                                    },
-                                ),
-                                html.Span(
-                                    id="fetch-status",
-                                    style={"marginLeft": "10px", "fontSize": "12px", "color": "#aaa"},
-                                ),
+                                dcc.Input(id="ticker-input", type="text", placeholder="例: 7203.T", value="7203.T", style={"width": "100px", "color": "#111"}),
+                                html.Button("取得", id="btn-fetch", n_clicks=0),
+                                html.Button("更新", id="btn-update", n_clicks=0),
+                            ],
+                        ),
+                        html.Div(style={"marginTop": "6px"}, children=[
+                            html.Label("お気に入り"),
+                            dcc.Dropdown(
+                                id="favorites-dropdown",
+                                options=[{"label": t, "value": t} for t in load_favorites()],
+                                value=None,
+                                clearable=True,
+                                style={"minWidth": "140px", "color": "#111", "backgroundColor": "#fff"},
+                                className="ticker-dropdown-dark-text",
+                            ),
+                        ]),
+                        html.Button("お気に入りに追加", id="btn-add-favorite", n_clicks=0, style={"marginTop": "6px"}),
+                        html.Div(id="step-display", style={"marginTop": "6px", "fontSize": "12px", "color": "#ccc"}),
+                        html.Div(
+                            style={"marginTop": "8px"},
+                            children=[
+                                html.Label("X軸(日付)範囲"),
+                                dcc.RangeSlider(id="range-x", min=0, max=1, value=[0, 1], allowCross=False, tooltip={"placement": "bottom"}),
                             ],
                         ),
                         html.Div(
-                            style={"marginTop": "10px"},
+                            style={"marginTop": "4px"},
                             children=[
-                                html.Label("日付範囲（インデックス）"),
-                                dcc.RangeSlider(
-                                    id="date-range-slider",
-                                    min=0,
-                                    max=0,
-                                    value=[0, 0],
-                                    allowCross=False,
-                                    tooltip={"placement": "bottom", "always_visible": False},
-                                ),
+                                html.Label("Y軸(株価)範囲"),
+                                dcc.RangeSlider(id="range-y", min=0, max=1, value=[0, 1], allowCross=False, tooltip={"placement": "bottom"}),
                             ],
                         ),
+                        html.Div(
+                            style={"marginTop": "4px"},
+                            children=[
+                                html.Label("Z軸(出来高)範囲"),
+                                dcc.RangeSlider(id="range-z", min=0, max=1, value=[0, 1], allowCross=False, tooltip={"placement": "bottom"}),
+                            ],
+                        ),
+                        html.Button("全体表示に戻す", id="btn-reset-range", n_clicks=0, style={"marginTop": "4px"}),
                     ],
                 ),
-                dcc.Graph(id="price-graph", style={"flex": "1 1 50%", "marginTop": "16px", **_NO_SELECT}),
-                dcc.Graph(id="volume-graph", style={"flex": "1 1 50%", "marginTop": "20px", **_NO_SELECT}),
+                dcc.Graph(id="graph-date-volume", style={"flex": "1 1 33%", "minHeight": "120px", **_NO_SELECT}),
+                dcc.Graph(id="graph-date-price", style={"flex": "1 1 33%", "minHeight": "120px", **_NO_SELECT}),
+                dcc.Graph(id="graph-volume-price", style={"flex": "1 1 33%", "minHeight": "120px", **_NO_SELECT}),
             ],
         ),
         html.Div(
             style={"flex": "1 1 60%", "padding": "10px", **_NO_SELECT},
-            children=[
-                dcc.Graph(id="surface-graph", style={"height": "100%", **_NO_SELECT}),
-            ],
+            children=[dcc.Graph(id="surface-graph", style={"height": "100%", **_NO_SELECT})],
         ),
-        dcc.Store(id="fetch-done-store", data=0),
+        dcc.Store(id="store-ticker", data=None),
+        dcc.Store(id="store-display-data", data=None),
     ],
 )
 
+@app.callback(
+    Output("store-ticker", "data"),
+    Output("store-display-data", "data"),
+    Output("step-display", "children"),
+    Output("favorites-dropdown", "options"),
+    Input("btn-fetch", "n_clicks"),
+    Input("favorites-dropdown", "value"),
+    State("ticker-input", "value"),
+    State("store-ticker", "data"),
+    prevent_initial_call=False,
+)
+def on_fetch_or_select(n_fetch, fav_value, input_ticker, current_ticker):
+    from dash import ctx
+    ticker = None
+    if ctx.triggered_id == "btn-fetch" and input_ticker:
+        ticker = (input_ticker or "").strip().upper()
+    elif ctx.triggered_id == "favorites-dropdown" and fav_value:
+        ticker = fav_value
+    elif ctx.triggered_id is None and not current_ticker:
+        # 起動時: 7203.T のCSVがあれば読んで表示
+        ticker = "7203.T"
 
-def _period_for_fetch(interval: str, period: str) -> str:
-    """1h の場合は最大約60日でトリム。"""
-    if interval != "1h":
-        return period or "1y"
-    if period in ("60d", "1mo"):
-        return period
-    try:
-        if "y" in (period or ""):
-            days = int((period or "1").replace("y", "")) * 365
-        else:
-            days = int((period or "60").replace("d", "") or "60")
-        if days > 60:
-            return "60d"
-    except ValueError:
-        pass
-    return period or "60d"
+    if not ticker:
+        if current_ticker:
+            return current_ticker, None, "", [{"label": t, "value": t} for t in load_favorites()]
+        return None, None, "", [{"label": t, "value": t} for t in load_favorites()]
+
+    # 取得ボタン: CSV が無ければ全量取得
+    if ctx.triggered_id == "btn-fetch":
+        existing = load_csv(ticker)
+        if existing is None or existing.empty:
+            df = fetch_5m_full(ticker)
+            if df is None or df.empty:
+                return current_ticker, None, "取得できませんでした", [{"label": t, "value": t} for t in load_favorites()]
+            save_csv(ticker, df)
+            existing = load_csv(ticker)
+        data = compute_display_data(existing)
+        if data is None:
+            return ticker, None, "データなし", [{"label": t, "value": t} for t in load_favorites()]
+        _DISPLAY_CACHE[ticker] = data
+        return ticker, {"ticker": ticker}, f"価格刻み: {data['step']:.2f}（直近終値 {data['last_close']:.2f} の5%）", [{"label": t, "value": t} for t in load_favorites()]
+
+    # お気に入り選択 or 起動時: 既存CSVのみ読む
+    df = load_csv(ticker)
+    if df is None or df.empty:
+        return ticker, None, "データがありません。取得または更新してください。", [{"label": t, "value": t} for t in load_favorites()]
+    data = compute_display_data(df)
+    if data is None:
+        return ticker, None, "", [{"label": t, "value": t} for t in load_favorites()]
+    _DISPLAY_CACHE[ticker] = data
+    return ticker, {"ticker": ticker}, f"価格刻み: {data['step']:.2f}（直近終値 {data['last_close']:.2f} の5%）", [{"label": t, "value": t} for t in load_favorites()]
+
+
+def _get_cached_data(ticker: str | None) -> dict[str, Any] | None:
+    if not ticker:
+        return None
+    return _DISPLAY_CACHE.get(ticker)
 
 
 @app.callback(
-    Output("fetch-done-store", "data"),
-    Output("fetch-status", "children"),
-    Input("fetch-button", "n_clicks"),
-    State("ticker-dropdown", "value"),
-    State("interval-dropdown", "value"),
-    State("period-dropdown", "value"),
-    State("fetch-done-store", "data"),
+    Output("store-ticker", "data", allow_duplicate=True),
+    Output("store-display-data", "data", allow_duplicate=True),
+    Output("step-display", "children", allow_duplicate=True),
+    Input("btn-update", "n_clicks"),
+    State("store-ticker", "data"),
     prevent_initial_call=True,
 )
-def on_fetch_click(n_clicks: int | None, ticker: str, interval: str, period: str, store: int | None):
-    if not n_clicks:
-        return (store or 0), ""
-    ticker = ticker or "AAPL"
-    interval = interval or "1d"
-    period = period or "1y"
-    period_use = _period_for_fetch(interval, period)
-    try:
-        fetch_and_save(ticker=ticker, interval=interval, period=period_use)
-        return (store or 0) + 1, "取得しました"
-    except Exception as e:
-        return store or 0, f"取得失敗: {e!s}"
-
-
-@app.callback(
-    Output("date-range-slider", "min"),
-    Output("date-range-slider", "max"),
-    Output("date-range-slider", "value"),
-    Output("date-range-slider", "marks"),
-    Input("ticker-dropdown", "value"),
-    Input("interval-dropdown", "value"),
-    Input("period-dropdown", "value"),
-    Input("fetch-done-store", "data"),
-)
-def init_date_slider(ticker: str, interval: str, period: str, _fetch_done: int | None):
-    data = load_from_csv(ticker or "AAPL", interval or "1d")
-    if data is None or data["n"] == 0:
-        return 0, 0, [0, 0], {}
-    n = data["n"]
-    min_idx, max_idx = 0, n - 1
-    step = max(1, n // 10)
-    def _mark_style():
-        return {
-            "transform": "translateX(-100%) rotate(-45deg)",
-            "transformOrigin": "100% 50%",
-            "textAlign": "right",
-            "whiteSpace": "nowrap",
-            "fontSize": "10px",
-            "display": "inline-block",
-        }
-    marks = {i: {"label": data["date_labels"][i], "style": _mark_style()} for i in range(0, n, step)}
-    marks[max_idx] = {"label": data["date_labels"][max_idx], "style": _mark_style()}
-    return min_idx, max_idx, [min_idx, max_idx], marks
-
-
-@app.callback(
-    Output("surface-graph", "figure"),
-    Input("ticker-dropdown", "value"),
-    Input("interval-dropdown", "value"),
-    Input("period-dropdown", "value"),
-    Input("date-range-slider", "value"),
-    Input("fetch-done-store", "data"),
-)
-def update_3d(ticker: str, interval: str, period: str, slider_value: list | None, _fetch_done: int | None):
-    data = load_from_csv(ticker or "AAPL", interval or "1d")
-    ticker_label = ticker or "AAPL"
+def on_update(n, current_ticker):
+    if not current_ticker:
+        return current_ticker, None, ""
+    existing = load_csv(current_ticker)
+    if existing is None or existing.empty:
+        df = fetch_5m_full(current_ticker)
+        if df is None or df.empty:
+            return current_ticker, None, "更新できませんでした"
+        save_csv(current_ticker, df)
+    else:
+        last_ts = existing.index[-1]
+        new_df = fetch_5m_incremental(current_ticker, last_ts)
+        if new_df is not None and not new_df.empty:
+            combined = pd.concat([existing, new_df])
+            combined = combined[~combined.index.duplicated(keep="last")]
+            combined = combined.sort_index()
+            save_csv(current_ticker, combined)
+            existing = combined
+        df = existing
+    data = compute_display_data(df)
     if data is None:
-        return _no_data_figure()
-    y_start, y_end = None, None
-    if slider_value and len(slider_value) >= 2:
-        y_start, y_end = int(slider_value[0]), int(slider_value[1])
-    return create_3d_figure(data, y_start, y_end, ticker_label=ticker_label)
-
+        return current_ticker, None, ""
+    _DISPLAY_CACHE[current_ticker] = data
+    return current_ticker, {"ticker": current_ticker}, f"価格刻み: {data['step']:.2f}（直近終値 {data['last_close']:.2f} の5%）"
 
 @app.callback(
-    Output("price-graph", "figure"),
-    Output("volume-graph", "figure"),
-    Input("ticker-dropdown", "value"),
-    Input("interval-dropdown", "value"),
-    Input("period-dropdown", "value"),
-    Input("surface-graph", "hoverData"),
-    Input("date-range-slider", "value"),
-    Input("fetch-done-store", "data"),
+    Output("favorites-dropdown", "options", allow_duplicate=True),
+    Input("btn-add-favorite", "n_clicks"),
+    State("store-ticker", "data"),
+    prevent_initial_call=True,
 )
-def update_2d(ticker: str, interval: str, period: str, hover_data: dict | None, slider_value: list | None, _fetch_done: int | None):
-    data = load_from_csv(ticker or "AAPL", interval or "1d")
-    ticker_label = ticker or "AAPL"
-    if data is None:
-        return _no_data_figure(), _no_data_figure()
-    n = data["n"]
-    y_start = 0
-    y_end = n - 1
-    if slider_value and len(slider_value) >= 2:
-        y_start = max(0, min(int(slider_value[0]), n - 1))
-        y_end = max(y_start, min(int(slider_value[1]), n - 1))
-    point_index = y_end
-    if hover_data and hover_data.get("points"):
-        pt = hover_data["points"][0]
-        # 3D はスライス表示のため pointNumber はスライス内インデックス → グローバルは y_start + pointNumber
-        if "pointNumber" in pt:
-            point_index = y_start + int(pt["pointNumber"])
-        elif "x" in pt and isinstance(pt["x"], (int, float)):
-            point_index = int(round(pt["x"]))
-    point_index = max(y_start, min(point_index, y_end))
+def on_add_favorite(n, ticker):
+    if ticker:
+        add_favorite(ticker)
+    return [{"label": t, "value": t} for t in load_favorites()]
+
+# 軸範囲スライダー初期化（データ変更時）
+@app.callback(
+    Output("range-x", "min"), Output("range-x", "max"), Output("range-x", "value"),
+    Output("range-y", "min"), Output("range-y", "max"), Output("range-y", "value"),
+    Output("range-z", "min"), Output("range-z", "max"), Output("range-z", "value"),
+    Input("store-display-data", "data"),
+    State("store-ticker", "data"),
+)
+def init_axis_sliders(_display_data, ticker):
+    data = _get_cached_data(ticker)
+    if data is None or data.get("n_dates", 0) == 0:
+        return 0, 1, [0, 1], 0, 1, [0, 1], 0, 1, [0, 1]
+    n_d = data["n_dates"]
+    pb = data["price_bins"]
+    z_arr = np.array(data["Z"])
+    z_min = float(np.nanmin(z_arr)) if z_arr.size else 0.0
+    z_max = float(np.nanmax(z_arr)) if z_arr.size else 1.0
     return (
-        create_price_figure(data, point_index, ticker_label=ticker_label),
-        create_volume_figure(data, point_index, ticker_label=ticker_label),
+        0, max(0, n_d - 1), [0, max(0, n_d - 1)],
+        0, max(0, len(pb) - 1), [0, max(0, len(pb) - 1)],
+        0, 1, [0, 1],
     )
 
+# 全体表示に戻す
+@app.callback(
+    Output("range-x", "value", allow_duplicate=True),
+    Output("range-y", "value", allow_duplicate=True),
+    Output("range-z", "value", allow_duplicate=True),
+    Input("btn-reset-range", "n_clicks"),
+    State("range-x", "max"), State("range-y", "max"), State("range-z", "max"),
+    prevent_initial_call=True,
+)
+def on_reset_range(n, x_max, y_max, z_max):
+    return [0, max(0, x_max)], [0, max(0, y_max)], [0, 1]
+
+# 3D サーフェス更新（store + 軸範囲）
+@app.callback(
+    Output("surface-graph", "figure"),
+    Input("store-display-data", "data"),
+    Input("store-ticker", "data"),
+    Input("range-x", "value"),
+    Input("range-y", "value"),
+    Input("range-z", "value"),
+)
+def update_surface(_display_data, ticker, rx, ry, rz):
+    data = _get_cached_data(ticker)
+    if data is None or not ticker:
+        return _no_data_figure()
+    pb = data["price_bins"]
+    nb = len(pb)
+    j0 = max(0, min(int(ry[0]), nb - 1)) if ry else 0
+    j1 = max(0, min(int(ry[1]), nb - 1)) if ry else max(0, nb - 1)
+    x_range = (float(pb[j0]), float(pb[j1])) if nb else None
+    y_range = (int(rx[0]), int(rx[1])) if rx else None
+    Z_arr = np.array(data["Z"])
+    z_max = float(np.nanmax(Z_arr)) if Z_arr.size else 1.0
+    z_min = float(np.nanmin(Z_arr)) if Z_arr.size else 0.0
+    if rz and len(rz) == 2:
+        z_range = (z_min + (z_max - z_min) * rz[0], z_min + (z_max - z_min) * rz[1])
+    else:
+        z_range = (z_min, z_max)
+    return create_surface_figure(data, ticker, x_range=x_range, y_range=y_range, z_range=z_range)
+
+# 2D グラフ更新（store + 3D hoverData）
+@app.callback(
+    Output("graph-date-volume", "figure"),
+    Output("graph-date-price", "figure"),
+    Output("graph-volume-price", "figure"),
+    Input("store-display-data", "data"),
+    Input("store-ticker", "data"),
+    Input("surface-graph", "hoverData"),
+)
+def update_2d_graphs(_display_data, ticker, hover_data):
+    data = _get_cached_data(ticker)
+    hover_idx = None
+    if data and hover_data and hover_data.get("points"):
+        pt = hover_data["points"][0]
+        y_val = pt.get("y")
+        if isinstance(y_val, (int, float)):
+            hover_idx = int(round(y_val))
+        pi = pt.get("pointIndex")
+        if isinstance(pi, (list, tuple)) and len(pi) >= 1:
+            hover_idx = int(pi[0])
+        if hover_idx is not None and data.get("n_dates"):
+            hover_idx = max(0, min(hover_idx, data["n_dates"] - 1))
+
+    df = load_csv(ticker) if ticker else None
+    day_df = get_day_df(df, data["date_labels"] if data else [], hover_idx) if data and hover_idx is not None else None
+    f1 = create_date_volume_figure(data, hover_idx)
+    f2 = create_date_price_figure(data, hover_idx)
+    f3 = create_volume_price_figure(data, day_df, hover_idx)
+    return f1, f2, f3
 
 if __name__ == "__main__":
     app.run(debug=True)

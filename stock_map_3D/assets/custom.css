@@ -11,7 +11,7 @@
   -ms-user-select: none !important;
 }
 
-/* 銘柄・時間足選択ドロップダウン: 白地に黒文字で見やすくする */
+/* 銘柄選択ドロップダウン: 白地に黒文字で見やすくする */
 .ticker-dropdown-dark-text .Select-control,
 .ticker-dropdown-dark-text .Select-value-label,
 .ticker-dropdown-dark-text .Select-input {
