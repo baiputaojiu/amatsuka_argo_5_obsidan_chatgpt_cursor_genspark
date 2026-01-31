@@ -133,6 +133,7 @@ def compute_display_data(df: pd.DataFrame) -> dict[str, Any] | None:
 
     # 各行の日付（タイムゾーンはそのまま、日付のみ取得）
     dates_in_data = [pd.Timestamp(ts).date() for ts in df.index]
+    days_with_data = {str(d) for d in set(dates_in_data)}  # 5分足が1本以上ある日（ローソク描画用）
     min_date = min(dates_in_data)
     max_date = max(dates_in_data)
     all_dates = pd.date_range(min_date, max_date, freq="D").date.tolist()
@@ -140,7 +141,10 @@ def compute_display_data(df: pd.DataFrame) -> dict[str, Any] | None:
 
     Z = np.zeros((len(all_dates), len(price_bins)))
     daily_volume = {d: 0.0 for d in all_dates}
-    daily_close = {}  # その日の最後の Close
+    daily_close = {}
+    daily_open = {}   # その日の最初の Open
+    daily_high = {}   # その日の最大 High
+    daily_low = {}    # その日の最小 Low
 
     for ts, row in df.iterrows():
         d = pd.Timestamp(ts).date()
@@ -161,13 +165,27 @@ def compute_display_data(df: pd.DataFrame) -> dict[str, Any] | None:
         Z[i, j] += vol
         daily_volume[d] = daily_volume.get(d, 0) + vol
         daily_close[d] = row["Close"]
+        if d not in daily_open:
+            daily_open[d] = row["Open"]
+        daily_high[d] = max(daily_high.get(d, row["High"]), row["High"])
+        daily_low[d] = min(daily_low.get(d, row["Low"]), row["Low"])
 
     date_labels = [str(d) for d in all_dates]
     daily_vol_list = [float(daily_volume[d]) for d in all_dates]
     daily_price_list = [float(daily_close.get(d, np.nan)) for d in all_dates]
+    daily_open_list = [float(daily_open.get(d, np.nan)) for d in all_dates]
+    daily_high_list = [float(daily_high.get(d, np.nan)) for d in all_dates]
+    daily_low_list = [float(daily_low.get(d, np.nan)) for d in all_dates]
     for i, p in enumerate(daily_price_list):
         if np.isnan(p) and i > 0:
             daily_price_list[i] = daily_price_list[i - 1]
+    for i in range(len(all_dates)):
+        if np.isnan(daily_open_list[i]) and i > 0:
+            daily_open_list[i] = daily_open_list[i - 1]
+        if np.isnan(daily_high_list[i]) and i > 0:
+            daily_high_list[i] = daily_high_list[i - 1]
+        if np.isnan(daily_low_list[i]) and i > 0:
+            daily_low_list[i] = daily_low_list[i - 1]
 
     return {
         "date_labels": date_labels,
@@ -176,6 +194,10 @@ def compute_display_data(df: pd.DataFrame) -> dict[str, Any] | None:
         "Z": Z.tolist(),
         "daily_volume": daily_vol_list,
         "daily_price": daily_price_list,
+        "daily_open": daily_open_list,
+        "daily_high": daily_high_list,
+        "daily_low": daily_low_list,
+        "days_with_data": days_with_data,
         "last_close": last_close,
         "step": step,
         "n_dates": len(all_dates),
@@ -205,6 +227,7 @@ def create_surface_figure(
     y_range: tuple[int, int] | None = None,
     z_range: tuple[float, float] | None = None,
     smoothing_mode: str = "current",
+    surface_opacity: float = 0.5,
 ) -> go.Figure:
     if data is None or data["n_dates"] == 0 or data["n_bins"] == 0:
         return _no_data_figure("データがありません")
@@ -272,6 +295,73 @@ def create_surface_figure(
 
     z_max_val = float(np.nanmax(Z_draw)) if Z_draw.size else 1.0
     vol_M = Z_draw / 1e6
+    opacity = max(0.05, min(1.0, float(surface_opacity)))
+
+    # XY平面（Z=0）に日足ローソク足を描く（先に描画して山脈の下で透けて見える）
+    traces: list = []
+    if data.get("daily_open") and data.get("daily_high") and data.get("daily_low"):
+        i0_slice = int(y_range[0]) if y_range is not None else 0
+        i1_slice = int(y_range[1]) if y_range is not None else len(data["date_labels"]) - 1
+        i0_slice = max(0, min(i0_slice, len(data["date_labels"]) - 1))
+        i1_slice = max(0, min(i1_slice, len(data["date_labels"]) - 1))
+        if i0_slice > i1_slice:
+            i0_slice, i1_slice = i1_slice, i0_slice
+        n_days = i1_slice - i0_slice + 1
+        open_slice = [float(data["daily_open"][i0_slice + i]) for i in range(n_days)]
+        high_slice = [float(data["daily_high"][i0_slice + i]) for i in range(n_days)]
+        low_slice = [float(data["daily_low"][i0_slice + i]) for i in range(n_days)]
+        close_slice = [float(data["daily_price"][i0_slice + i]) for i in range(n_days)]
+        x_wick, y_wick, z_wick = [], [], []
+        x_body_down, y_body_down, z_body_down = [], [], []
+        x_body_up, y_body_up, z_body_up = [], [], []
+        days_with_data = data.get("days_with_data") or set()
+        for i in range(n_days):
+            date_str = data["date_labels"][i0_slice + i]
+            if date_str not in days_with_data:
+                continue  # 5分足が1本もない日はローソクを描かない
+            lo, hi = low_slice[i], high_slice[i]
+            op, cl = open_slice[i], close_slice[i]
+            if np.isnan(lo) or np.isnan(hi):
+                continue
+            x_wick.extend([lo, hi, None])
+            y_wick.extend([i, i, None])
+            z_wick.extend([0, 0, None])
+            if np.isnan(op) or np.isnan(cl):
+                continue
+            if cl < op:
+                x_body_down.extend([op, cl, None])
+                y_body_down.extend([i, i, None])
+                z_body_down.extend([0, 0, None])
+            else:
+                x_body_up.extend([op, cl, None])
+                y_body_up.extend([i, i, None])
+                z_body_up.extend([0, 0, None])
+        if x_wick:
+            traces.append(
+                go.Scatter3d(
+                    x=x_wick, y=y_wick, z=z_wick, mode="lines",
+                    line=dict(color="rgba(200,200,200,0.9)", width=2),
+                    name="ヒゲ", showlegend=False,
+                )
+            )
+        if x_body_down:
+            traces.append(
+                go.Scatter3d(
+                    x=x_body_down, y=y_body_down, z=z_body_down, mode="lines",
+                    line=dict(color="rgba(255,80,80,0.95)", width=6),
+                    name="陰線", showlegend=False,
+                )
+            )
+        if x_body_up:
+            traces.append(
+                go.Scatter3d(
+                    x=x_body_up, y=y_body_up, z=z_body_up, mode="lines",
+                    line=dict(color="rgba(80,255,120,0.95)", width=6),
+                    name="陽線", showlegend=False,
+                )
+            )
+
+    # 山脈サーフェス（半透明でローソクが透けて見える）
     surface = go.Surface(
         x=price_slice,
         y=y_indices,
@@ -282,8 +372,9 @@ def create_surface_figure(
         colorscale="Turbo",
         colorbar=dict(title="出来高 (M)", thickness=20, len=0.7),
         showscale=True,
+        opacity=opacity,
     )
-    traces: list = [surface]
+    traces.append(surface)
 
     # 現在価格の位置に半透明の壁（表示範囲内の場合のみ）
     last_close = data.get("last_close")
@@ -612,6 +703,22 @@ app.layout = html.Div(
                             ],
                         ),
                         html.Div(
+                            style={"marginTop": "8px"},
+                            children=[
+                                html.Label("山脈の半透明度"),
+                                dcc.Slider(
+                                    id="surface-opacity-slider",
+                                    min=0.05,
+                                    max=1.0,
+                                    value=0.5,
+                                    step=0.05,
+                                    marks={0.05: "5%", 0.25: "25%", 0.5: "50%", 0.75: "75%", 1.0: "100%"},
+                                    tooltip={"placement": "bottom", "always_visible": True},
+                                    updatemode="drag",
+                                ),
+                            ],
+                        ),
+                        html.Div(
                             style={"display": "flex", "gap": "8px", "marginTop": "4px"},
                             children=[
                                 html.Button("範囲を適用", id="btn-apply-range", n_clicks=0),
@@ -830,11 +937,12 @@ def on_reset_range(n, ticker):
     Input("smoothing-dropdown", "value"),
     Input("range-y-slider", "value"),
     Input("range-z-slider", "value"),
+    Input("surface-opacity-slider", "value"),
     State("range-x-date", "start_date"),
     State("range-x-date", "end_date"),
     prevent_initial_call="initial_duplicate",
 )
-def update_surface(_apply_clicks, _display_data, ticker, smoothing_mode, y_slider_val, z_slider_val, start_date, end_date):
+def update_surface(_apply_clicks, _display_data, ticker, smoothing_mode, y_slider_val, z_slider_val, surface_opacity, start_date, end_date):
     # #region agent log
     import json
     from dash import ctx
@@ -903,7 +1011,8 @@ def update_surface(_apply_clicks, _display_data, ticker, smoothing_mode, y_slide
     except Exception:
         pass
     # #endregion
-    return create_surface_figure(data, ticker, x_range=x_range, y_range=y_range, z_range=z_range, smoothing_mode=sm), range_data
+    opacity_val = float(surface_opacity) if surface_opacity is not None else 0.5
+    return create_surface_figure(data, ticker, x_range=x_range, y_range=y_range, z_range=z_range, smoothing_mode=sm, surface_opacity=opacity_val), range_data
 
 # 2D グラフ更新（store + 3D hoverData）
 @app.callback(
