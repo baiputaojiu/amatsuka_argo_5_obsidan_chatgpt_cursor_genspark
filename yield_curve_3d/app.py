@@ -23,195 +23,6 @@ BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
 
 
-def _parse_japanese_era_date(s: str) -> pd.Timestamp:
-    """
-    "S49.9.24" や "R7.12.30" のような元号表記を西暦 Timestamp に変換する。
-    対応: S(昭和), H(平成), R(令和)
-    """
-    if not isinstance(s, str) or not s:
-        return pd.NaT
-    s = s.strip()
-    era = s[0]
-    try:
-        rest = s[1:]
-        y_str, m_str, d_str = rest.split(".")
-        era_year = int(y_str)
-        month = int(m_str)
-        day = int(d_str)
-    except Exception:
-        return pd.NaT
-
-    if era == "S":  # 昭和 (1926-01-01〜)
-        year = 1925 + era_year  # S1=1926
-    elif era == "H":  # 平成 (1989-01-08〜)
-        year = 1988 + era_year  # H1=1989
-    elif era == "R":  # 令和 (2019-05-01〜)
-        year = 2018 + era_year  # R1=2019
-    else:
-        return pd.NaT
-
-    try:
-        return pd.Timestamp(year=year, month=month, day=day)
-    except Exception:
-        return pd.NaT
-
-
-def _load_japan() -> Dict[str, Any]:
-    """
-    日本国債イールドカーブを読み込み、3D サーフェス用に整形する。
-
-    CSV の形式（japan_yield_curve.csv）:
-      1 行目: タイトル行（国債金利情報...）
-      2 行目: ヘッダー行（基準日,1年,2年,...,40年）
-      3 行目以降: データ
-    """
-    df = pd.read_csv(DATA_DIR / "japan_yield_curve.csv", header=1)
-    # 元号表記の基準日を西暦 Timestamp に変換
-    df = df.rename(columns={"基準日": "date_raw"})
-    date_values = df["date_raw"].map(_parse_japanese_era_date)
-    date_labels = date_values.dt.strftime("%Y-%m-%d").tolist()
-
-    # 残存期間カラム（"1年", "2年", ...）を抽出
-    maturity_cols = [c for c in df.columns if c != "date_raw"]
-
-    # パーセント表記を float に変換（"-" 等は NaN にしておく）
-    for c in maturity_cols:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-
-    # 横軸に使う「年数」
-    # 日本国債は「1年, 2年, ..., 40年」と想定
-    maturity_years = []
-    maturity_labels = []
-    for c in maturity_cols:
-        # "1年" → 1, "10年" → 10 という雑なパースだが十分
-        num = "".join(ch for ch in c if ch.isdigit())
-        if num == "":
-            continue
-        maturity_years.append(float(num))
-        maturity_labels.append(c)
-
-    maturity_years = np.array(maturity_years, dtype=float)
-
-    # 行: 日付, 列: 残存期間 の 2D 配列
-    z = df[maturity_cols].to_numpy(dtype=float)
-
-    # 10 年物カラム（なければ最も近い年限）
-    target_label = None
-    for label in maturity_labels:
-        if "10" in label:
-            target_label = label
-            break
-    if target_label is None and maturity_labels:
-        target_label = min(
-            maturity_labels,
-            key=lambda lbl: abs(float("".join(ch for ch in lbl if ch.isdigit())) - 10.0),
-        )
-    ts_col_index = maturity_labels.index(target_label) if target_label else 0
-
-    return {
-        "country": "japan",
-        "display_name": "日本",
-        # 画面表示用は西暦 YYYY-MM-DD
-        "dates": date_labels,
-        # 範囲指定などに使う生の Timestamp
-        "date_values": date_values,
-        "maturity_years": maturity_years,
-        "maturity_labels": maturity_labels,
-        "z": z,
-        "ts_col_index": ts_col_index,
-    }
-
-
-def _load_usa() -> Dict[str, Any]:
-    """
-    米国債イールドカーブを読み込み、3D サーフェス用に整形する。
-
-    CSV の形式（usa_yield_curve.csv）:
-      1 行目: ヘッダー行（Date,1 Mo,1.5 Month,2 Mo,...,30 Yr）
-      2 行目以降: データ
-    """
-    df = pd.read_csv(DATA_DIR / "usa_yield_curve.csv")
-    df = df.rename(columns={"Date": "date_raw"})
-
-    maturity_cols = [c for c in df.columns if c != "date_raw"]
-
-    for c in maturity_cols:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-
-    # 残存期間（年ベース）に変換
-    def _col_to_years(col: str) -> float:
-        col = col.strip()
-        if "Mo" in col or "Month" in col:
-            # "1 Mo", "1.5 Month" など
-            num = "".join(ch if (ch.isdigit() or ch == ".") else " " for ch in col)
-            try:
-                months = float(num.split()[0])
-                return months / 12.0
-            except Exception:
-                return np.nan
-        if "Yr" in col or "Year" in col or "Years" in col:
-            num = "".join(ch if (ch.isdigit() or ch == ".") else " " for ch in col)
-            try:
-                years = float(num.split()[0])
-                return years
-            except Exception:
-                return np.nan
-        return np.nan
-
-    maturity_years = np.array([_col_to_years(c) for c in maturity_cols], dtype=float)
-    maturity_labels = maturity_cols
-    z = df[maturity_cols].to_numpy(dtype=float)
-    date_values = pd.to_datetime(df["date_raw"])
-    date_labels = date_values.dt.strftime("%Y-%m-%d").tolist()
-
-    # 10 年物
-    target_label = None
-    for label in maturity_labels:
-        if "10" in label and ("Yr" in label or "Year" in label):
-            target_label = label
-            break
-    if target_label is None and maturity_labels:
-        target_label = min(
-            maturity_labels,
-            key=lambda lbl: abs(_col_to_years(lbl) - 10.0),
-        )
-    ts_col_index = maturity_labels.index(target_label) if target_label else 0
-
-    return {
-        "country": "usa",
-        "display_name": "米国",
-        "dates": date_labels,
-        "date_values": date_values,
-        "maturity_years": maturity_years,
-        "maturity_labels": maturity_labels,
-        "z": z,
-        "ts_col_index": ts_col_index,
-    }
-
-
-def _col_to_years_generic(col) -> float:
-    """残存期間列名を年数に変換（UK, Euro, China, India 用）。数値列名(0.5, 1, 10 等)も可。"""
-    if isinstance(col, (int, float)):
-        return float(col)
-    col = str(col).strip()
-    if "M" in col.upper() and "Y" not in col.upper():
-        num = "".join(ch for ch in col if ch.isdigit() or ch == ".")
-        try:
-            return float(num or 0) / 12.0
-        except ValueError:
-            return np.nan
-    if "Y" in col.upper() or "Yr" in col or "Year" in col:
-        num = "".join(ch for ch in col if ch.isdigit() or ch == ".")
-        try:
-            return float(num or 0)
-        except ValueError:
-            return np.nan
-    try:
-        return float(col)
-    except (ValueError, TypeError):
-        return np.nan
-
-
 def _empty_dataset(country_key: str, display_name: str) -> Dict[str, Any]:
     """CSV が無い場合の空データセット。"""
     return {
@@ -226,36 +37,42 @@ def _empty_dataset(country_key: str, display_name: str) -> Dict[str, Any]:
     }
 
 
-def _load_uk() -> Dict[str, Any]:
+def _load_yield_curve(country_key: str, display_name: str, filename: str) -> Dict[str, Any]:
     """
-    英国国債イールドカーブを読み込む。
-    CSV: Date + 残存期間列（例: 5Y, 10Y, 30Y）。DMO/BoE 形式。
+    統一形式のイールドカーブCSVを読み込む。
+    形式: 1行目ヘッダー（Date + 残存期間を数値年で表した列名）、値は YYYY-MM-DD と利回り。
     """
     try:
-        df = pd.read_csv(DATA_DIR / "uk_yield_curve.csv")
+        df = pd.read_csv(DATA_DIR / filename)
     except FileNotFoundError:
-        return _empty_dataset("uk", "英国")
-    df = df.rename(columns={df.columns[0]: "date_raw"})
-    maturity_cols = [c for c in df.columns if c != "date_raw"]
+        return _empty_dataset(country_key, display_name)
+    df = df.rename(columns={df.columns[0]: "Date"})
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    df = df.dropna(subset=["Date"])
+    if len(df) == 0:
+        return _empty_dataset(country_key, display_name)
+    maturity_cols = [c for c in df.columns if c != "Date"]
+    valid_maturity = []
+    for c in maturity_cols:
+        try:
+            float(c)
+            valid_maturity.append(c)
+        except (ValueError, TypeError):
+            pass
+    maturity_cols = valid_maturity
+    if not maturity_cols:
+        return _empty_dataset(country_key, display_name)
     for c in maturity_cols:
         df[c] = pd.to_numeric(df[c], errors="coerce")
-    maturity_years = np.array([_col_to_years_generic(c) for c in maturity_cols], dtype=float)
-    maturity_labels = maturity_cols
-    date_values = pd.to_datetime(df["date_raw"], errors="coerce")
-    df = df.dropna(subset=["date_raw"])
-    date_values = pd.to_datetime(df["date_raw"], errors="coerce")
+    maturity_years = np.array([float(c) for c in maturity_cols], dtype=float)
+    maturity_labels = [str(c) for c in maturity_cols]
+    date_values = pd.to_datetime(df["Date"])
     date_labels = date_values.dt.strftime("%Y-%m-%d").tolist()
     z = df[maturity_cols].to_numpy(dtype=float)
-    if len(date_labels) == 0:
-        return _empty_dataset("uk", "英国")
-    ts_col_index = 0
-    for i, lbl in enumerate(maturity_labels):
-        if abs(_col_to_years_generic(lbl) - 10.0) < 0.5:
-            ts_col_index = i
-            break
+    ts_col_index = int(np.argmin(np.abs(maturity_years - 10.0)))
     return {
-        "country": "uk",
-        "display_name": "英国",
+        "country": country_key,
+        "display_name": display_name,
         "dates": date_labels,
         "date_values": date_values,
         "maturity_years": maturity_years,
@@ -265,130 +82,14 @@ def _load_uk() -> Dict[str, Any]:
     }
 
 
-def _load_euro() -> Dict[str, Any]:
-    """
-    ユーロ圏（ECB AAA 国債）イールドカーブを読み込む。
-    CSV: 日付列 + 残存期間列。ECB 形式。データは 2004年9月〜。
-    """
-    try:
-        df = pd.read_csv(DATA_DIR / "euro_yield_curve.csv")
-    except FileNotFoundError:
-        return _empty_dataset("euro", "ユーロ圏")
-    df = df.rename(columns={df.columns[0]: "date_raw"})
-    maturity_cols = [c for c in df.columns if c != "date_raw"]
-    for c in maturity_cols:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-    maturity_years = np.array([_col_to_years_generic(c) for c in maturity_cols], dtype=float)
-    maturity_labels = maturity_cols
-    date_values = pd.to_datetime(df["date_raw"], errors="coerce")
-    df = df.dropna(subset=["date_raw"])
-    date_values = pd.to_datetime(df["date_raw"], errors="coerce")
-    date_labels = date_values.dt.strftime("%Y-%m-%d").tolist()
-    z = df[maturity_cols].to_numpy(dtype=float)
-    if len(date_labels) == 0:
-        return _empty_dataset("euro", "ユーロ圏")
-    ts_col_index = 0
-    for i, lbl in enumerate(maturity_labels):
-        if abs(_col_to_years_generic(lbl) - 10.0) < 0.5:
-            ts_col_index = i
-            break
-    return {
-        "country": "euro",
-        "display_name": "ユーロ圏",
-        "dates": date_labels,
-        "date_values": date_values,
-        "maturity_years": maturity_years,
-        "maturity_labels": maturity_labels,
-        "z": z,
-        "ts_col_index": ts_col_index,
-    }
-
-
-def _load_china() -> Dict[str, Any]:
-    """
-    中国国債イールドカーブを読み込む。
-    CSV: Date + 3M, 6M, 1Y, 2Y, ... など。ChinaBond 形式。
-    """
-    try:
-        df = pd.read_csv(DATA_DIR / "china_yield_curve.csv")
-    except FileNotFoundError:
-        return _empty_dataset("china", "中国")
-    df = df.rename(columns={df.columns[0]: "date_raw"})
-    maturity_cols = [c for c in df.columns if c != "date_raw"]
-    for c in maturity_cols:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-    maturity_years = np.array([_col_to_years_generic(c) for c in maturity_cols], dtype=float)
-    maturity_labels = maturity_cols
-    date_values = pd.to_datetime(df["date_raw"], errors="coerce")
-    df = df.dropna(subset=["date_raw"])
-    date_values = pd.to_datetime(df["date_raw"], errors="coerce")
-    date_labels = date_values.dt.strftime("%Y-%m-%d").tolist()
-    z = df[maturity_cols].to_numpy(dtype=float)
-    if len(date_labels) == 0:
-        return _empty_dataset("china", "中国")
-    ts_col_index = 0
-    for i, lbl in enumerate(maturity_labels):
-        if abs(_col_to_years_generic(lbl) - 10.0) < 0.5:
-            ts_col_index = i
-            break
-    return {
-        "country": "china",
-        "display_name": "中国",
-        "dates": date_labels,
-        "date_values": date_values,
-        "maturity_years": maturity_years,
-        "maturity_labels": maturity_labels,
-        "z": z,
-        "ts_col_index": ts_col_index,
-    }
-
-
-def _load_india() -> Dict[str, Any]:
-    """
-    インド国債イールドカーブを読み込む。
-    CSV: Date + 1Y, 5Y, 10Y など。RBI 等の形式。フルカーブが無い場合は 10Y のみでも可。
-    """
-    try:
-        df = pd.read_csv(DATA_DIR / "india_yield_curve.csv")
-    except FileNotFoundError:
-        return _empty_dataset("india", "インド")
-    df = df.rename(columns={df.columns[0]: "date_raw"})
-    maturity_cols = [c for c in df.columns if c != "date_raw"]
-    for c in maturity_cols:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-    maturity_years = np.array([_col_to_years_generic(c) for c in maturity_cols], dtype=float)
-    maturity_labels = maturity_cols
-    date_values = pd.to_datetime(df["date_raw"], errors="coerce")
-    df = df.dropna(subset=["date_raw"])
-    date_values = pd.to_datetime(df["date_raw"], errors="coerce")
-    date_labels = date_values.dt.strftime("%Y-%m-%d").tolist()
-    z = df[maturity_cols].to_numpy(dtype=float)
-    if len(date_labels) == 0:
-        return _empty_dataset("india", "インド")
-    ts_col_index = 0
-    for i, lbl in enumerate(maturity_labels):
-        if abs(_col_to_years_generic(lbl) - 10.0) < 0.5:
-            ts_col_index = i
-            break
-    return {
-        "country": "india",
-        "display_name": "インド",
-        "dates": date_labels,
-        "date_values": date_values,
-        "maturity_years": maturity_years,
-        "maturity_labels": maturity_labels,
-        "z": z,
-        "ts_col_index": ts_col_index,
-    }
-
-
+# 全国とも日本に合わせて 3D 日付軸は古い→新しい（y_min→y_max）。反転なし。
 DATASETS: Dict[str, Dict[str, Any]] = {
-    "japan": _load_japan(),
-    "usa": _load_usa(),
-    "uk": _load_uk(),
-    "euro": _load_euro(),
-    "china": _load_china(),
-    "india": _load_india(),
+    "japan": _load_yield_curve("japan", "日本", "japan_yield_curve.csv"),
+    "usa": _load_yield_curve("usa", "米国", "usa_yield_curve.csv"),
+    "uk": _load_yield_curve("uk", "英国", "uk_yield_curve.csv"),
+    "euro": _load_yield_curve("euro", "ユーロ圏", "euro_yield_curve.csv"),
+    "china": _load_yield_curve("china", "中国", "china_yield_curve.csv"),
+    "india": _load_yield_curve("india", "インド", "india_yield_curve.csv"),
 }
 
 
@@ -458,7 +159,7 @@ def create_surface_figure(country_key: str, y_start=None, y_end=None) -> go.Figu
                 tickmode="array",
                 tickvals=tick_indices,
                 ticktext=[dates[int(i)] for i in tick_indices],
-                range=[y_max, y_min] if country_key in ("usa", "uk", "euro") else [y_min, y_max],
+                range=[y_min, y_max],  # 日本に合わせて古い日付が手前
             ),
         ),
         template="plotly_dark",

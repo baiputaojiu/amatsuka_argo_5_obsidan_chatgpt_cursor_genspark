@@ -26,24 +26,24 @@ OUTPUT_CSV = DATA_DIR / "euro_yield_curve.csv"
 
 # ECB SDMX API: YC = Yield curves, B.U2.EUR.4F.G_N_A = AAA, SV_C_YM = Svensson, SR_* = spot rate
 ECB_API_BASE = "https://data-api.ecb.europa.eu/service/data/YC/B.U2.EUR.4F.G_N_A.SV_C_YM"
-# 残存期間コード → 列表示名（app.py の _col_to_years_generic で解釈可能）
+# 残存期間コード → 統一形式の列名（数値年）
 ECB_MATURITY_CODES = [
-    ("SR_3M", "3M"),
-    ("SR_6M", "6M"),
-    ("SR_1Y", "1Y"),
-    ("SR_2Y", "2Y"),
-    ("SR_3Y", "3Y"),
-    ("SR_4Y", "4Y"),
-    ("SR_5Y", "5Y"),
-    ("SR_6Y", "6Y"),
-    ("SR_7Y", "7Y"),
-    ("SR_8Y", "8Y"),
-    ("SR_9Y", "9Y"),
-    ("SR_10Y", "10Y"),
-    ("SR_15Y", "15Y"),
-    ("SR_20Y", "20Y"),
-    ("SR_25Y", "25Y"),
-    ("SR_30Y", "30Y"),
+    ("SR_3M", "0.25"),
+    ("SR_6M", "0.5"),
+    ("SR_1Y", "1"),
+    ("SR_2Y", "2"),
+    ("SR_3Y", "3"),
+    ("SR_4Y", "4"),
+    ("SR_5Y", "5"),
+    ("SR_6Y", "6"),
+    ("SR_7Y", "7"),
+    ("SR_8Y", "8"),
+    ("SR_9Y", "9"),
+    ("SR_10Y", "10"),
+    ("SR_15Y", "15"),
+    ("SR_20Y", "20"),
+    ("SR_25Y", "25"),
+    ("SR_30Y", "30"),
 ]
 
 
@@ -68,9 +68,8 @@ def _download_csv(url: str, timeout: int = 120) -> bytes:
 
 
 def _normalize_ecb_csv(df: pd.DataFrame, since_year: int = 2004) -> pd.DataFrame:
-    """日付列を Date に、残存期間列を数値化。since_year 以降に絞る。"""
+    """日付列を Date に、残存期間列を数値化。since_year 以降に絞り、列を数値年でソート。"""
     df = df.copy()
-    # ECB CSV は列が TIME_PERIOD, 残存期間名 等になり得る
     date_col = None
     for c in df.columns:
         if "time" in c.lower() or "date" in c.lower() or c == "Observed period" or c == "TIME_PERIOD":
@@ -85,7 +84,12 @@ def _normalize_ecb_csv(df: pd.DataFrame, since_year: int = 2004) -> pd.DataFrame
     maturity_cols = [c for c in df.columns if c != "Date"]
     for c in maturity_cols:
         df[c] = pd.to_numeric(df[c], errors="coerce")
-    df = df.sort_values("Date", ascending=False)
+    try:
+        maturity_cols_sorted = sorted(maturity_cols, key=lambda x: float(x))
+    except (ValueError, TypeError):
+        maturity_cols_sorted = maturity_cols
+    df = df[["Date"] + maturity_cols_sorted]
+    df = df.sort_values("Date", ascending=True)
     df["Date"] = df["Date"].dt.strftime("%Y-%m-%d")
     return df
 
