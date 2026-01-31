@@ -251,7 +251,36 @@ def create_surface_figure(
         showscale=True,
         hovertemplate="株価: %{x:.2f}<br>日付: %{y}<br>出来高: %{z:.0f}<extra></extra>",
     )
-    fig = go.Figure(data=[surface])
+    traces: list = [surface]
+
+    # 現在価格の位置に半透明の壁（表示範囲内の場合のみ）
+    last_close = data.get("last_close")
+    p_lo, p_hi = float(np.min(price_slice)), float(np.max(price_slice))
+    if last_close is not None and p_lo <= last_close <= p_hi:
+        y_max = len(date_slice) - 1
+        if z_range is not None:
+            z_lo, z_hi = float(z_range[0]), float(z_range[1])
+            z_max = z_hi * 3
+        else:
+            z_max = float(np.nanmax(Z_slice)) * 1.1 if Z_slice.size else 1.0
+        wall_x = [[last_close, last_close], [last_close, last_close]]
+        wall_y = [[0, 0], [y_max, y_max]]
+        wall_z = [[0, z_max], [0, z_max]]
+        wall = go.Surface(
+            x=wall_x,
+            y=wall_y,
+            z=wall_z,
+            surfacecolor=[[1, 1], [1, 1]],
+            cmin=0,
+            cmax=1,
+            colorscale=[[0, "rgba(0,255,200,0.5)"], [1, "rgba(0,255,200,0.5)"]],
+            showscale=False,
+            opacity=0.4,
+            hovertemplate="現在価格: %{x:.2f}<extra></extra>",
+        )
+        traces.append(wall)
+
+    fig = go.Figure(data=traces)
 
     y_step = max(1, len(date_slice) // 10)
     y_tick_indices = list(range(0, len(date_slice), y_step))
@@ -864,44 +893,6 @@ def _sliced_display_data(data: dict[str, Any], range_data: dict | None):
     vol_slice = daily_volume[i0 : i1 + 1] if daily_volume else []
     price_slice_daily = daily_price[i0 : i1 + 1] if daily_price else []
     return date_slice, price_slice, Z_slice, vol_slice, price_slice_daily
-
-
-@app.callback(
-    Output("graph-data-summary", "children"),
-    Output("graph-data-preview", "children"),
-    Input("store-display-data", "data"),
-    Input("store-current-range", "data"),
-    State("store-ticker", "data"),
-)
-def update_graph_data_preview(_display_data, range_data, ticker):
-    data = _get_cached_data(ticker)
-    if not data:
-        return "データがありません。銘柄を取得してください。", ""
-    date_slice, price_slice, Z_slice, vol_slice, price_slice_daily = _sliced_display_data(data, range_data)
-    if not date_slice or Z_slice is None:
-        return "描画データがありません。", ""
-    n_rows, n_cols = Z_slice.shape
-    safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in (ticker or ""))
-    summary = f"行(日付): {n_rows}, 列(株価帯): {n_cols}"
-    if date_slice:
-        summary += f"　日付: {date_slice[0]} ～ {date_slice[-1]}"
-    if price_slice is not None and len(price_slice) > 0:
-        summary += f"　株価帯: {float(price_slice[0]):.2f} ～ {float(price_slice[-1]):.2f}"
-    summary += f"　→ data/{safe}_graph_data.csv に保存"
-    preview_rows = []
-    preview_rows.append(html.Tr([html.Th("日付", style={"padding": "2px 6px"}), html.Th("日次出来高", style={"padding": "2px 6px"}), html.Th("終値", style={"padding": "2px 6px"})]))
-    for i in range(min(20, len(date_slice))):
-        vol = vol_slice[i] if i < len(vol_slice) else ""
-        pr = price_slice_daily[i] if i < len(price_slice_daily) else ""
-        if isinstance(vol, float):
-            vol = f"{vol:,.0f}"
-        if isinstance(pr, float):
-            pr = f"{pr:.2f}"
-        preview_rows.append(html.Tr([html.Td(date_slice[i], style={"padding": "2px 6px"}), html.Td(vol, style={"padding": "2px 6px"}), html.Td(pr, style={"padding": "2px 6px"})]))
-    if len(date_slice) > 20:
-        preview_rows.append(html.Tr([html.Td("…", colSpan=3, style={"padding": "2px 6px", "color": "#888"})]))
-    table = html.Table(preview_rows, style={"borderCollapse": "collapse", "color": "#ccc", "width": "100%"})
-    return summary, table
 
 
 if __name__ == "__main__":
