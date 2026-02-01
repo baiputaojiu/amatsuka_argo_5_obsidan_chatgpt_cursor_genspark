@@ -56,15 +56,6 @@ TARGET_COLS = [
 
 def _download_csv(url: str) -> bytes:
     """CSV をダウンロードする。"""
-    # #region agent log
-    _debug_log_path = Path(__file__).resolve().parent.parent / ".cursor" / "debug.log"
-    def _log(msg, data):
-        hid = data.pop("hypothesisId", "H0")
-        payload = {"location": "fetch_usa_data._download_csv", "message": msg, "data": data, "timestamp": __import__("time").time() * 1000, "sessionId": "debug-session", "runId": "run1", "hypothesisId": hid}
-        with open(_debug_log_path, "a", encoding="utf-8") as _f:
-            _f.write(__import__("json").dumps(payload, ensure_ascii=False) + "\n")
-    _log("entry", {"url": url[:80], "hypothesisId": "H1"})
-    # #endregion
     try:
         import urllib.request
         import urllib.error
@@ -82,19 +73,8 @@ def _download_csv(url: str) -> bytes:
         _ctx.verify_mode = ssl.CERT_NONE
         with urllib.request.urlopen(req, timeout=120, context=_ctx) as res:
             body = res.read()
-        # #region agent log
-        _log("success", {"url": url[:80], "body_len": len(body), "hypothesisId": "H1"})
-        # #endregion
         return body
     except Exception as e:
-        # #region agent log
-        err_data = {"url": url[:80], "exc_type": type(e).__name__, "exc_msg": str(e)[:200], "hypothesisId": "H2"}
-        if hasattr(e, "code"):
-            err_data["http_code"] = e.code
-        if hasattr(e, "reason"):
-            err_data["reason"] = str(e.reason)[:100]
-        _log("exception", err_data)
-        # #endregion
         raise RuntimeError(f"ダウンロードに失敗しました: {url}") from e
 
 

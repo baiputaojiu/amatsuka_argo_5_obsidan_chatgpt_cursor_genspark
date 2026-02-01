@@ -1,4 +1,4 @@
-# stock_map_3D: 日付×株価×出来高の3D山脈と2Dグラフ
+# stock_map_3D_1h: 日付×株価×出来高の3D山脈（1時間足・730日版）
 from pathlib import Path
 from typing import Any
 
@@ -43,7 +43,7 @@ def add_favorite(ticker: str) -> list[str]:
     return load_favorites()
 
 # ---------------------------------------------------------------------------
-# 5分足取得・CSV
+# 1時間足取得・CSV
 # ---------------------------------------------------------------------------
 def _flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
     if isinstance(df.columns, pd.MultiIndex):
@@ -54,11 +54,11 @@ def _flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
 def csv_path(ticker: str) -> Path:
     # ファイル名に使えない文字を置換（. はそのまま）
     safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in ticker)
-    return DATA_DIR / f"{safe}_5m.csv"
+    return DATA_DIR / f"{safe}_1h.csv"
 
-def fetch_5m_full(ticker: str) -> pd.DataFrame | None:
+def fetch_1h_full(ticker: str) -> pd.DataFrame | None:
     try:
-        df = yf.download(ticker, period="60d", interval="5m", group_by="column", progress=False, threads=False)
+        df = yf.download(ticker, period="730d", interval="1h", group_by="column", progress=False, threads=False)
         if df is None or df.empty:
             return None
         df = _flatten_columns(df)
@@ -69,13 +69,13 @@ def fetch_5m_full(ticker: str) -> pd.DataFrame | None:
     except Exception:
         return None
 
-def fetch_5m_incremental(ticker: str, last_ts: pd.Timestamp) -> pd.DataFrame | None:
+def fetch_1h_incremental(ticker: str, last_ts: pd.Timestamp) -> pd.DataFrame | None:
     try:
-        start = last_ts + pd.Timedelta(minutes=5)
+        start = last_ts + pd.Timedelta(hours=1)
         end = pd.Timestamp.now(tz=start.tzinfo) if start.tz else pd.Timestamp.now()
         if start >= end:
             return pd.DataFrame()
-        df = yf.download(ticker, start=start, end=end, interval="5m", group_by="column", progress=False, threads=False)
+        df = yf.download(ticker, start=start, end=end, interval="1h", group_by="column", progress=False, threads=False)
         if df is None or df.empty:
             return pd.DataFrame()
         df = _flatten_columns(df)
@@ -133,7 +133,7 @@ def compute_display_data(df: pd.DataFrame) -> dict[str, Any] | None:
 
     # 各行の日付（タイムゾーンはそのまま、日付のみ取得）
     dates_in_data = [pd.Timestamp(ts).date() for ts in df.index]
-    days_with_data = {str(d) for d in set(dates_in_data)}  # 5分足が1本以上ある日（ローソク描画用）
+    days_with_data = {str(d) for d in set(dates_in_data)}  # 1時間足が1本以上ある日（ローソク描画用）
     min_date = min(dates_in_data)
     max_date = max(dates_in_data)
     all_dates = pd.date_range(min_date, max_date, freq="D").date.tolist()
@@ -228,7 +228,7 @@ def create_surface_figure(
     z_range: tuple[float, float] | None = None,
     smoothing_mode: str = "current",
     surface_opacity: float = 0.5,
-    df_5m: pd.DataFrame | None = None,
+    df_1h: pd.DataFrame | None = None,
 ) -> go.Figure:
     if data is None or data["n_dates"] == 0 or data["n_bins"] == 0:
         return _no_data_figure("データがありません")
@@ -270,9 +270,7 @@ def create_surface_figure(
 
     # 平滑化: ①なし / ②現在の処理（制約付き反復＋角丸め） / ③ガウスぼかしのみ（高さ維持なし）
     Z_draw = Z_slice.astype(float).copy()
-    branch = "none"
     if smoothing_mode == "current":
-        branch = "current"
         mask_nonzero = Z_slice > 0
         for _ in range(20):
             Z_draw[:] = gaussian_filter(Z_draw, sigma=(2.0, 0.6), mode="constant", cval=0.0)
@@ -280,20 +278,17 @@ def create_surface_figure(
         Z_draw[:] = gaussian_filter(Z_draw, sigma=(1.2, 1.2), mode="constant", cval=0.0)
         Z_draw = np.maximum(Z_draw, 0.0)
     elif smoothing_mode == "gaussian_only":
-        branch = "gaussian_only"
-        # Y方向の裾を②と同程度に広げるため sigma=(2.0, 0.6)（日付方向=Y, 株価方向=X）
         Z_draw = gaussian_filter(Z_draw, sigma=(2.0, 0.6), mode="constant", cval=0.0)
         Z_draw = np.maximum(Z_draw, 0.0)
-    # "none" のときは Z_draw をそのまま（平滑化なし）
 
     z_max_val = float(np.nanmax(Z_draw)) if Z_draw.size else 1.0
     vol_M = Z_draw / 1e6
     opacity = max(0.05, min(1.0, float(surface_opacity)))
 
-    # XY平面（Z=0）に5分足ローソクを描く（先に描画して山脈の下で透けて見える）
+    # XY平面（Z=0）に1時間足ローソクを描く（先に描画して山脈の下で透けて見える）
     traces: list = []
-    if df_5m is not None and not df_5m.empty and ensure_columns(df_5m).shape[0] > 0:
-        df_bar = ensure_columns(df_5m)
+    if df_1h is not None and not df_1h.empty and ensure_columns(df_1h).shape[0] > 0:
+        df_bar = ensure_columns(df_1h)
         idx = pd.to_datetime(df_bar.index)
         x_wick, y_wick, z_wick = [], [], []
         x_body_down, y_body_down, z_body_down = [], [], []
@@ -414,168 +409,15 @@ def create_surface_figure(
     )
     if z_range is not None:
         z_lo, z_hi = float(z_range[0]), float(z_range[1])
-        # 表示上限を3倍に広げて山を1/3の高さで表示
         layout_scene["zaxis"] = dict(range=[z_lo, z_hi * 3], title="Z: 出来高")
 
     fig.update_layout(
         margin=dict(l=0, r=0, t=30, b=0),
         scene=layout_scene,
         template="plotly_dark",
-        title=f"{ticker} 日付×株価×出来高",
+        title=f"{ticker} 日付×株価×出来高（1時間足）",
     )
     return fig
-
-# ---------------------------------------------------------------------------
-# 2D グラフ（日付-出来高、日付-株価、出来高-株価）
-# ---------------------------------------------------------------------------
-def create_date_volume_figure(
-    data: dict[str, Any] | None,
-    hover_date_idx: int | None,
-    date_range: tuple[int, int] | None = None,
-) -> go.Figure:
-    if data is None or not data["date_labels"]:
-        return _no_data_figure()
-    labels = data["date_labels"]
-    vol = data["daily_volume"]
-    if date_range is not None:
-        i0, i1 = max(0, date_range[0]), min(len(labels) - 1, date_range[1])
-        if i0 > i1:
-            i0, i1 = i1, i0
-        labels = labels[i0 : i1 + 1]
-        vol = vol[i0 : i1 + 1]
-        if hover_date_idx is not None and i0 <= hover_date_idx <= i1:
-            hover_date_idx = hover_date_idx - i0
-        else:
-            hover_date_idx = None
-    x = list(range(len(labels)))
-    y = vol
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=x, y=y, mode="lines",
-            hovertemplate="日付: %{text}<br>出来高: %{y:,.0f}<extra></extra>",
-            text=data["date_labels"],
-            showlegend=False,
-        )
-    )
-    if hover_date_idx is not None and 0 <= hover_date_idx < len(x):
-        fig.add_vline(x=hover_date_idx, line=dict(color="red", width=1, dash="dash"))
-        fig.add_trace(
-            go.Scatter(
-                x=[hover_date_idx], y=[y[hover_date_idx]],
-                mode="markers", marker=dict(color="red", size=10),
-                hovertemplate="日付: %{text}<br>出来高: %{y:,.0f}<extra></extra>",
-                text=[labels[hover_date_idx]],
-                showlegend=False,
-            )
-        )
-    fig.update_layout(
-        margin=dict(l=40, r=10, t=30, b=40),
-        xaxis_title="日付", yaxis_title="出来高",
-        template="plotly_dark", title="日付-出来高",
-        xaxis=dict(tickmode="array", tickvals=x[:: max(1, len(x) // 8)], ticktext=[labels[i] for i in range(0, len(x), max(1, len(x) // 8))]),
-    )
-    return fig
-
-def create_date_price_figure(
-    data: dict[str, Any] | None,
-    hover_date_idx: int | None,
-    date_range: tuple[int, int] | None = None,
-) -> go.Figure:
-    if data is None or not data["date_labels"]:
-        return _no_data_figure()
-    labels = data["date_labels"]
-    price = data["daily_price"]
-    if date_range is not None:
-        i0, i1 = max(0, date_range[0]), min(len(labels) - 1, date_range[1])
-        if i0 > i1:
-            i0, i1 = i1, i0
-        labels = labels[i0 : i1 + 1]
-        price = price[i0 : i1 + 1]
-        if hover_date_idx is not None and i0 <= hover_date_idx <= i1:
-            hover_date_idx = hover_date_idx - i0
-        else:
-            hover_date_idx = None
-    x = list(range(len(labels)))
-    y = price
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=x, y=y, mode="lines",
-            hovertemplate="日付: %{text}<br>株価: %{y:.2f}<extra></extra>",
-            text=data["date_labels"],
-            showlegend=False,
-        )
-    )
-    # 最新株価の緑点線
-    if data.get("last_close") is not None:
-        fig.add_hline(
-            y=data["last_close"],
-            line=dict(color="green", width=1, dash="dot"),
-            annotation_text="最新株価",
-        )
-    if hover_date_idx is not None and 0 <= hover_date_idx < len(x):
-        fig.add_vline(x=hover_date_idx, line=dict(color="red", width=1, dash="dash"))
-        fig.add_trace(
-            go.Scatter(
-                x=[hover_date_idx], y=[y[hover_date_idx]],
-                mode="markers", marker=dict(color="red", size=10),
-                hovertemplate="日付: %{text}<br>株価: %{y:.2f}<extra></extra>",
-                text=[labels[hover_date_idx]],
-                showlegend=False,
-            )
-        )
-    fig.update_layout(
-        margin=dict(l=40, r=10, t=30, b=40),
-        xaxis_title="日付", yaxis_title="株価",
-        template="plotly_dark", title="日付-株価",
-        xaxis=dict(tickmode="array", tickvals=x[:: max(1, len(x) // 8)], ticktext=[labels[i] for i in range(0, len(x), max(1, len(x) // 8))]),
-    )
-    return fig
-
-def create_volume_price_figure(
-    data: dict[str, Any] | None,
-    df_day: pd.DataFrame | None,
-    hover_date_idx: int | None,
-) -> go.Figure:
-    if data is None:
-        return _no_data_figure()
-    if df_day is None or df_day.empty:
-        fig = go.Figure()
-        fig.add_annotation(text="ホバーした日のデータなし", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
-        fig.update_layout(template="plotly_dark", title="出来高-株価")
-        return fig
-    typical = (df_day["Open"] + df_day["High"] + df_day["Low"] + df_day["Close"]) / 4.0
-    vol = df_day["Volume"].fillna(0)
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=vol, y=typical, mode="markers",
-            hovertemplate="出来高: %{x:,.0f}<br>株価: %{y:.2f}<extra></extra>",
-            showlegend=False,
-        )
-    )
-    if data.get("last_close") is not None:
-        fig.add_hline(
-            y=data["last_close"],
-            line=dict(color="green", width=1, dash="dot"),
-            annotation_text="最新株価",
-        )
-    fig.update_layout(
-        margin=dict(l=40, r=10, t=30, b=40),
-        xaxis_title="出来高", yaxis_title="株価",
-        template="plotly_dark", title="出来高-株価（ホバーした日）",
-    )
-    return fig
-
-# ホバーした日付インデックスから、その日の 5分足 DataFrame を返す（CSV 由来の df と all_dates から）
-def get_day_df(df: pd.DataFrame | None, date_labels: list, date_idx: int) -> pd.DataFrame | None:
-    if df is None or not date_labels or date_idx < 0 or date_idx >= len(date_labels):
-        return None
-    d_str = date_labels[date_idx]
-    idx = pd.to_datetime(df.index)
-    mask = idx.strftime("%Y-%m-%d") == d_str
-    return df.loc[mask] if mask.any() else None
 
 # ---------------------------------------------------------------------------
 # App
@@ -747,7 +589,6 @@ def on_fetch_or_select(n_fetch, fav_value, input_ticker, current_ticker):
     elif ctx.triggered_id == "favorites-dropdown" and fav_value:
         ticker = fav_value
     elif ctx.triggered_id is None and not current_ticker:
-        # 起動時: 7203.T のCSVがあれば読んで表示
         ticker = "7203.T"
 
     if not ticker:
@@ -755,11 +596,10 @@ def on_fetch_or_select(n_fetch, fav_value, input_ticker, current_ticker):
             return current_ticker, None, "", [{"label": t, "value": t} for t in load_favorites()]
         return None, None, "", [{"label": t, "value": t} for t in load_favorites()]
 
-    # 取得ボタン: CSV が無ければ全量取得
     if ctx.triggered_id == "btn-fetch":
         existing = load_csv(ticker)
         if existing is None or existing.empty:
-            df = fetch_5m_full(ticker)
+            df = fetch_1h_full(ticker)
             if df is None or df.empty:
                 return current_ticker, None, "取得できませんでした", [{"label": t, "value": t} for t in load_favorites()]
             save_csv(ticker, df)
@@ -770,7 +610,6 @@ def on_fetch_or_select(n_fetch, fav_value, input_ticker, current_ticker):
         _DISPLAY_CACHE[ticker] = data
         return ticker, {"ticker": ticker}, f"価格刻み: {data['step']:.2f}（直近終値 {data['last_close']:.2f} の1%）", [{"label": t, "value": t} for t in load_favorites()]
 
-    # お気に入り選択 or 起動時: 既存CSVのみ読む
     df = load_csv(ticker)
     if df is None or df.empty:
         return ticker, None, "データがありません。取得または更新してください。", [{"label": t, "value": t} for t in load_favorites()]
@@ -788,7 +627,6 @@ def _get_cached_data(ticker: str | None) -> dict[str, Any] | None:
 
 
 def _save_graph_data_csv(ticker: str, date_slice: list, price_slice: np.ndarray, Z_slice: np.ndarray) -> None:
-    """描画用Z行列を data/{ticker}_graph_data.csv に保存する。"""
     if not date_slice or price_slice is None or Z_slice is None or len(Z_slice) == 0:
         return
     safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in ticker)
@@ -812,13 +650,13 @@ def on_update(n, current_ticker):
         return current_ticker, None, ""
     existing = load_csv(current_ticker)
     if existing is None or existing.empty:
-        df = fetch_5m_full(current_ticker)
+        df = fetch_1h_full(current_ticker)
         if df is None or df.empty:
             return current_ticker, None, "更新できませんでした"
         save_csv(current_ticker, df)
     else:
         last_ts = existing.index[-1]
-        new_df = fetch_5m_incremental(current_ticker, last_ts)
+        new_df = fetch_1h_incremental(current_ticker, last_ts)
         if new_df is not None and not new_df.empty:
             combined = pd.concat([existing, new_df])
             combined = combined[~combined.index.duplicated(keep="last")]
@@ -843,7 +681,6 @@ def on_add_favorite(n, ticker):
         add_favorite(ticker)
     return [{"label": t, "value": t} for t in load_favorites()]
 
-# 軸範囲入力の初期化（データ変更時）。X初期範囲は山脈が0でない範囲
 @app.callback(
     Output("range-x-date", "start_date"),
     Output("range-x-date", "end_date"),
@@ -888,7 +725,6 @@ def init_axis_inputs(_display_data, ticker):
         range_data,
     )
 
-# 全体表示に戻す
 @app.callback(
     Output("range-x-date", "start_date", allow_duplicate=True),
     Output("range-x-date", "end_date", allow_duplicate=True),
@@ -913,7 +749,6 @@ def on_reset_range(n, ticker):
         [z_min, z_max],
     )
 
-# 3D サーフェス更新＋現在範囲を store に保存（スライダー・平滑化・日付・銘柄変更で即時反映）
 @app.callback(
     Output("surface-graph", "figure"),
     Output("store-current-range", "data", allow_duplicate=True),
@@ -938,7 +773,6 @@ def update_surface(_apply_clicks, _display_data, ticker, smoothing_mode, y_slide
     data_z_min = float(np.nanmin(Z_arr)) if Z_arr.size else 0.0
     data_z_max = float(np.nanmax(Z_arr)) if Z_arr.size else 1.0
 
-    # X軸(日付): カレンダーで選択した日付をインデックスに変換
     y_range = (0, len(date_labels) - 1)
     if start_date is not None and end_date is not None:
         try:
@@ -957,7 +791,6 @@ def update_surface(_apply_clicks, _display_data, ticker, smoothing_mode, y_slide
         except (ValueError, TypeError, AttributeError):
             pass
 
-    # Y軸(株価): スライダー値 [min, max]
     x_range = None
     p_data_min = float(min(pb)) if pb else 0.0
     p_data_max = float(max(pb)) if pb else 0.0
@@ -966,7 +799,6 @@ def update_surface(_apply_clicks, _display_data, ticker, smoothing_mode, y_slide
         p_max = float(y_slider_val[1])
         x_range = (min(p_min, p_max), max(p_min, p_max))
 
-    # Z軸(出来高): スライダー値 [min, max]
     if z_slider_val is not None and len(z_slider_val) >= 2:
         z_min_in = float(z_slider_val[0])
         z_max_in = float(z_slider_val[1])
@@ -980,11 +812,10 @@ def update_surface(_apply_clicks, _display_data, ticker, smoothing_mode, y_slide
         _save_graph_data_csv(ticker, date_slice, price_slice, Z_slice)
     sm = smoothing_mode if smoothing_mode in ("none", "current", "gaussian_only") else "current"
     opacity_val = float(surface_opacity) if surface_opacity is not None else 0.5
-    df_5m = load_csv(ticker) if ticker else None
-    return create_surface_figure(data, ticker, x_range=x_range, y_range=y_range, z_range=z_range, smoothing_mode=sm, surface_opacity=opacity_val, df_5m=df_5m), range_data
+    df_1h = load_csv(ticker) if ticker else None
+    return create_surface_figure(data, ticker, x_range=x_range, y_range=y_range, z_range=z_range, smoothing_mode=sm, surface_opacity=opacity_val, df_1h=df_1h), range_data
 
 def _sliced_display_data(data: dict[str, Any], range_data: dict | None):
-    """store-current-range に従って日付・株価でスライスしたデータを返す。"""
     if not data or not data.get("date_labels"):
         return None, None, None, None, None
     date_labels = data["date_labels"]
@@ -1019,4 +850,4 @@ def _sliced_display_data(data: dict[str, Any], range_data: dict | None):
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True, port=8052)
