@@ -285,14 +285,6 @@ def create_surface_figure(
         Z_draw = gaussian_filter(Z_draw, sigma=(2.0, 0.6), mode="constant", cval=0.0)
         Z_draw = np.maximum(Z_draw, 0.0)
     # "none" のときは Z_draw をそのまま（平滑化なし）
-    # #region agent log
-    try:
-        import json as _json
-        with open(BASE_DIR.parent / ".cursor" / "debug.log", "a", encoding="utf-8") as _f:
-            _f.write(_json.dumps({"hypothesisId":"C","location":"create_surface_figure:smoothing","message":"branch","data":{"smoothing_mode":smoothing_mode,"branch":branch}, "timestamp": __import__("time").time()}, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # #endregion
 
     z_max_val = float(np.nanmax(Z_draw)) if Z_draw.size else 1.0
     vol_M = Z_draw / 1e6
@@ -937,16 +929,6 @@ def on_reset_range(n, ticker):
     prevent_initial_call="initial_duplicate",
 )
 def update_surface(_apply_clicks, _display_data, ticker, smoothing_mode, y_slider_val, z_slider_val, surface_opacity, start_date, end_date):
-    # #region agent log
-    import json
-    from dash import ctx
-    _log = BASE_DIR.parent / ".cursor" / "debug.log"
-    try:
-        with open(_log, "a", encoding="utf-8") as _f:
-            _f.write(json.dumps({"hypothesisId":"A,B,E","location":"update_surface:entry","message":"triggered","data":{"triggered_id":getattr(ctx,"triggered_id",None),"smoothing_mode":smoothing_mode,"ticker":ticker}, "timestamp": __import__("time").time()}, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # #endregion
     data = _get_cached_data(ticker)
     if data is None or not ticker:
         return _no_data_figure(), None
@@ -997,14 +979,6 @@ def update_surface(_apply_clicks, _display_data, ticker, smoothing_mode, y_slide
     if date_slice is not None and price_slice is not None and Z_slice is not None:
         _save_graph_data_csv(ticker, date_slice, price_slice, Z_slice)
     sm = smoothing_mode if smoothing_mode in ("none", "current", "gaussian_only") else "current"
-    # #region agent log
-    try:
-        import json as _json
-        with open(BASE_DIR.parent / ".cursor" / "debug.log", "a", encoding="utf-8") as _f:
-            _f.write(_json.dumps({"hypothesisId":"B,C","location":"update_surface:sm","message":"sm passed to create_surface_figure","data":{"sm":sm,"smoothing_mode_raw":smoothing_mode}, "timestamp": __import__("time").time()}, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # #endregion
     opacity_val = float(surface_opacity) if surface_opacity is not None else 0.5
     df_5m = load_csv(ticker) if ticker else None
     return create_surface_figure(data, ticker, x_range=x_range, y_range=y_range, z_range=z_range, smoothing_mode=sm, surface_opacity=opacity_val, df_5m=df_5m), range_data
