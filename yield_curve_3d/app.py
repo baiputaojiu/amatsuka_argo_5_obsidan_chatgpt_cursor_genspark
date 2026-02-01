@@ -1,19 +1,7 @@
-import json
 from pathlib import Path
 from typing import Dict, Any
 
 import numpy as np
-
-# #region agent log
-DEBUG_LOG = Path(__file__).resolve().parent.parent / ".cursor" / "debug.log"
-def _dlog(location: str, message: str, data: dict, hypothesis_id: str):
-    try:
-        payload = {"sessionId": "debug-session", "runId": "run1", "hypothesisId": hypothesis_id, "location": location, "message": message, "data": data, "timestamp": __import__("time").time() * 1000}
-        with open(DEBUG_LOG, "a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-# #endregion
 import pandas as pd
 from dash import Dash, callback_context, dcc, html, Input, Output, State
 import plotly.graph_objs as go
@@ -513,18 +501,12 @@ app.layout = html.Div(
     Input("country-dropdown", "value"),
 )
 def init_date_slider(country_key: str):
-    # #region agent log
-    _dlog("app.py:init_date_slider", "entry", {"country_key": country_key}, "H2")
-    # #endregion
     if country_key not in DATASETS:
         country_key = "japan"
     data = DATASETS[country_key]
     dates = data["dates"]
     n = len(dates)
     if n == 0:
-        # #region agent log
-        _dlog("app.py:init_date_slider", "exit n==0", {"min": 0, "max": 0, "value": [0, 0], "marks_len": 0}, "H2")
-        # #endregion
         return 0, 0, [0, 0], {}
 
     min_idx = 0
@@ -554,9 +536,6 @@ def init_date_slider(country_key: str):
         "style": _mark_style(),
     }
     out_value = [min_idx, max_idx]
-    # #region agent log
-    _dlog("app.py:init_date_slider", "exit", {"n": n, "min": min_idx, "max": max_idx, "value": out_value, "marks_type": str(type(marks)), "marks_keys_sample": list(marks.keys())[:3]}, "H2")
-    # #endregion
     return min_idx, max_idx, out_value, marks
 
 
@@ -596,24 +575,15 @@ def update_button_styles(view_mode: str):
     Input("surface-view-mode", "data"),
 )
 def update_surface(country_key: str, slider_value, view_mode: str):
-    # #region agent log
-    _dlog("app.py:update_surface", "entry", {"country_key": country_key, "slider_value": repr(slider_value), "slider_value_is_none": slider_value is None}, "H1")
-    # #endregion
     if country_key not in DATASETS:
         country_key = "japan"
     data = DATASETS[country_key]
     n = len(data["dates"])
     mode = view_mode if view_mode in ("surface", "wireframe") else "surface"
     if not slider_value or n == 0:
-        # #region agent log
-        _dlog("app.py:update_surface", "branch no_slider_or_n0", {"returning_full_figure": True}, "H3")
-        # #endregion
         return create_surface_figure(country_key, view_mode=mode)
     start_idx = max(0, min(int(slider_value[0]), n - 1))
     end_idx = max(start_idx, min(int(slider_value[1]), n - 1))
-    # #region agent log
-    _dlog("app.py:update_surface", "before_create", {"start_idx": start_idx, "end_idx": end_idx}, "H3")
-    # #endregion
     return create_surface_figure(country_key, start_idx, end_idx, view_mode=mode)
 
 
@@ -625,9 +595,6 @@ def update_surface(country_key: str, slider_value, view_mode: str):
     Input("date-range-slider", "value"),
 )
 def update_2d_graphs(country_key: str, hover_data: Dict[str, Any] | None, slider_value):
-    # #region agent log
-    _dlog("app.py:update_2d_graphs", "entry", {"country_key": country_key, "slider_value": repr(slider_value), "has_hover": hover_data is not None and bool(hover_data.get("points"))}, "H4")
-    # #endregion
     if country_key not in DATASETS:
         country_key = "japan"
     data = DATASETS[country_key]
@@ -645,9 +612,6 @@ def update_2d_graphs(country_key: str, hover_data: Dict[str, Any] | None, slider
     else:
         y_start = max(0, min(int(slider_value[0]), num_dates - 1))
         y_end = max(y_start, min(int(slider_value[1]), num_dates - 1))
-    # #region agent log
-    _dlog("app.py:update_2d_graphs", "after_range", {"y_start": y_start, "y_end": y_end, "slider_was_none": slider_value is None}, "H4")
-    # #endregion
 
     # hoverData が無ければ「範囲の最後の日 × デフォルト（10 年付近）の残存期間」を使う
     row_index = y_end
