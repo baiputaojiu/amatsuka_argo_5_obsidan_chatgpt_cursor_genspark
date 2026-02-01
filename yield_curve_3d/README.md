@@ -194,21 +194,61 @@ python fetch_usa_data.py
 
 **ゴールド先物（フォワードカーブ）**
 
-- **自動取得**（yfinance で CME GC 複数限月）:
+- **自動取得**（先物のみ・yfinance で CME GC 複数限月）:
   ```powershell
-  python fetch_gold_data.py              # デフォルト: 2023年〜
-  python fetch_gold_data.py --since 2024 # 開始年を指定
+  python fetch_gold_data.py              # デフォルト: 2024年〜
+  python fetch_gold_data.py --since 2024
   ```
-- データ形式: `Date` + 満期（年）列 `0.083`, `0.25`, `0.5`, `1.0`, `2.0`。フロント月（GC=F）と個別限月（GCxYY.CMX）を取得し、各満期には最も近い限月の価格をそのまま割り当てます（補間なし）。
+- データ形式: `Date` + `0.0`（現物） + 満期列 `1`, `2`, …。現物（0.0 列）は自動取得しないため、[Stooq で手動取得](#金銀の現物価格00-列の手動取得stooq)してマージします。
+
+**シルバー 1ヶ月フォワードレート（silver_forward_rate_1m.csv）**
+
+- `silver_forward_curve.csv` から 2025年4月〜を補完するには:
+  ```powershell
+  python extend_forward_rate_1m.py
+  ```
 
 **シルバー先物（フォワードカーブ）**
 
-- **自動取得**（yfinance で CME SI 複数限月）:
+- **自動取得**（先物のみ・yfinance で CME SI 複数限月）:
   ```powershell
-  python fetch_silver_data.py              # デフォルト: 2023年〜
+  python fetch_silver_data.py              # デフォルト: 2024年〜
   python fetch_silver_data.py --since 2024
   ```
-- データ形式: ゴールドと同じ（`Date` + 満期列）。SI=F、SIxYY.CMX を取得。
+- データ形式: ゴールドと同じ（`Date` + `0.0` + 満期列）。現物（0.0 列）は [Stooq で手動取得](#金銀の現物価格00-列の手動取得stooq)してマージします。
+
+**金銀の現物価格（0.0 列）の手動取得（Stooq）**
+
+金・銀の日次スポット（XAU/USD・XAG/USD）はプログラムから自動取得していません。[Stooq](https://stooq.com/) で手動ダウンロードし、`data/` に保存したうえでマージスクリプトを実行してください。
+
+1. **金（XAU/USD）の日足 CSV をダウンロード**
+   - ブラウザで次の URL を開く（CSV がダウンロードまたは表示される）:
+     ```
+     https://stooq.com/q/d/l/?s=xauusd&i=d
+     ```
+   - ファイルを `data/gold_spot_stooq.csv` として保存（既存の `Date,Open,High,Low,Close` 形式のままでよい）。
+
+2. **銀（XAG/USD）の日足 CSV をダウンロード**
+   - 次の URL を開く:
+     ```
+     https://stooq.com/q/d/l/?s=xagusd&i=d
+     ```
+   - ファイルを `data/silver_spot_stooq.csv` として保存。
+
+3. **フォワードカーブへ 2023 年以降の現物価格を反映**
+   - 次のスクリプトを実行すると、`gold_forward_curve.csv` と `silver_forward_curve.csv` の 0.0 列に、上記 CSV の 2023 年以降の終値（Close）がマージされます。
+   ```powershell
+   python merge_spot_into_forward_curve.py
+   ```
+
+**金銀先物価格の手動取得（Stooq の制限）**
+
+Stooq では **先物（.F 拡張子の銘柄）について CSV ダウンロードが提供されていません**。  
+`https://stooq.com/q/d/l/?s=gc.f&i=d` や `s=si.f&i=d` を開いても、空またはデータなしになることがあります（Stooq 側の仕様です）。
+
+- **現物（XAU/USD・XAG/USD）**: 上記の Stooq URL（xauusd, xagusd）で CSV 取得可能。
+- **先物（GC.F・SI.F）**: Stooq からは CSV で取得できないため、**先物は yfinance による自動取得**（`fetch_gold_data.py` / `fetch_silver_data.py`）を利用してください。
+- **CME DataMine**: [datamine.new.cmegroup.com](https://datamine.new.cmegroup.com/) で金・銀先物のヒストリカル（EOD CSV 等）を取得できるが、**有料ライセンス**が必要です。
 
 ### 日本のデータを取得し直す
 
