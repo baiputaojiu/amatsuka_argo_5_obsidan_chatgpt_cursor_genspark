@@ -228,6 +228,7 @@ def create_surface_figure(
     z_range: tuple[float, float] | None = None,
     smoothing_mode: str = "current",
     surface_opacity: float = 0.5,
+    df_5m: pd.DataFrame | None = None,
 ) -> go.Figure:
     if data is None or data["n_dates"] == 0 or data["n_bins"] == 0:
         return _no_data_figure("データがありません")
@@ -297,50 +298,46 @@ def create_surface_figure(
     vol_M = Z_draw / 1e6
     opacity = max(0.05, min(1.0, float(surface_opacity)))
 
-    # XY平面（Z=0）に日足ローソク足を描く（先に描画して山脈の下で透けて見える）
+    # XY平面（Z=0）に5分足ローソクを描く（先に描画して山脈の下で透けて見える）
     traces: list = []
-    if data.get("daily_open") and data.get("daily_high") and data.get("daily_low"):
-        i0_slice = int(y_range[0]) if y_range is not None else 0
-        i1_slice = int(y_range[1]) if y_range is not None else len(data["date_labels"]) - 1
-        i0_slice = max(0, min(i0_slice, len(data["date_labels"]) - 1))
-        i1_slice = max(0, min(i1_slice, len(data["date_labels"]) - 1))
-        if i0_slice > i1_slice:
-            i0_slice, i1_slice = i1_slice, i0_slice
-        n_days = i1_slice - i0_slice + 1
-        open_slice = [float(data["daily_open"][i0_slice + i]) for i in range(n_days)]
-        high_slice = [float(data["daily_high"][i0_slice + i]) for i in range(n_days)]
-        low_slice = [float(data["daily_low"][i0_slice + i]) for i in range(n_days)]
-        close_slice = [float(data["daily_price"][i0_slice + i]) for i in range(n_days)]
+    if df_5m is not None and not df_5m.empty and ensure_columns(df_5m).shape[0] > 0:
+        df_bar = ensure_columns(df_5m)
+        idx = pd.to_datetime(df_bar.index)
         x_wick, y_wick, z_wick = [], [], []
         x_body_down, y_body_down, z_body_down = [], [], []
         x_body_up, y_body_up, z_body_up = [], [], []
-        days_with_data = data.get("days_with_data") or set()
-        for i in range(n_days):
-            date_str = data["date_labels"][i0_slice + i]
-            if date_str not in days_with_data:
-                continue  # 5分足が1本もない日はローソクを描かない
-            lo, hi = low_slice[i], high_slice[i]
-            op, cl = open_slice[i], close_slice[i]
-            if np.isnan(lo) or np.isnan(hi):
+        for day_idx, date_str in enumerate(date_slice):
+            mask = idx.strftime("%Y-%m-%d") == date_str
+            if not mask.any():
                 continue
-            x_wick.extend([lo, hi, None])
-            y_wick.extend([i, i, None])
-            z_wick.extend([0, 0, None])
-            if np.isnan(op) or np.isnan(cl):
-                continue
-            if cl < op:
-                x_body_down.extend([op, cl, None])
-                y_body_down.extend([i, i, None])
-                z_body_down.extend([0, 0, None])
-            else:
-                x_body_up.extend([op, cl, None])
-                y_body_up.extend([i, i, None])
-                z_body_up.extend([0, 0, None])
+            rows = df_bar.loc[mask].sort_index()
+            n_bars = len(rows)
+            for i, (ts, row) in enumerate(rows.iterrows()):
+                op = float(row["Open"])
+                hi = float(row["High"])
+                lo = float(row["Low"])
+                cl = float(row["Close"])
+                if np.isnan(lo) or np.isnan(hi):
+                    continue
+                y_pos = day_idx + (i / n_bars) if n_bars > 0 else day_idx
+                x_wick.extend([lo, hi, None])
+                y_wick.extend([y_pos, y_pos, None])
+                z_wick.extend([0, 0, None])
+                if np.isnan(op) or np.isnan(cl):
+                    continue
+                if cl < op:
+                    x_body_down.extend([op, cl, None])
+                    y_body_down.extend([y_pos, y_pos, None])
+                    z_body_down.extend([0, 0, None])
+                else:
+                    x_body_up.extend([op, cl, None])
+                    y_body_up.extend([y_pos, y_pos, None])
+                    z_body_up.extend([0, 0, None])
         if x_wick:
             traces.append(
                 go.Scatter3d(
                     x=x_wick, y=y_wick, z=z_wick, mode="lines",
-                    line=dict(color="rgba(200,200,200,0.9)", width=2),
+                    line=dict(color="rgba(200,200,200,0.9)", width=1),
                     name="ヒゲ", showlegend=False,
                 )
             )
@@ -348,7 +345,7 @@ def create_surface_figure(
             traces.append(
                 go.Scatter3d(
                     x=x_body_down, y=y_body_down, z=z_body_down, mode="lines",
-                    line=dict(color="rgba(255,80,80,0.95)", width=6),
+                    line=dict(color="rgba(255,80,80,0.95)", width=3),
                     name="陰線", showlegend=False,
                 )
             )
@@ -356,7 +353,7 @@ def create_surface_figure(
             traces.append(
                 go.Scatter3d(
                     x=x_body_up, y=y_body_up, z=z_body_up, mode="lines",
-                    line=dict(color="rgba(80,255,120,0.95)", width=6),
+                    line=dict(color="rgba(80,255,120,0.95)", width=3),
                     name="陽線", showlegend=False,
                 )
             )
@@ -614,10 +611,10 @@ app.layout = html.Div(
             children="更新中…",
         ),
         html.Div(
-            style={"flex": "0 0 40%", "display": "flex", "flexDirection": "column", "padding": "10px", "backgroundColor": "#111", **_NO_SELECT},
+            style={"flex": "0 0 260px", "display": "flex", "flexDirection": "column", "padding": "10px", "backgroundColor": "#111", "overflowY": "auto", **_NO_SELECT},
             children=[
                 html.Div(
-                    style={"marginBottom": "8px", **_NO_SELECT},
+                    style={"marginBottom": "8px", "flexShrink": 0, **_NO_SELECT},
                     children=[
                         html.Label("銘柄コード"),
                         html.Div(
@@ -727,14 +724,11 @@ app.layout = html.Div(
                         ),
                     ],
                 ),
-                dcc.Graph(id="graph-date-volume", style={"flex": "1 1 33%", "minHeight": "120px", **_NO_SELECT}),
-                dcc.Graph(id="graph-date-price", style={"flex": "1 1 33%", "minHeight": "120px", **_NO_SELECT}),
-                dcc.Graph(id="graph-volume-price", style={"flex": "1 1 33%", "minHeight": "120px", **_NO_SELECT}),
             ],
         ),
         html.Div(
-            style={"flex": "1 1 60%", "padding": "10px", **_NO_SELECT},
-            children=[dcc.Graph(id="surface-graph", style={"height": "100%", **_NO_SELECT})],
+            style={"flex": "1 1 auto", "display": "flex", "alignItems": "center", "justifyContent": "center", "padding": "10px", "minWidth": 0, **_NO_SELECT},
+            children=[dcc.Graph(id="surface-graph", style={"height": "100%", "width": "100%", **_NO_SELECT})],
         ),
         dcc.Store(id="store-ticker", data=None),
         dcc.Store(id="store-display-data", data=None),
@@ -1012,38 +1006,8 @@ def update_surface(_apply_clicks, _display_data, ticker, smoothing_mode, y_slide
         pass
     # #endregion
     opacity_val = float(surface_opacity) if surface_opacity is not None else 0.5
-    return create_surface_figure(data, ticker, x_range=x_range, y_range=y_range, z_range=z_range, smoothing_mode=sm, surface_opacity=opacity_val), range_data
-
-# 2D グラフ更新（store + 3D hoverData）
-@app.callback(
-    Output("graph-date-volume", "figure"),
-    Output("graph-date-price", "figure"),
-    Output("graph-volume-price", "figure"),
-    Input("store-display-data", "data"),
-    Input("store-ticker", "data"),
-    Input("surface-graph", "hoverData"),
-)
-def update_2d_graphs(_display_data, ticker, hover_data):
-    data = _get_cached_data(ticker)
-    hover_idx = None
-    if data and hover_data and hover_data.get("points"):
-        pt = hover_data["points"][0]
-        y_val = pt.get("y")
-        if isinstance(y_val, (int, float)):
-            hover_idx = int(round(y_val))
-        pi = pt.get("pointIndex")
-        if isinstance(pi, (list, tuple)) and len(pi) >= 1:
-            hover_idx = int(pi[0])
-        if hover_idx is not None and data.get("n_dates"):
-            hover_idx = max(0, min(hover_idx, data["n_dates"] - 1))
-
-    df = load_csv(ticker) if ticker else None
-    day_df = get_day_df(df, data["date_labels"] if data else [], hover_idx) if data and hover_idx is not None else None
-    f1 = create_date_volume_figure(data, hover_idx)
-    f2 = create_date_price_figure(data, hover_idx)
-    f3 = create_volume_price_figure(data, day_df, hover_idx)
-    return f1, f2, f3
-
+    df_5m = load_csv(ticker) if ticker else None
+    return create_surface_figure(data, ticker, x_range=x_range, y_range=y_range, z_range=z_range, smoothing_mode=sm, surface_opacity=opacity_val, df_5m=df_5m), range_data
 
 def _sliced_display_data(data: dict[str, Any], range_data: dict | None):
     """store-current-range に従って日付・株価でスライスしたデータを返す。"""

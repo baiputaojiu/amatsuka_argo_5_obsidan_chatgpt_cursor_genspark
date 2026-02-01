@@ -404,84 +404,129 @@
 {"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "store-ticker", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769876936.4707985}
 {"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769876936.5516853}
 {"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769876936.5711477}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877064.7137914}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877064.729687}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877064.7437723}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877064.8383055}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877064.8558612}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877064.8574343}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877064.8663332}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877064.869691}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877064.9008334}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877064.9365985}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877064.9457638}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877064.949941}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877064.987916}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877064.9953086}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877064.997885}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877068.556833}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877068.5748208}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877068.5831764}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877068.636164}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877068.6566956}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877068.6667473}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877068.6897666}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877068.7088}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877068.7593722}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877068.7642033}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877068.8054106}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877068.8111749}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877070.4325974}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877070.4507396}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877070.461306}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877070.4627476}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877070.5330353}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877070.539246}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877070.540877}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877070.5540724}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877070.5569658}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877070.5662587}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877070.5737703}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877070.5882556}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877070.6655848}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877070.6668496}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877070.6670685}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877070.6738734}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877070.8009267}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877070.8517466}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877070.8674748}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877070.883617}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877070.884424}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877070.919936}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877070.9208653}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877070.9211557}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877072.4989388}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877072.5198703}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877072.5340042}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877072.635888}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877072.639769}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877072.650316}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877072.65233}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877072.6575923}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877072.6664484}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877072.6827955}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877072.6829185}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877072.6831462}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877072.9574926}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877072.968387}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877072.9833515}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877082.8450532}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877082.858763}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877082.8813996}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877082.8822231}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877082.9221401}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877082.9267094}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877082.9355514}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877082.956911}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877083.044407}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877083.045017}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877083.0798104}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877083.083233}
-{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877083.2516866}
-{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877083.2780876}
-{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877083.3142922}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "store-ticker", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877175.0955262}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877175.1264565}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877175.1626825}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "store-ticker", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877176.312966}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877176.325294}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "store-ticker", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877176.3392205}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877176.3704896}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877176.417218}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877176.44987}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "store-ticker", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877233.8958964}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877233.9812157}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877234.8648374}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "store-ticker", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877236.2503967}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877236.53152}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877236.8455565}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "store-ticker", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877237.036448}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877237.0567102}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877237.1208503}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "store-ticker", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877278.2808173}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877278.3972995}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877278.4336202}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "store-ticker", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877294.3200233}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877295.367973}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877295.6986527}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "store-ticker", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877295.9078865}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877295.9270318}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877295.9534717}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "store-ticker", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877297.792979}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877297.8118627}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877297.8767037}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "store-ticker", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877307.272797}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877308.482246}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "store-ticker", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877309.2321153}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877309.2894053}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877309.3595912}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "store-ticker", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769877309.3605878}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769877309.481562}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877310.3386934}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769877311.9791353}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769878054.7777958}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769878054.802971}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769878054.8257606}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769878054.9013417}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769878054.908069}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769878054.9230702}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769878054.9559493}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769878054.9600909}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769878055.1260958}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769878055.7781742}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769878056.5855713}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769878057.0679505}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769878098.1875656}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769878098.5668876}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769878098.670364}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769878098.7523906}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769878098.8287544}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769878098.8770995}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769878098.9081557}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769878099.0669732}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "btn-apply-range", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769878099.163482}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769878099.2848902}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769878099.592071}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769878099.786762}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769878100.4612226}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769878100.7805407}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769878104.5580153}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769878125.4977112}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769878125.555869}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769878125.7421591}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769878125.7423334}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769878125.953489}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769878125.9998689}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769878126.0619457}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769878126.1056385}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769878126.1060262}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769878126.795159}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "smoothing-dropdown", "smoothing_mode": "gaussian_only", "ticker": "7203.T"}, "timestamp": 1769878129.4017148}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769878129.6659014}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "gaussian_only", "smoothing_mode_raw": "gaussian_only"}, "timestamp": 1769878129.7555518}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769878129.8935535}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769878129.924953}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769878130.1136882}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769878130.2548018}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "smoothing-dropdown", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769878130.9466698}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "gaussian_only", "branch": "gaussian_only"}, "timestamp": 1769878131.0835085}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769878131.5976062}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769878131.7092717}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769878131.8905735}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769878132.218201}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769878132.7620552}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769878133.0621774}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769878133.1932073}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769878137.4137018}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769878137.6844199}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769878138.5970545}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769878138.9884276}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769878142.2112517}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769878145.5733895}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769878169.804931}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769878181.783968}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769878182.580088}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769878193.926225}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "store-ticker", "smoothing_mode": "current", "ticker": "4543.T"}, "timestamp": 1769880340.546144}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769880340.6807303}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769880340.7500317}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "store-ticker", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769880646.4214208}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769880646.5001915}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769880646.6459699}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "store-ticker", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769880669.8604193}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769880669.8790662}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769880669.9320142}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "store-ticker", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769880671.334865}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769880671.4705741}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769880672.3327513}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "surface-opacity-slider", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769880701.5924292}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769880701.6080866}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769880701.6657803}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "store-ticker", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769914764.0989857}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769914764.15377}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769914764.2598546}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "store-ticker", "smoothing_mode": "current", "ticker": "7203.T"}, "timestamp": 1769914784.5669208}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769914784.5821187}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769914784.6219432}
+{"hypothesisId": "A,B,E", "location": "update_surface:entry", "message": "triggered", "data": {"triggered_id": "store-ticker", "smoothing_mode": "current", "ticker": "4062.T"}, "timestamp": 1769914802.1391551}
+{"hypothesisId": "B,C", "location": "update_surface:sm", "message": "sm passed to create_surface_figure", "data": {"sm": "current", "smoothing_mode_raw": "current"}, "timestamp": 1769914802.1540592}
+{"hypothesisId": "C", "location": "create_surface_figure:smoothing", "message": "branch", "data": {"smoothing_mode": "current", "branch": "current"}, "timestamp": 1769914802.178022}
