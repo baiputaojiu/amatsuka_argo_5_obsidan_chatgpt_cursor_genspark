@@ -70,6 +70,65 @@ def load_data(metal: str = "silver") -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
+def get_missing_spot_dates(metal: str) -> list[dict]:
+    """現物(0.0)が欠損している日付のリストをドロップダウン用に返す。NaT・不正値は除外する。"""
+    path = get_data_path(metal)
+    if not path.exists():
+        return []
+    df = pd.read_csv(path)
+    if "0.0" not in df.columns or "Date" not in df.columns:
+        return []
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    df["_spot"] = pd.to_numeric(df["0.0"], errors="coerce")
+    # 日付が有効で、かつ 0.0 が NaN の行のみ
+    missing = df.loc[df["Date"].notna() & df["_spot"].isna(), "Date"]
+    missing = missing.drop_duplicates().sort_values()
+    # 文字列に変換（NaT は上で除外済み）
+    labels = missing.dt.strftime("%Y-%m-%d").tolist()
+    return [{"label": s, "value": s} for s in labels if s]
+
+
+def save_spot_price(metal: str, date_str: str, value: float) -> bool:
+    """指定日の現物(0.0)をCSVに上書き保存する"""
+    path = get_data_path(metal)
+    if not path.exists():
+        return False
+    df = pd.read_csv(path)
+    if "0.0" not in df.columns or "Date" not in df.columns:
+        return False
+    # 日付は文字列またはパースして比較
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    mask = df["Date"].notna() & (df["Date"].dt.strftime("%Y-%m-%d") == date_str)
+    if not mask.any():
+        return False
+    df.loc[mask, "0.0"] = value
+    df["Date"] = df["Date"].dt.strftime("%Y-%m-%d")
+    df.to_csv(path, index=False)
+    return True
+
+
+def run_curve_update() -> str:
+    """update_forward_curves.py を実行し、結果メッセージを返す"""
+    script = YIELD_CURVE_3D_DIR / "update_forward_curves.py"
+    if not script.exists():
+        return "更新スクリプトが見つかりません"
+    try:
+        r = subprocess.run(
+            [sys.executable, str(script)],
+            cwd=str(YIELD_CURVE_3D_DIR),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if r.returncode != 0:
+            return f"更新エラー: {r.stderr or r.stdout or 'unknown'}"
+        return (r.stdout or "").strip() or "更新完了"
+    except subprocess.TimeoutExpired:
+        return "更新がタイムアウトしました"
+    except Exception as e:
+        return f"更新失敗: {e}"
+
+
 def create_figure(df: pd.DataFrame, period: str | int, metal: str = "silver") -> go.Figure:
     """フォワードレート時系列グラフを作成"""
     label = METAL_LABELS.get(metal, "シルバー")
@@ -296,16 +355,25 @@ def update_graph(metal, period, update_n_clicks, last_update_clicks):
 )
 def update_missing_spot_and_save(metal, save_n_clicks, selected_date, spot_value):
     from dash import ctx
+
     metal = metal or "silver"
-    options = get_missing_spot_dates(metal)
+    try:
+        options = get_missing_spot_dates(metal)
+    except Exception:
+        options = []
+    if not isinstance(options, list):
+        options = []
     save_status = ""
 
-    if ctx.triggered_id == "save-spot-btn" and save_n_clicks and selected_date and spot_value is not None:
+    if ctx.triggered_id == "save-spot-btn" and save_n_clicks and selected_date is not None and spot_value is not None:
         try:
             v = float(spot_value)
-            if save_spot_price(metal, selected_date, v):
+            if save_spot_price(metal, str(selected_date), v):
                 save_status = "保存しました"
-                options = get_missing_spot_dates(metal)
+                try:
+                    options = get_missing_spot_dates(metal)
+                except Exception:
+                    pass
         except (ValueError, TypeError):
             save_status = "無効な値です"
 
