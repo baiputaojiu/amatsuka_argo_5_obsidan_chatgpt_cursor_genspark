@@ -15,7 +15,7 @@ def _dlog(location: str, message: str, data: dict, hypothesis_id: str):
         pass
 # #endregion
 import pandas as pd
-from dash import Dash, dcc, html, Input, Output
+from dash import Dash, callback_context, dcc, html, Input, Output, State
 import plotly.graph_objs as go
 
 
@@ -37,10 +37,18 @@ def _empty_dataset(country_key: str, display_name: str) -> Dict[str, Any]:
     }
 
 
-def _load_yield_curve(country_key: str, display_name: str, filename: str) -> Dict[str, Any]:
+def _load_yield_curve(
+    country_key: str,
+    display_name: str,
+    filename: str,
+    z_label: str = "利回り (%)",
+    chart_suffix: str = "イールドカーブ",
+) -> Dict[str, Any]:
     """
-    統一形式のイールドカーブCSVを読み込む。
-    形式: 1行目ヘッダー（Date + 残存期間を数値年で表した列名）、値は YYYY-MM-DD と利回り。
+    統一形式のCSVを読み込む。
+    形式: 1行目ヘッダー（Date + 残存期間を数値年で表した列名）、値は YYYY-MM-DD と数値。
+    z_label: Z軸・Y軸のラベル（利回り%/先物価格等）
+    chart_suffix: グラフタイトル用（イールドカーブ/フォワードカーブ）
     """
     try:
         df = pd.read_csv(DATA_DIR / filename)
@@ -70,6 +78,8 @@ def _load_yield_curve(country_key: str, display_name: str, filename: str) -> Dic
     date_labels = date_values.dt.strftime("%Y-%m-%d").tolist()
     z = df[maturity_cols].to_numpy(dtype=float)
     ts_col_index = int(np.argmin(np.abs(maturity_years - 10.0)))
+    if len(maturity_years) > 0 and maturity_years.max() < 2:
+        ts_col_index = int(np.argmin(np.abs(maturity_years - 0.25)))
     return {
         "country": country_key,
         "display_name": display_name,
@@ -79,6 +89,8 @@ def _load_yield_curve(country_key: str, display_name: str, filename: str) -> Dic
         "maturity_labels": maturity_labels,
         "z": z,
         "ts_col_index": ts_col_index,
+        "z_label": z_label,
+        "chart_suffix": chart_suffix,
     }
 
 
@@ -90,6 +102,14 @@ DATASETS: Dict[str, Dict[str, Any]] = {
     "euro": _load_yield_curve("euro", "ユーロ圏", "euro_yield_curve.csv"),
     "china": _load_yield_curve("china", "中国", "china_yield_curve.csv"),
     "india": _load_yield_curve("india", "インド", "india_yield_curve.csv"),
+    "gold": _load_yield_curve(
+        "gold", "ゴールド先物", "gold_forward_curve.csv",
+        z_label="先物価格 (USD/oz)", chart_suffix="フォワードカーブ",
+    ),
+    "silver": _load_yield_curve(
+        "silver", "シルバー先物", "silver_forward_curve.csv",
+        z_label="先物価格 (USD/oz)", chart_suffix="フォワードカーブ",
+    ),
 }
 
 
@@ -105,43 +125,104 @@ def _no_data_figure(title: str = "データがありません") -> go.Figure:
     return fig
 
 
-def create_surface_figure(country_key: str, y_start=None, y_end=None) -> go.Figure:
+def _build_wireframe_traces(
+    maturity_years: np.ndarray,
+    y_indices: np.ndarray,
+    z: np.ndarray,
+    z_label: str,
+) -> list:
+    """ワイヤーフレーム用の Scatter3d トレースを生成。有効なzの点同士のみ線で接続。"""
+    valid = ~np.isnan(z) & np.isfinite(z)
+    x_list, y_list, z_list = [], [], []
+    # 水平線（満期方向）: 同一日付で隣接満期を結ぶ
+    for j in range(z.shape[0]):
+        for i in range(z.shape[1] - 1):
+            if valid[j, i] and valid[j, i + 1]:
+                x_list.extend([maturity_years[i], maturity_years[i + 1], None])
+                y_list.extend([y_indices[j], y_indices[j], None])
+                z_list.extend([z[j, i], z[j, i + 1], None])
+    # 垂直線（日付方向）: 同一満期で隣接日付を結ぶ
+    for i in range(z.shape[1]):
+        for j in range(z.shape[0] - 1):
+            if valid[j, i] and valid[j + 1, i]:
+                x_list.extend([maturity_years[i], maturity_years[i], None])
+                y_list.extend([y_indices[j], y_indices[j + 1], None])
+                z_list.extend([z[j, i], z[j + 1, i], None])
+    if not x_list:
+        return []
+    line_trace = go.Scatter3d(
+        x=x_list,
+        y=y_list,
+        z=z_list,
+        mode="lines",
+        line=dict(color="rgba(100,150,255,0.8)", width=1),
+        hoverinfo="skip",
+    )
+    # 有効な点をマーカーで表示
+    yy, xx = np.where(valid)
+    z_vals = z[yy, xx]
+    point_trace = go.Scatter3d(
+        x=maturity_years[xx],
+        y=y_indices[yy],
+        z=z_vals,
+        mode="markers",
+        marker=dict(size=2, color=z_vals, colorscale="RdBu", reversescale=True),
+        text=[f"残存: {maturity_years[xi]:.2f}年<br>日付idx: {y_indices[yi]}<br>{z_label}: {z[yi, xi]:.3f}" for yi, xi in zip(yy, xx)],
+        hovertemplate="%{text}<extra></extra>",
+    )
+    return [line_trace, point_trace]
+
+
+def create_surface_figure(
+    country_key: str, y_start=None, y_end=None, view_mode: str = "surface"
+) -> go.Figure:
     data = DATASETS[country_key]
     dates = data["dates"]
     maturity_years = data["maturity_years"]
-    z = data["z"]
+    z_full = data["z"]
 
     if len(dates) == 0:
         return _no_data_figure(f"{data['display_name']}のデータがありません")
 
-    # y 軸はインデックス（0,1,2,...) を使い、ラベルに日付を表示
-    y_indices = np.arange(len(dates))
-
-    surface = go.Surface(
-        x=maturity_years,
-        y=y_indices,
-        z=z,
-        colorscale="RdBu",
-        reversescale=True,
-        colorbar=dict(title="利回り (%)"),
-        showscale=True,
-    )
-
-    fig = go.Figure(data=[surface])
-
-    # 日付範囲（インデックス）指定があれば、そこにズーム
-    if y_indices.size == 0:
-        y_min = 0
-        y_max = 0
+    y_indices_full = np.arange(len(dates))
+    # 日付範囲指定があればスライス（表示パフォーマンスのため）
+    if y_start is not None and y_end is not None:
+        y_min = max(0, int(y_start))
+        y_max = min(len(dates) - 1, int(y_end))
     else:
-        y_min = int(y_indices[0])
-        y_max = int(y_indices[-1])
-    if y_start is not None:
-        y_min = max(y_min, int(y_start))
-    if y_end is not None:
-        y_max = min(y_max, int(y_end))
+        y_min = 0
+        y_max = len(dates) - 1
+    y_indices = y_indices_full[y_min : y_max + 1]
+    z = z_full[y_min : y_max + 1, :]
 
-    # 可視範囲の長さに応じて y 軸ラベルの間隔を調整
+    z_label = data.get("z_label", "利回り (%)")
+
+    if view_mode == "wireframe":
+        traces = _build_wireframe_traces(maturity_years, y_indices, z, z_label)
+        if not traces:
+            return _no_data_figure("表示できるデータがありません")
+        fig = go.Figure(data=traces)
+        # ワイヤーフレームは point に colorscale があるので colorbar を point に付与
+        fig.update_traces(
+            marker_showscale=True,
+            selector=dict(mode="markers"),
+        )
+        fig.update_traces(
+            marker_colorbar=dict(title=z_label),
+            selector=dict(mode="markers"),
+        )
+    else:
+        surface = go.Surface(
+            x=maturity_years,
+            y=y_indices,
+            z=z,
+            colorscale="RdBu",
+            reversescale=True,
+            colorbar=dict(title=z_label),
+            showscale=True,
+        )
+        fig = go.Figure(data=[surface])
+
     visible_indices = np.arange(y_min, y_max + 1) if y_max >= y_min else np.array([y_min])
     y_step = max(1, len(visible_indices) // 10)
     tick_indices = visible_indices[::y_step]
@@ -150,20 +231,18 @@ def create_surface_figure(country_key: str, y_start=None, y_end=None) -> go.Figu
         margin=dict(l=0, r=0, t=30, b=0),
         scene=dict(
             xaxis_title="残存期間 (年)",
-            xaxis=dict(
-                autorange="reversed",  # 残存期間軸を反転（短期→長期 を右方向に）
-            ),
+            xaxis=dict(autorange="reversed"),
             yaxis_title="日付",
-            zaxis_title="利回り (%)",
+            zaxis_title=z_label,
             yaxis=dict(
                 tickmode="array",
                 tickvals=tick_indices,
                 ticktext=[dates[int(i)] for i in tick_indices],
-                range=[y_min, y_max],  # 日本に合わせて古い日付が手前
+                range=[y_min, y_max],
             ),
         ),
         template="plotly_dark",
-        title=f"{data['display_name']} イールドカーブ（3D）",
+        title=f"{data['display_name']} {data.get('chart_suffix', 'イールドカーブ')}（3D）",
     )
     return fig
 
@@ -185,6 +264,7 @@ def create_curve_figure(country_key: str, row_index: int, col_index: int) -> go.
     maturity_label = maturity_labels[col_index]
     maturity_x = maturity_years[col_index]
     current_y = y_values[col_index]
+    z_label = data.get("z_label", "利回り (%)")
 
     fig = go.Figure()
     fig.add_trace(
@@ -193,7 +273,7 @@ def create_curve_figure(country_key: str, row_index: int, col_index: int) -> go.
             y=y_values,
             mode="lines+markers",
             text=maturity_labels,
-            hovertemplate="残存期間: %{text}<br>利回り: %{y:.3f}%<extra></extra>",
+            hovertemplate=f"残存期間: %{{text}}<br>{z_label}: %{{y:.3f}}<extra></extra>",
             showlegend=False,
         )
     )
@@ -211,17 +291,18 @@ def create_curve_figure(country_key: str, row_index: int, col_index: int) -> go.
             marker=dict(color="red", size=10),
             showlegend=False,
             hovertext=[maturity_label],
-            hovertemplate="残存期間: %{hovertext}<br>利回り: %{y:.3f}%<extra></extra>",
+            hovertemplate=f"残存期間: %{{hovertext}}<br>{z_label}: %{{y:.3f}}<extra></extra>",
         )
     )
 
+    chart_suffix = data.get("chart_suffix", "イールドカーブ")
     fig.update_layout(
         margin=dict(l=40, r=10, t=30, b=40),
         xaxis_title="残存期間 (年)",
-        yaxis_title="利回り (%)",
+        yaxis_title=z_label,
         template="plotly_dark",
         showlegend=False,
-        title=f"{date_label} のイールドカーブ断面（{maturity_label} を強調）",
+        title=f"{date_label} の{chart_suffix}断面（{maturity_label} を強調）",
     )
     return fig
 
@@ -247,6 +328,7 @@ def create_timeseries_figure(
 
     y_values = z[:, col_index]
     maturity_label = maturity_labels[col_index]
+    z_label = data.get("z_label", "利回り (%)")
 
     fig = go.Figure()
     fig.add_trace(
@@ -255,7 +337,7 @@ def create_timeseries_figure(
             y=y_values,
             mode="lines",
             hovertext=dates,
-            hovertemplate="日付: %{hovertext}<br>利回り: %{y:.3f}%<extra></extra>",
+            hovertemplate=f"日付: %{{hovertext}}<br>{z_label}: %{{y:.3f}}<extra></extra>",
             showlegend=False,
         )
     )
@@ -278,7 +360,7 @@ def create_timeseries_figure(
             marker=dict(color="red", size=10),
             showlegend=False,
             hovertext=[dates[row_index]],
-            hovertemplate="日付: %{hovertext}<br>利回り: %{y:.3f}%<extra></extra>",
+            hovertemplate=f"日付: %{{hovertext}}<br>{z_label}: %{{y:.3f}}<extra></extra>",
         )
     )
 
@@ -297,10 +379,10 @@ def create_timeseries_figure(
             ticktext=[dates[i] for i in range(0, len(dates), max(1, len(dates) // 10))],
             range=[y_start, y_end],
         ),
-        yaxis_title="利回り (%)",
+        yaxis_title=z_label,
         template="plotly_dark",
         showlegend=False,
-        title=f"{maturity_label} の利回りの推移（{dates[row_index]} を強調）",
+        title=f"{maturity_label} の推移（{dates[row_index]} を強調）",
     )
     return fig
 
@@ -347,6 +429,8 @@ app.layout = html.Div(
                                 {"label": "ユーロ圏", "value": "euro"},
                                 {"label": "中国", "value": "china"},
                                 {"label": "インド", "value": "india"},
+                                {"label": "ゴールド先物", "value": "gold"},
+                                {"label": "シルバー先物", "value": "silver"},
                             ],
                             value="japan",
                             clearable=False,
@@ -401,6 +485,16 @@ app.layout = html.Div(
                 **_NO_SELECT,
             },
             children=[
+                dcc.Store(id="surface-view-mode", data="surface"),
+                html.Div(
+                    id="surface-view-buttons",
+                    style={"marginBottom": "8px", "display": "flex", "gap": "8px", "alignItems": "center"},
+                    children=[
+                        html.Span("3D表示:", style={"fontSize": "12px"}),
+                        html.Button("面", id="btn-view-surface", n_clicks=0),
+                        html.Button("ワイヤーフレーム", id="btn-view-wireframe", n_clicks=0),
+                    ],
+                ),
                 dcc.Graph(
                     id="surface-graph",
                     style={"height": "100%", **_NO_SELECT},
@@ -466,12 +560,42 @@ def init_date_slider(country_key: str):
     return min_idx, max_idx, out_value, marks
 
 
+_BTN_BASE = {"fontSize": "12px", "padding": "4px 12px", "cursor": "pointer"}
+_BTN_ACTIVE = {**_BTN_BASE, "backgroundColor": "#4a7", "borderColor": "#6c9"}
+_BTN_INACTIVE = {**_BTN_BASE, "backgroundColor": "#333", "borderColor": "#555"}
+
+
+@app.callback(
+    Output("surface-view-mode", "data"),
+    Input("btn-view-surface", "n_clicks"),
+    Input("btn-view-wireframe", "n_clicks"),
+)
+def update_view_mode(_n_surface, _n_wireframe):
+    ctx = callback_context
+    if not ctx.triggered:
+        return "surface"
+    tid = ctx.triggered[0]["prop_id"].split(".")[0]
+    return "surface" if tid == "btn-view-surface" else "wireframe"
+
+
+@app.callback(
+    Output("btn-view-surface", "style"),
+    Output("btn-view-wireframe", "style"),
+    Input("surface-view-mode", "data"),
+)
+def update_button_styles(view_mode: str):
+    if view_mode == "wireframe":
+        return _BTN_INACTIVE, _BTN_ACTIVE
+    return _BTN_ACTIVE, _BTN_INACTIVE
+
+
 @app.callback(
     Output("surface-graph", "figure"),
     Input("country-dropdown", "value"),
     Input("date-range-slider", "value"),
+    Input("surface-view-mode", "data"),
 )
-def update_surface(country_key: str, slider_value):
+def update_surface(country_key: str, slider_value, view_mode: str):
     # #region agent log
     _dlog("app.py:update_surface", "entry", {"country_key": country_key, "slider_value": repr(slider_value), "slider_value_is_none": slider_value is None}, "H1")
     # #endregion
@@ -479,17 +603,18 @@ def update_surface(country_key: str, slider_value):
         country_key = "japan"
     data = DATASETS[country_key]
     n = len(data["dates"])
+    mode = view_mode if view_mode in ("surface", "wireframe") else "surface"
     if not slider_value or n == 0:
         # #region agent log
         _dlog("app.py:update_surface", "branch no_slider_or_n0", {"returning_full_figure": True}, "H3")
         # #endregion
-        return create_surface_figure(country_key)
+        return create_surface_figure(country_key, view_mode=mode)
     start_idx = max(0, min(int(slider_value[0]), n - 1))
     end_idx = max(start_idx, min(int(slider_value[1]), n - 1))
     # #region agent log
     _dlog("app.py:update_surface", "before_create", {"start_idx": start_idx, "end_idx": end_idx}, "H3")
     # #endregion
-    return create_surface_figure(country_key, start_idx, end_idx)
+    return create_surface_figure(country_key, start_idx, end_idx, view_mode=mode)
 
 
 @app.callback(
@@ -587,5 +712,5 @@ def update_2d_graphs(country_key: str, hover_data: Dict[str, Any] | None, slider
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True, port=8051)
 
