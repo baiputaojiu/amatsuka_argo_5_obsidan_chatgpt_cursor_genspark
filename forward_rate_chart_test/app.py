@@ -1,9 +1,9 @@
 """
-シルバー/ゴールド 1ヶ月フォワードレート時系列チャート（テスト用）
+シルバー/ゴールド/日経 フォワードレート時系列チャート（テスト用）
 
-画像のXAG1M=TTKL風グラフを再現。金属切り替えでゴールドも表示。
-- データ: silver_forward_curve.csv / gold_forward_curve.csv（0.0=現物、1=フロント月）
-- レート = (フロント月 - 現物) / 現物 * 100 (%)
+画像のXAG1M=TTKL風グラフを再現。銘柄切り替えでゴールド・日経も表示。
+- データ: silver/gold/nikkei_forward_curve.csv（0.0=現物、1=フロント月/限月）
+- レート = (フロント - 現物) / 現物 * 100 (%)
 - ダークテーマ、Y=0（Par）基準線、期間切り替え（6ヶ月など）
 """
 
@@ -21,14 +21,19 @@ BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR.parent / "yield_curve_3d" / "data"
 YIELD_CURVE_3D_DIR = BASE_DIR.parent / "yield_curve_3d"
 
-# 金属ごとのCSVと表示名
+# 銘柄ごとのCSVと表示名（シルバー/ゴールド/日経）
 METAL_OPTIONS = [
     {"label": "シルバー (XAG)", "value": "silver"},
     {"label": "ゴールド (XAU)", "value": "gold"},
+    {"label": "日経 (N225)", "value": "nikkei"},
 ]
-METAL_FILES = {"silver": "silver_forward_curve.csv", "gold": "gold_forward_curve.csv"}
-METAL_LABELS = {"silver": "シルバー", "gold": "ゴールド"}
-METAL_SYMBOLS = {"silver": "XAG", "gold": "XAU"}
+METAL_FILES = {
+    "silver": "silver_forward_curve.csv",
+    "gold": "gold_forward_curve.csv",
+    "nikkei": "nikkei_forward_curve.csv",
+}
+METAL_LABELS = {"silver": "シルバー", "gold": "ゴールド", "nikkei": "日経"}
+METAL_SYMBOLS = {"silver": "XAG", "gold": "XAU", "nikkei": "N225"}
 
 # 期間オプション（日数）
 PERIOD_OPTIONS = [
@@ -46,7 +51,7 @@ PERIOD_OPTIONS = [
 
 
 def get_data_path(metal: str) -> Path:
-    """金属に応じたCSVパスを返す"""
+    """銘柄に応じたCSVパスを返す"""
     f = METAL_FILES.get(metal, METAL_FILES["silver"])
     return DATA_DIR / f
 

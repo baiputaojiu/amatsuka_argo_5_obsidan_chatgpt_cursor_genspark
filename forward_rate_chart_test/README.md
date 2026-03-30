@@ -1,6 +1,6 @@
-# シルバー / ゴールド 1ヶ月フォワードレート チャート（テスト）
+# シルバー / ゴールド / 日経 フォワードレート チャート（テスト）
 
-XAG1M=TTKL風の1ヶ月フォワードレート時系列グラフのテスト用アプリです。
+XAG1M=TTKL風のフォワードレート時系列グラフのテスト用アプリです。シルバー・ゴールド・日経を切り替えて表示できます。
 
 ## 起動方法（仮想環境で実行）
 
@@ -23,13 +23,14 @@ python app.py
 
 ## データ
 
-- `yield_curve_3d/data/silver_forward_curve.csv` および `gold_forward_curve.csv` を参照
-- 列: Date, 0.0（現物）, 1（フロント月）, 2, 3, …。レート = (1 - 0.0) / 0.0 × 100 (%)
+- `yield_curve_3d/data/` の `silver_forward_curve.csv` / `gold_forward_curve.csv` / `nikkei_forward_curve.csv` を参照
+- 列: Date, 0.0（現物）, 1（フロント月/限月）, …。レート = (1 - 0.0) / 0.0 × 100 (%)
+- 日経のCSVは `yield_curve_3d/fetch_nikkei_data.py` で取得（yfinance: ^N225 + NIY=F）
 
 ## 機能
 
-- 金属切り替え: シルバー (XAG) / ゴールド (XAU)
+- 銘柄切り替え: シルバー (XAG) / ゴールド (XAU) / 日経 (N225)
 - 期間切り替え: 1日 / 5日 / 10日 / 1ヶ月 / 3ヶ月 / 6ヶ月 / 2025年4月〜 / 年初来 / 1年 / 最大
-- 限月データを更新: yfinance で新規日付のみ追加（既存データは変更しない）
+- 限月データを更新: yfinance で新規日付のみ追加（既存データは変更しない）。利用するには `pip install -r requirements.txt` で yfinance を入れておくこと。
 - 現在価格が無い日: 日付を選んで現物価格を手入力して保存
 - Y=0（Par）基準線、棒グラフ、ダークテーマ
