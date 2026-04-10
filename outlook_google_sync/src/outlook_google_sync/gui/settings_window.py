@@ -123,7 +123,7 @@ class SettingsWindow(tk.Toplevel):
         ttk.Combobox(f, textvariable=mlp, values=["source", "google"], state="readonly", width=12).grid(row=row, column=1, sticky="w")
         row += 1
 
-        ttk.Label(f, text="通常同期 = 差分同期（変更のみ書込）\n強制フル同期 = 全件再評価", foreground="gray").grid(row=row, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Label(f, text="通常同期 = 差分同期（変更のみ書込）\nフル同期 = 全件再評価", foreground="gray").grid(row=row, column=0, columnspan=2, sticky="w", pady=(8, 0))
         row += 1
 
         ttk.Label(
