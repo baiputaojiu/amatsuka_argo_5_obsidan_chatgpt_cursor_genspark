@@ -12,7 +12,13 @@ from tkcalendar import DateEntry
 from ..config.settings_store import load_settings, save_settings
 from ..connectors.outlook_com import read_events_from_outlook
 from ..connectors.outlook_ics import read_events_from_ics
-from ..connectors.google_calendar import get_calendar_time_zone, list_calendars, list_managed_events
+from ..connectors.google_calendar import (
+    get_calendar_time_zone,
+    list_all_events_in_range,
+    list_calendars,
+    list_managed_event_items,
+    list_managed_events,
+)
 from ..logging.logger_factory import build_logger
 from ..models.profile import FilterConfig
 from ..services.connection_test import test_ics_file, test_google, test_outlook_com
@@ -24,7 +30,7 @@ from ..sync.preview import build_preview
 from .settings_window import SettingsWindow
 from .preview_window import PreviewWindow
 from .duplicate_repair_window import DuplicateRepairWindow
-from .dialogs import DeleteConfirmDialog, SummaryDialog, RetryDialog
+from .dialogs import DeleteConfirmDialog, DuplicateRepairOptionsDialog, SummaryDialog, RetryDialog
 from .ttk_style import apply_button_contrast_style
 
 
@@ -45,8 +51,12 @@ class MainWindow(tk.Tk):
             "conflict_policy": "overwrite",
             "notification_enabled": True,
             "log_verbosity": "standard",
+            "duplicate_repair_mode": "sync_key",
+            "duplicate_repair_description_mode": "longer",
         }
         self.state_data.update(self.settings.get("runtime_state", {}))
+        self.state_data.setdefault("duplicate_repair_mode", "sync_key")
+        self.state_data.setdefault("duplicate_repair_description_mode", "longer")
         self._cancel_flag = threading.Event()
         self._last_preview = None
         self._build()
@@ -82,13 +92,13 @@ class MainWindow(tk.Tk):
         bar.pack(fill="x", padx=8)
         self.btns = []
         for text, cmd in [
-            ("通常プレビュー", lambda: self.worker(self.preview_normal)),
-            ("フルプレビュー", lambda: self.worker(self.preview_full)),
-            ("通常同期", lambda: self.worker(lambda: self.sync("normal"))),
-            ("強制フル同期", lambda: self.worker(lambda: self.sync("full"))),
-            ("接続テスト", lambda: self.worker(self.connection_test)),
-            ("重複修復", lambda: self.worker(self.duplicate_repair)),
             ("設定", self.open_settings),
+            ("接続テスト", lambda: self.worker(self.connection_test)),
+            ("通常プレビュー", lambda: self.worker(self.preview_normal)),
+            ("通常同期", lambda: self.worker(lambda: self.sync("normal"))),
+            ("フルプレビュー", lambda: self.worker(self.preview_full)),
+            ("フル同期", lambda: self.worker(lambda: self.sync("full"))),
+            ("重複修復", lambda: self.worker(self.duplicate_repair)),
         ]:
             b = ttk.Button(bar, text=text, command=cmd)
             b.pack(side="left", padx=3)
@@ -430,10 +440,52 @@ class MainWindow(tk.Tk):
     # ── Duplicate repair (Ch27) ──
 
     def duplicate_repair(self):
-        from ..sync.duplicate_repair import find_duplicates
+        dlg = DuplicateRepairOptionsDialog(
+            self,
+            initial_mode=self.state_data.get("duplicate_repair_mode", "sync_key"),
+        )
+        if dlg.result is None:
+            return
+        mode = dlg.result
+        self.state_data["duplicate_repair_mode"] = mode
+        self.settings["runtime_state"] = {**self.state_data, "ics_path": self.ics_var.get().strip()}
+        save_settings(self.settings)
+
         cal_id = self.state_data.get("calendar_id", "primary")
         sd = datetime.combine(self.start.get_date(), datetime.min.time())
         ed = datetime.combine(self.end.get_date(), datetime.max.time())
-        existing = list_managed_events(cal_id, sd, ed)
-        dup_map = find_duplicates(list(existing.values()))
-        self.after(0, lambda: DuplicateRepairWindow(self, dup_map, cal_id))
+        init_desc = self.state_data.get("duplicate_repair_description_mode", "longer")
+
+        def job():
+            from ..sync.duplicate_repair import (
+                build_groups_for_mode,
+                filter_events_within_start_end_dates,
+            )
+
+            try:
+                if mode == "sync_key":
+                    events = list_managed_event_items(cal_id, sd, ed)
+                else:
+                    events = list_all_events_in_range(cal_id, sd, ed)
+                events = filter_events_within_start_end_dates(events, sd, ed)
+                groups = build_groups_for_mode(mode, events)
+                self.after(
+                    0,
+                    lambda g=groups, m=mode, d=init_desc: DuplicateRepairWindow(
+                        self,
+                        g,
+                        cal_id,
+                        mode=m,
+                        initial_description_mode=d,
+                    ),
+                )
+            except Exception as e:
+                self.logger.error("duplicate_repair: %s", e, exc_info=True)
+                err_text = str(e)
+                self.after(0, lambda msg=err_text: self.log_msg(f"ERROR: {msg}"))
+                self.after(
+                    0,
+                    lambda msg=err_text: messagebox.showerror("重複修復", msg),
+                )
+
+        self.worker(job)

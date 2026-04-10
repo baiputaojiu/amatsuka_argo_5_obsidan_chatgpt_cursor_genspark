@@ -8,6 +8,107 @@ def ask_yes_no(title: str, message: str) -> bool:
     return messagebox.askyesno(title, message)
 
 
+class DuplicateRepairOptionsDialog(tk.Toplevel):
+    """Choose duplicate detection mode."""
+
+    def __init__(
+        self,
+        master,
+        *,
+        initial_mode: str = "sync_key",
+    ):
+        super().__init__(master)
+        self.title("重複修復の設定")
+        self.geometry("520x200")
+        self.transient(master)
+        self.grab_set()
+        self.result: str | None = None
+
+        f = ttk.Frame(self, padding=12)
+        f.pack(fill="both", expand=True)
+
+        ttk.Label(f, text="検出する重複の種類").pack(anchor="w")
+        self.var_mode = tk.StringVar(value=initial_mode)
+        ttk.Radiobutton(
+            f,
+            text="同一 sync_key のみ（ツール管理で同じキーが複数行）",
+            variable=self.var_mode,
+            value="sync_key",
+        ).pack(anchor="w", pady=(6, 0))
+        ttk.Radiobutton(
+            f,
+            text="同名・同開始・同終了（ツール未管理の行も含む）",
+            variable=self.var_mode,
+            value="content",
+        ).pack(anchor="w", pady=(4, 0))
+
+        ttk.Label(
+            f,
+            text="説明文のマージ方法は、マージ前プレビュー画面でグループごとに選べます。",
+            foreground="gray",
+            wraplength=480,
+        ).pack(anchor="w", pady=(14, 0))
+
+        bf = ttk.Frame(f)
+        bf.pack(fill="x", pady=(16, 0))
+        ttk.Button(bf, text="続行", command=self._ok).pack(side="right", padx=(6, 0))
+        ttk.Button(bf, text="キャンセル", command=self._cancel).pack(side="right")
+
+        self.wait_window()
+
+    def _ok(self) -> None:
+        self.result = self.var_mode.get()
+        self.destroy()
+
+    def _cancel(self) -> None:
+        self.result = None
+        self.destroy()
+
+
+class DescriptionMergeDialog(tk.Toplevel):
+    """Choose description merge mode for batch duplicate merge."""
+
+    def __init__(self, master, *, initial: str = "longer"):
+        super().__init__(master)
+        self.title("説明文のマージ")
+        self.geometry("420x180")
+        self.transient(master)
+        self.grab_set()
+        self.result: str | None = None
+
+        f = ttk.Frame(self, padding=12)
+        f.pack(fill="both", expand=True)
+        ttk.Label(f, text="一括マージ時の説明文の扱いを選んでください。").pack(anchor="w")
+        self.var_desc = tk.StringVar(value=initial)
+        ttk.Radiobutton(
+            f,
+            text="より長い説明文を採用",
+            variable=self.var_desc,
+            value="longer",
+        ).pack(anchor="w", pady=(10, 0))
+        ttk.Radiobutton(
+            f,
+            text="区切り（---）付きで連結",
+            variable=self.var_desc,
+            value="concat",
+        ).pack(anchor="w", pady=(4, 0))
+
+        bf = ttk.Frame(f)
+        bf.pack(fill="x", pady=(16, 0))
+        ttk.Button(bf, text="OK", command=self._ok).pack(side="right", padx=(6, 0))
+        ttk.Button(bf, text="キャンセル", command=self._cancel).pack(side="right")
+
+        self.wait_window()
+
+    def _ok(self) -> None:
+        self.result = self.var_desc.get()
+        self.destroy()
+
+    def _cancel(self) -> None:
+        self.result = None
+        self.destroy()
+
+
 class DeleteConfirmDialog(tk.Toplevel):
     """Ch26.3: Modal dialog for delete candidate confirmation."""
 

@@ -11,6 +11,9 @@ def migrate_config(path):
         return data
     if old < SCHEMA_VERSION:
         data.setdefault("runtime_state", {})
+        rs = data["runtime_state"]
+        rs.setdefault("duplicate_repair_mode", "sync_key")
+        rs.setdefault("duplicate_repair_description_mode", "longer")
         data.setdefault("sync_metadata", {"per_source_fingerprint": {}})
         data["schema_version"] = SCHEMA_VERSION
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
