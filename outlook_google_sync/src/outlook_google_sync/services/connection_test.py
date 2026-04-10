@@ -4,8 +4,29 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from typing import Any
+import json
+import time
+from pathlib import Path
 
 logger = logging.getLogger("outlook_google_sync")
+
+
+def _dbg(hid: str, loc: str, msg: str, data: dict) -> None:
+    try:
+        rec = {
+            "sessionId": "b3c4c4",
+            "runId": "shortcut-conn-test",
+            "hypothesisId": hid,
+            "location": loc,
+            "message": msg,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        Path("debug-b3c4c4.log").open("a", encoding="utf-8").write(
+            json.dumps(rec, ensure_ascii=False) + "\n"
+        )
+    except Exception:
+        pass
 
 # Outlook OlObjectClass (代表値) — 既定カレンダーでよく出るもの
 _OL_CLASS_NAMES: dict[int, str] = {
@@ -52,12 +73,71 @@ def _first_item_detail_lines(first: Any) -> list[str]:
 
 def test_outlook_com(start_dt: datetime | None = None, end_dt: datetime | None = None) -> tuple[bool, str]:
     """Ch24.2: COM connection test."""
+    # region agent log
+    _dbg(
+        "H1",
+        "services/connection_test.py:test_outlook_com:entry",
+        "enter test_outlook_com",
+        {
+            "start_dt": str(start_dt),
+            "end_dt": str(end_dt),
+        },
+    )
+    # endregion
     try:
+        import sys
+        # region agent log
+        _dbg(
+            "H1",
+            "services/connection_test.py:test_outlook_com:pre-import",
+            "python runtime info",
+            {
+                "executable": getattr(sys, "executable", ""),
+                "prefix": getattr(sys, "prefix", ""),
+                "path0": sys.path[0] if getattr(sys, "path", None) else "",
+            },
+        )
+        # endregion
         import win32com.client  # type: ignore
+        try:
+            import win32timezone  # type: ignore
+            # region agent log
+            _dbg(
+                "H2",
+                "services/connection_test.py:test_outlook_com:import-win32timezone",
+                "win32timezone import ok",
+                {},
+            )
+            # endregion
+        except Exception as tz_exc:
+            # region agent log
+            _dbg(
+                "H2",
+                "services/connection_test.py:test_outlook_com:import-win32timezone",
+                "win32timezone import failed",
+                {"error": repr(tz_exc)},
+            )
+            # endregion
     except ImportError:
+        # region agent log
+        _dbg(
+            "H3",
+            "services/connection_test.py:test_outlook_com:importerror",
+            "win32com import failed",
+            {},
+        )
+        # endregion
         return False, "pywin32 未導入。手動ICSまたはマクロ連携をお使いください。"
 
     try:
+        # region agent log
+        _dbg(
+            "H4",
+            "services/connection_test.py:test_outlook_com:dispatch-start",
+            "starting dispatch",
+            {},
+        )
+        # endregion
         app = win32com.client.Dispatch("Outlook.Application")
         ns = app.GetNamespace("MAPI")
         folder = ns.GetDefaultFolder(9)
@@ -105,8 +185,24 @@ def test_outlook_com(start_dt: datetime | None = None, end_dt: datetime | None =
             + ("\n" + "\n".join(restrict_lines) if restrict_lines else "")
         )
         logger.info(msg)
+        # region agent log
+        _dbg(
+            "H5",
+            "services/connection_test.py:test_outlook_com:success",
+            "connection test success",
+            {"count": count},
+        )
+        # endregion
         return True, msg
     except Exception as exc:
+        # region agent log
+        _dbg(
+            "H4",
+            "services/connection_test.py:test_outlook_com:exception",
+            "connection test exception",
+            {"error": repr(exc)},
+        )
+        # endregion
         msg = f"Outlook COM 接続テスト失敗: {exc}"
         logger.error(msg)
         return False, msg
