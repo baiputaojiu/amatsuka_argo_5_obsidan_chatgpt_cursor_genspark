@@ -1,0 +1,32 @@
+/* ドラッグ時にテキスト選択・コピーにならないよう選択を無効化 */
+.js-plotly-plot,
+.js-plotly-plot .plot-container,
+.js-plotly-plot .svg-container,
+.js-plotly-plot canvas,
+.rc-slider,
+.rc-slider * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
+}
+
+/* 国選択ドロップダウン: 白地に黒文字で見やすくする */
+.country-dropdown-dark-text .Select-control,
+.country-dropdown-dark-text .Select-value-label,
+.country-dropdown-dark-text .Select-input {
+  color: #111 !important;
+  background-color: #fff !important;
+}
+.country-dropdown-dark-text .Select-menu-outer,
+.country-dropdown-dark-text .VirtualizedSelectOption {
+  color: #111 !important;
+  background-color: #fff !important;
+}
+.country-dropdown-dark-text .VirtualizedSelectFocusedOption {
+  background-color: #e8e8e8 !important;
+  color: #111 !important;
+}
+.country-dropdown-dark-text .Select-input > input {
+  color: #111 !important;
+}
