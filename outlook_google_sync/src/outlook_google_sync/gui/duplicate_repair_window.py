@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import tkinter as tk
+import threading
 from tkinter import messagebox, ttk
 
 from ..config.settings_store import save_settings
 from ..connectors.google_calendar import get_event
 from ..sync.duplicate_merge import execute_duplicate_merge
 from ..sync.duplicate_repair import DuplicateGroup
+from .progress_window import ProgressWindow
 
 _CHOICES = {
     "skip": "マージしない",
@@ -58,6 +60,7 @@ class DuplicateRepairWindow(tk.Toplevel):
         self._group_by_parent: dict[str, DuplicateGroup] = {}
         self._group_choice: dict[str, tk.StringVar] = {}
         self._group_full_cache: dict[str, list[dict]] = {}
+        self._progress_win: ProgressWindow | None = None
 
         if not groups:
             ttk.Label(self, text="重複候補はありません。").pack(pady=20)
@@ -255,6 +258,21 @@ class DuplicateRepairWindow(tk.Toplevel):
         }
         save_settings(top.settings)
 
+    def _open_progress(self, message: str) -> None:
+        self._close_progress()
+        self._progress_win = ProgressWindow(self, title="重複修復中")
+        self._progress_win.set_indeterminate(message)
+
+    def _close_progress(self) -> None:
+        if self._progress_win is not None:
+            self._progress_win.close_safe()
+            self._progress_win = None
+
+    def _set_progress(self, current: int, total: int, message: str) -> None:
+        if self._progress_win is None:
+            return
+        self._progress_win.set_progress(current, total, message)
+
     def _run_batch(self) -> None:
         ops: list[tuple[DuplicateGroup, str]] = []
         blocked: list[str] = []
@@ -281,10 +299,14 @@ class DuplicateRepairWindow(tk.Toplevel):
 
         for b in self._action_btns:
             b.configure(state="disabled")
-        merged_count = 0
-        err: list[str] = []
-        try:
-            for g, mode in ops:
+        self._open_progress("一括マージを開始しています...")
+
+        def run_batch():
+            merged_count = 0
+            err: list[str] = []
+            total = len(ops)
+            for idx, (g, mode) in enumerate(ops, start=1):
+                self.after(0, lambda i=idx, t=total, gid=g.group_id: self._set_progress(i - 1, t, f"処理中 {i}/{t}: {gid[:18]}"))
                 try:
                     full = self._load_group_full(g)
                     sorted_full = sorted(full, key=_start_sort_key)
@@ -295,16 +317,21 @@ class DuplicateRepairWindow(tk.Toplevel):
                     merged_count += 1
                 except Exception as exc:
                     err.append(f"{g.group_id[:16]}: {exc}")
-        finally:
-            for b in self._action_btns:
-                b.configure(state="normal")
+                self.after(0, lambda i=idx, t=total, gid=g.group_id: self._set_progress(i, t, f"処理中 {i}/{t}: {gid[:18]}"))
 
-        if last_mode in ("longer", "concat"):
-            self._persist_last_mode(last_mode)
+            def done():
+                self._close_progress()
+                for b in self._action_btns:
+                    b.configure(state="normal")
+                if last_mode in ("longer", "concat"):
+                    self._persist_last_mode(last_mode)
+                if blocked:
+                    err.append(f"場所不一致で除外: {len(blocked)} グループ")
+                if err:
+                    messagebox.showerror("一部失敗", "\n".join(err[:10]))
+                messagebox.showinfo("完了", f"一括マージ完了: {merged_count} グループ")
+                self.destroy()
 
-        if blocked:
-            err.append(f"場所不一致で除外: {len(blocked)} グループ")
-        if err:
-            messagebox.showerror("一部失敗", "\n".join(err[:10]))
-        messagebox.showinfo("完了", f"一括マージ完了: {merged_count} グループ")
-        self.destroy()
+            self.after(0, done)
+
+        threading.Thread(target=run_batch, daemon=True).start()
