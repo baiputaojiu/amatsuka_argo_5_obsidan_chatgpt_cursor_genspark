@@ -8,6 +8,7 @@ from typing import Callable, Optional
 from ..connectors.google_calendar import (
     delete_event,
     detach_event,
+    get_calendar_time_zone,
     list_managed_events,
     upsert_event,
 )
@@ -52,6 +53,8 @@ class SyncEngine:
         if progress:
             progress("Google 既存イベント取得中...")
 
+        cal_tz = get_calendar_time_zone(calendar_id)
+
         existing = list_managed_events(
             calendar_id,
             min(e.start for e in events),
@@ -74,7 +77,7 @@ class SyncEngine:
                 self.logger.info("Sync cancelled by user")
                 break
 
-            body = e.to_google_body(detail_level)
+            body = e.to_google_body(detail_level, time_zone=cal_tz)
             google_item = existing.get(e.sync_key)
             event_id = google_item["id"] if google_item else None
 

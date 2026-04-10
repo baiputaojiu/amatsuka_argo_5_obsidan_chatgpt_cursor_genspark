@@ -13,6 +13,9 @@ from ..config.paths import credentials_path, token_path
 
 logger = logging.getLogger("outlook_google_sync")
 
+# API 失敗時のフォールバック（環境に依存しない IANA）
+_CALENDAR_TZ_FALLBACK = "UTC"
+
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 TOOL_MARKER = "outlook_google_sync_v1"
 
@@ -42,6 +45,24 @@ def list_calendars() -> list[dict]:
     return get_service().calendarList().list(maxResults=250).execute().get("items", [])
 
 
+def get_calendar_time_zone(calendar_id: str) -> str:
+    """同期先カレンダーの IANA タイムゾーン（events の dateTime + timeZone に使う）。"""
+    try:
+        service = get_service()
+        cal = service.calendars().get(calendarId=calendar_id).execute()
+        tz = cal.get("timeZone")
+        if tz:
+            return str(tz)
+    except Exception as exc:
+        logger.warning(
+            "カレンダー timeZone 取得失敗 (%s): %s — %s を使用します",
+            calendar_id,
+            exc,
+            _CALENDAR_TZ_FALLBACK,
+        )
+    return _CALENDAR_TZ_FALLBACK
+
+
 def list_managed_events(calendar_id: str, time_min: datetime, time_max: datetime) -> dict[str, dict]:
     """Return {sync_key: google_event} for tool-managed events in the range."""
     service = get_service()
@@ -66,6 +87,43 @@ def list_managed_events(calendar_id: str, time_min: datetime, time_max: datetime
         if key:
             by_key[key] = item
     return by_key
+
+
+def list_managed_event_items(calendar_id: str, time_min: datetime, time_max: datetime) -> list[dict]:
+    """Return all tool-managed events in the range (multiple rows may share one sync_key)."""
+    service = get_service()
+    items = (
+        service.events()
+        .list(
+            calendarId=calendar_id,
+            timeMin=time_min.isoformat() + "Z",
+            timeMax=time_max.isoformat() + "Z",
+            singleEvents=True,
+            maxResults=2500,
+        )
+        .execute()
+        .get("items", [])
+    )
+    out: list[dict] = []
+    for item in items:
+        private = ((item.get("extendedProperties") or {}).get("private") or {})
+        if private.get("tool_marker") != TOOL_MARKER:
+            continue
+        if private.get("sync_key"):
+            out.append(item)
+    return out
+
+
+def get_event(calendar_id: str, event_id: str) -> dict:
+    """Full event resource (for preview: description, attendees, etc.)."""
+    service = get_service()
+    return service.events().get(calendarId=calendar_id, eventId=event_id).execute()
+
+
+def patch_event_merge(calendar_id: str, event_id: str, body: dict) -> dict:
+    """Patch event without injecting TOOL_MARKER (duplicate merge for unmanaged-only groups)."""
+    service = get_service()
+    return service.events().patch(calendarId=calendar_id, eventId=event_id, body=body).execute()
 
 
 def list_all_events_in_range(calendar_id: str, time_min: datetime, time_max: datetime) -> list[dict]:
@@ -151,8 +209,9 @@ def upsert_events(calendar_id: str, events, detail_level: str = "full"):
     )
     created = updated = 0
     errors: list[str] = []
+    tz = get_calendar_time_zone(calendar_id)
     for e in events:
-        body = e.to_google_body(detail_level)
+        body = e.to_google_body(detail_level, time_zone=tz)
         try:
             eid = existing.get(e.sync_key, {}).get("id")
             action, _ = upsert_event(calendar_id, eid, body)

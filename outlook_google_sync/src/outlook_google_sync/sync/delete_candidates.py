@@ -5,6 +5,13 @@ from datetime import datetime
 TOOL_MARKER = "outlook_google_sync_v1"
 
 
+def _to_local_naive(dt: datetime) -> datetime:
+    """GUI の range は naive ローカル。Google の dateTime は aware になり得るので揃える。"""
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone().replace(tzinfo=None)
+
+
 def select_delete_candidates(
     existing_by_key: dict[str, dict],
     current_keys,
@@ -45,6 +52,8 @@ def _overlaps_range(item: dict, range_start: datetime, range_end: datetime) -> b
     ev_end = _parse_event_dt(item.get("end", {}))
     if ev_start is None or ev_end is None:
         return True  # conservative: include if we can't determine
+    ev_start = _to_local_naive(ev_start)
+    ev_end = _to_local_naive(ev_end)
     return ev_end > range_start and ev_start < range_end
 
 
