@@ -12,7 +12,7 @@ from tkcalendar import DateEntry
 from ..config.settings_store import load_settings, save_settings
 from ..connectors.outlook_com import read_events_from_outlook
 from ..connectors.outlook_ics import read_events_from_ics
-from ..connectors.google_calendar import list_calendars, list_managed_events
+from ..connectors.google_calendar import get_calendar_time_zone, list_calendars, list_managed_events
 from ..logging.logger_factory import build_logger
 from ..models.profile import FilterConfig
 from ..services.connection_test import test_ics_file, test_google, test_outlook_com
@@ -264,9 +264,13 @@ class MainWindow(tk.Tk):
 
     def preview_normal(self):
         events, sd, ed = self.read_source()
-        existing = list_managed_events(self.state_data.get("calendar_id", "primary"), sd, ed) if events else {}
+        cal_id = self.state_data.get("calendar_id", "primary")
+        existing = list_managed_events(cal_id, sd, ed) if events else {}
         fp = self.settings.get("sync_metadata", {}).get("per_source_fingerprint", {})
-        snap = build_preview(events, existing, fp, mode="normal", range_start=sd, range_end=ed)
+        tz = get_calendar_time_zone(cal_id)
+        snap = build_preview(
+            events, existing, fp, mode="normal", range_start=sd, range_end=ed, time_zone=tz,
+        )
         self._last_preview = snap
         self.after(0, lambda: PreviewWindow(
             self, "通常プレビュー", snap,
@@ -275,9 +279,13 @@ class MainWindow(tk.Tk):
 
     def preview_full(self):
         events, sd, ed = self.read_source()
-        existing = list_managed_events(self.state_data.get("calendar_id", "primary"), sd, ed) if events else {}
+        cal_id = self.state_data.get("calendar_id", "primary")
+        existing = list_managed_events(cal_id, sd, ed) if events else {}
         fp = self.settings.get("sync_metadata", {}).get("per_source_fingerprint", {})
-        snap = build_preview(events, existing, fp, mode="full", range_start=sd, range_end=ed)
+        tz = get_calendar_time_zone(cal_id)
+        snap = build_preview(
+            events, existing, fp, mode="full", range_start=sd, range_end=ed, time_zone=tz,
+        )
         self._last_preview = snap
         self.after(0, lambda: PreviewWindow(
             self, "フルプレビュー", snap,

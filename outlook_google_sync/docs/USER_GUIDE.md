@@ -372,6 +372,7 @@ cd D:\workspace\amatsuka_argo_5_obsidan_chatgpt_cursor_genspark\outlook_google_s
 | 重複イベント発生 | 「重複修復」ツールで対処 |
 | 予定が 0 件 | 期間指定を確認。接続テストでは警告だが失敗ではない |
 | ICS パースエラー | 接続テストで詳細チェック。文字コードやTZ情報を確認 |
+| Google API `Missing time zone definition for start/end time`（400） | 本ツールは **同期先カレンダーの `timeZone`（IANA）を API で取得**し、時刻付きイベントの `start`/`end` に付与して送信する。対象カレンダーが正しく選ばれているか確認する |
 
 補足:
 - `.bat` が起動しない場合は、**エクスプローラのダブルクリックではなく** Cursor ターミナル（PowerShell）で `.\scripts\xxx.bat` として実行する

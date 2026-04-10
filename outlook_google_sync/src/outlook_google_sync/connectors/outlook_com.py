@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from ..models.event import EventModel
@@ -59,13 +59,7 @@ def _process_item(
     item, start_dt: datetime, end_dt: datetime,
     include_private: bool, events: list[EventModel],
 ) -> None:
-    start_val = getattr(item, "Start", None)
-    end_val = getattr(item, "End", None)
-    if not start_val or not end_val:
-        return
-
-    start = _normalize_outlook_datetime(start_val)
-    end = _normalize_outlook_datetime(end_val)
+    start, end = _item_start_end_local_naive(item)
     if start is None or end is None:
         return
 
@@ -134,6 +128,49 @@ def _to_datetime(val) -> Optional[datetime]:
         return datetime(val.year, val.month, val.day, val.hour, val.minute, val.second)
     except Exception:
         return None
+
+
+def _utc_prop_to_local_naive(val: Any) -> Optional[datetime]:
+    """StartUTC / EndUTC は UTC。ローカル naive に揃える（Teams/Exchange の時刻と画面を揃える）。"""
+    dt = _to_datetime(val)
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt.astimezone().replace(tzinfo=None)
+
+
+def _item_start_end_local_naive(item: Any) -> tuple[Optional[datetime], Optional[datetime]]:
+    """終日は Start/End。時刻付きは StartUTC/EndUTC を優先（Teams/Exchange で画面時刻と一致させる）。"""
+    is_all_day = bool(getattr(item, "AllDayEvent", False))
+    if is_all_day:
+        sv = getattr(item, "Start", None)
+        ev = getattr(item, "End", None)
+        if not sv or not ev:
+            return None, None
+        return (
+            _normalize_outlook_datetime(sv),
+            _normalize_outlook_datetime(ev),
+        )
+
+    s_utc = getattr(item, "StartUTC", None)
+    e_utc = getattr(item, "EndUTC", None)
+    if s_utc is not None and e_utc is not None:
+        s = _utc_prop_to_local_naive(s_utc)
+        e = _utc_prop_to_local_naive(e_utc)
+        if s is not None and e is not None:
+            return s, e
+
+    sv = getattr(item, "Start", None)
+    ev = getattr(item, "End", None)
+    if not sv or not ev:
+        return None, None
+    return (
+        _normalize_outlook_datetime(sv),
+        _normalize_outlook_datetime(ev),
+    )
 
 
 def _normalize_outlook_datetime(val: Any) -> Optional[datetime]:

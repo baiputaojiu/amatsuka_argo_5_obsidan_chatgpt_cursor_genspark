@@ -23,13 +23,17 @@ class EventModel:
     busy_status: int = 2  # 0=Free,1=Tentative,2=Busy,3=OOF
     categories: list[str] = field(default_factory=list)
 
-    def to_google_body(self, detail_level: str = "full") -> dict:
+    def to_google_body(self, detail_level: str = "full", time_zone: str | None = None) -> dict:
         if self.is_all_day:
             start_val = {"date": self.start.strftime("%Y-%m-%d")}
             end_val = {"date": self.end.strftime("%Y-%m-%d")}
         else:
             start_val = {"dateTime": self.start.isoformat()}
             end_val = {"dateTime": self.end.isoformat()}
+            # オフセットなし dateTime のとき Google API は timeZone 必須
+            if time_zone:
+                start_val["timeZone"] = time_zone
+                end_val["timeZone"] = time_zone
 
         now_utc = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         body: dict = {

@@ -64,6 +64,7 @@ def build_preview(
     mode: str = "normal",
     range_start: datetime | None = None,
     range_end: datetime | None = None,
+    time_zone: str | None = None,
 ) -> PreviewSnapshot:
     """Build preview snapshot (Ch15.1~15.3).
 
@@ -86,7 +87,7 @@ def build_preview(
         if not google_item:
             snap.actions.append(PreviewAction(event=e, google_item=None, action="create", reason="新規"))
         else:
-            body = e.to_google_body()
+            body = e.to_google_body("full", time_zone=time_zone)
             if has_conflict(google_item, body):
                 snap.actions.append(PreviewAction(event=e, google_item=google_item, action="update", reason="衝突検知（手編集あり）"))
             else:
