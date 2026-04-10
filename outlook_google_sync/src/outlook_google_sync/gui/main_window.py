@@ -174,7 +174,8 @@ class MainWindow(tk.Tk):
                 fn()
             except Exception as e:
                 self.logger.error("Worker error: %s", e, exc_info=True)
-                self.after(0, lambda: self.log_msg(f"ERROR: {e}"))
+                err_text = str(e)
+                self.after(0, lambda msg=err_text: self.log_msg(f"ERROR: {msg}"))
             finally:
                 if com_inited:
                     try:
