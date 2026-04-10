@@ -13,6 +13,7 @@ logger = logging.getLogger("outlook_google_sync")
 
 def _dbg(hid: str, loc: str, msg: str, data: dict) -> None:
     try:
+        log_path = Path(__file__).resolve().parents[4] / "debug-b3c4c4.log"
         rec = {
             "sessionId": "b3c4c4",
             "runId": "shortcut-conn-test",
@@ -22,7 +23,7 @@ def _dbg(hid: str, loc: str, msg: str, data: dict) -> None:
             "data": data,
             "timestamp": int(time.time() * 1000),
         }
-        Path("debug-b3c4c4.log").open("a", encoding="utf-8").write(
+        log_path.open("a", encoding="utf-8").write(
             json.dumps(rec, ensure_ascii=False) + "\n"
         )
     except Exception:
