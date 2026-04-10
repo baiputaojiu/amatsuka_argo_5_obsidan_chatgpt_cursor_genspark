@@ -1,11 +1,11 @@
-# イールドカーブ 3D 可視化アプリ（日本 / 米国 / 英国 / ユーロ圏 / 中国 / インド）
+# イールドカーブ・フォワードカーブ 3D 可視化アプリ
 
-日本・米国・英国・ユーロ圏・中国・インドのイールドカーブを 3D サーフェスで表示し、マウスホバーした日付の断面カーブと、10 年金利の推移を表示する Dash アプリです。
+日本・米国・英国・ユーロ圏・中国・インドのイールドカーブおよびゴールド・シルバー先物フォワードカーブを 3D サーフェスで表示する Dash アプリです。
 
-- 右側: 3D イールドカーブ（時間 × 残存期間 × 利回り）
-- 左上: 選択日（ホバーした日）のイールドカーブ断面
-- 左下: 10 年金利の時系列（ホバー位置に縦線）
-- 上部ドロップダウン: 国・地域の選択（日本 / 米国 / 英国 / ユーロ圏 / 中国 / インド）
+- 右側: 3D サーフェス（時間 × 残存期間 × 利回り or 先物価格）
+- 左上: 選択日（ホバーした日）の断面カーブ
+- 左下: 代表満期の時系列（ホバー位置に縦線）
+- 上部ドロップダウン: 国・資産の選択（日本 / 米国 / 英国 / ユーロ圏 / 中国 / インド / ゴールド先物 / シルバー先物）
 
 ---
 
@@ -88,7 +88,7 @@ pip install -r requirements.txt
 3. コンソールに以下のようなメッセージが出ます。
 
    ```text
-   Dash is running on http://127.0.0.1:8050/
+   Dash is running on http://127.0.0.1:8051/
    ```
 
 4. ブラウザで上記 URL（または表示されている URL）にアクセスするとアプリ画面が開きます。
@@ -191,6 +191,64 @@ python fetch_usa_data.py
 
 - 公的にはフルイールドカーブの日次 CSV が限られているため、手動で CSV を用意する前提です。
 - [Reserve Bank of India](https://rbi.org.in/scripts/bs_viewcontent.aspx?Id=1956) や [FRED (India government bond yields)](https://fred.stlouisfed.org/tags/series?t=bonds%3Bindia%3Binterest+rate) 等からデータを取得し、`Date` + 残存期間列（例: `1Y`, `5Y`, `10Y`）の形式で `data/india_yield_curve.csv` に保存してください。列名は英語（例: Date, 1Y, 5Y, 10Y）にすると `app.py` がそのまま読みます。（インド用の自動取得スクリプトはありません。）
+
+**ゴールド先物（フォワードカーブ）**
+
+- **自動取得**（先物のみ・yfinance で CME GC 複数限月）:
+  ```powershell
+  python fetch_gold_data.py              # デフォルト: 2024年〜
+  python fetch_gold_data.py --since 2024
+  ```
+- データ形式: `Date` + `0.0`（現物） + 満期列 `1`, `2`, …。現物（0.0 列）は自動取得しないため、[Stooq で手動取得](#金銀の現物価格00-列の手動取得stooq)してマージします。
+
+**シルバー 1ヶ月フォワードレート（silver_forward_rate_1m.csv）**
+
+- `silver_forward_curve.csv` から 2025年4月〜を補完するには:
+  ```powershell
+  python extend_forward_rate_1m.py
+  ```
+
+**シルバー先物（フォワードカーブ）**
+
+- **自動取得**（先物のみ・yfinance で CME SI 複数限月）:
+  ```powershell
+  python fetch_silver_data.py              # デフォルト: 2024年〜
+  python fetch_silver_data.py --since 2024
+  ```
+- データ形式: ゴールドと同じ（`Date` + `0.0` + 満期列）。現物（0.0 列）は [Stooq で手動取得](#金銀の現物価格00-列の手動取得stooq)してマージします。
+
+**金銀の現物価格（0.0 列）の手動取得（Stooq）**
+
+金・銀の日次スポット（XAU/USD・XAG/USD）はプログラムから自動取得していません。[Stooq](https://stooq.com/) で手動ダウンロードし、`data/` に保存したうえでマージスクリプトを実行してください。
+
+1. **金（XAU/USD）の日足 CSV をダウンロード**
+   - ブラウザで次の URL を開く（CSV がダウンロードまたは表示される）:
+     ```
+     https://stooq.com/q/d/l/?s=xauusd&i=d
+     ```
+   - ファイルを `data/gold_spot_stooq.csv` として保存（既存の `Date,Open,High,Low,Close` 形式のままでよい）。
+
+2. **銀（XAG/USD）の日足 CSV をダウンロード**
+   - 次の URL を開く:
+     ```
+     https://stooq.com/q/d/l/?s=xagusd&i=d
+     ```
+   - ファイルを `data/silver_spot_stooq.csv` として保存。
+
+3. **フォワードカーブへ 2023 年以降の現物価格を反映**
+   - 次のスクリプトを実行すると、`gold_forward_curve.csv` と `silver_forward_curve.csv` の 0.0 列に、上記 CSV の 2023 年以降の終値（Close）がマージされます。
+   ```powershell
+   python merge_spot_into_forward_curve.py
+   ```
+
+**金銀先物価格の手動取得（Stooq の制限）**
+
+Stooq では **先物（.F 拡張子の銘柄）について CSV ダウンロードが提供されていません**。  
+`https://stooq.com/q/d/l/?s=gc.f&i=d` や `s=si.f&i=d` を開いても、空またはデータなしになることがあります（Stooq 側の仕様です）。
+
+- **現物（XAU/USD・XAG/USD）**: 上記の Stooq URL（xauusd, xagusd）で CSV 取得可能。
+- **先物（GC.F・SI.F）**: Stooq からは CSV で取得できないため、**先物は yfinance による自動取得**（`fetch_gold_data.py` / `fetch_silver_data.py`）を利用してください。
+- **CME DataMine**: [datamine.new.cmegroup.com](https://datamine.new.cmegroup.com/) で金・銀先物のヒストリカル（EOD CSV 等）を取得できるが、**有料ライセンス**が必要です。
 
 ### 日本のデータを取得し直す
 

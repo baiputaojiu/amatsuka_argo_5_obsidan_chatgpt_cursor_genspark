@@ -1,0 +1,8 @@
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
+icalendar
+python-dateutil
+tkcalendar
+pywin32; platform_system == "Windows"
+pytest
