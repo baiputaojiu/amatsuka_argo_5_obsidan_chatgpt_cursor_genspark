@@ -5,6 +5,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import yfinance as yf
+from scipy.ndimage import gaussian_filter
 from dash import Dash, dcc, html, Input, Output, State
 import plotly.graph_objs as go
 
@@ -121,7 +122,7 @@ def compute_display_data(df: pd.DataFrame) -> dict[str, Any] | None:
     df = df.sort_index()
     typical = (df["Open"] + df["High"] + df["Low"] + df["Close"]) / 4.0
     last_close = float(df["Close"].iloc[-1])
-    step = max(last_close * 0.05, 1e-6)
+    step = max(last_close * 0.01, 1e-6)
     t_min = typical.min()
     t_max = typical.max()
     bins_start = np.floor(t_min / step) * step
@@ -132,6 +133,7 @@ def compute_display_data(df: pd.DataFrame) -> dict[str, Any] | None:
 
     # 各行の日付（タイムゾーンはそのまま、日付のみ取得）
     dates_in_data = [pd.Timestamp(ts).date() for ts in df.index]
+    days_with_data = {str(d) for d in set(dates_in_data)}  # 5分足が1本以上ある日（ローソク描画用）
     min_date = min(dates_in_data)
     max_date = max(dates_in_data)
     all_dates = pd.date_range(min_date, max_date, freq="D").date.tolist()
@@ -139,7 +141,10 @@ def compute_display_data(df: pd.DataFrame) -> dict[str, Any] | None:
 
     Z = np.zeros((len(all_dates), len(price_bins)))
     daily_volume = {d: 0.0 for d in all_dates}
-    daily_close = {}  # その日の最後の Close
+    daily_close = {}
+    daily_open = {}   # その日の最初の Open
+    daily_high = {}   # その日の最大 High
+    daily_low = {}    # その日の最小 Low
 
     for ts, row in df.iterrows():
         d = pd.Timestamp(ts).date()
@@ -160,13 +165,27 @@ def compute_display_data(df: pd.DataFrame) -> dict[str, Any] | None:
         Z[i, j] += vol
         daily_volume[d] = daily_volume.get(d, 0) + vol
         daily_close[d] = row["Close"]
+        if d not in daily_open:
+            daily_open[d] = row["Open"]
+        daily_high[d] = max(daily_high.get(d, row["High"]), row["High"])
+        daily_low[d] = min(daily_low.get(d, row["Low"]), row["Low"])
 
     date_labels = [str(d) for d in all_dates]
     daily_vol_list = [float(daily_volume[d]) for d in all_dates]
     daily_price_list = [float(daily_close.get(d, np.nan)) for d in all_dates]
+    daily_open_list = [float(daily_open.get(d, np.nan)) for d in all_dates]
+    daily_high_list = [float(daily_high.get(d, np.nan)) for d in all_dates]
+    daily_low_list = [float(daily_low.get(d, np.nan)) for d in all_dates]
     for i, p in enumerate(daily_price_list):
         if np.isnan(p) and i > 0:
             daily_price_list[i] = daily_price_list[i - 1]
+    for i in range(len(all_dates)):
+        if np.isnan(daily_open_list[i]) and i > 0:
+            daily_open_list[i] = daily_open_list[i - 1]
+        if np.isnan(daily_high_list[i]) and i > 0:
+            daily_high_list[i] = daily_high_list[i - 1]
+        if np.isnan(daily_low_list[i]) and i > 0:
+            daily_low_list[i] = daily_low_list[i - 1]
 
     return {
         "date_labels": date_labels,
@@ -175,6 +194,10 @@ def compute_display_data(df: pd.DataFrame) -> dict[str, Any] | None:
         "Z": Z.tolist(),
         "daily_volume": daily_vol_list,
         "daily_price": daily_price_list,
+        "daily_open": daily_open_list,
+        "daily_high": daily_high_list,
+        "daily_low": daily_low_list,
+        "days_with_data": days_with_data,
         "last_close": last_close,
         "step": step,
         "n_dates": len(all_dates),
@@ -201,61 +224,198 @@ def create_surface_figure(
     data: dict[str, Any] | None,
     ticker: str,
     x_range: tuple[float, float] | None = None,
-    y_range: tuple[float, float] | None = None,
+    y_range: tuple[int, int] | None = None,
     z_range: tuple[float, float] | None = None,
+    smoothing_mode: str = "current",
+    surface_opacity: float = 0.5,
+    df_5m: pd.DataFrame | None = None,
 ) -> go.Figure:
     if data is None or data["n_dates"] == 0 or data["n_bins"] == 0:
         return _no_data_figure("データがありません")
     date_labels = data["date_labels"]
     price_bins = np.array(data["price_bins"])
     Z = np.array(data["Z"])
-    y_indices = np.arange(len(date_labels))
 
+    # 範囲でスライス（描画データを絞るので確実に反映される）
+    i0 = int(y_range[0]) if y_range is not None else 0
+    i1 = int(y_range[1]) if y_range is not None else len(date_labels) - 1
+    i0 = max(0, min(i0, len(date_labels) - 1))
+    i1 = max(0, min(i1, len(date_labels) - 1))
+    if i0 > i1:
+        i0, i1 = i1, i0
+    date_slice = date_labels[i0 : i1 + 1]
+    Z_date = Z[i0 : i1 + 1, :]
+
+    if x_range is not None:
+        p_min, p_max = float(x_range[0]), float(x_range[1])
+        if p_min > p_max:
+            p_min, p_max = p_max, p_min
+        j_mask = (price_bins >= p_min) & (price_bins <= p_max)
+        if not np.any(j_mask):
+            j_mask = np.ones(len(price_bins), dtype=bool)
+        price_slice = price_bins[j_mask]
+        Z_slice = Z_date[:, j_mask]
+    else:
+        price_slice = price_bins
+        Z_slice = Z_date
+
+    if len(date_slice) == 0 or len(price_slice) == 0:
+        return _no_data_figure("データがありません")
+    y_indices = np.arange(len(date_slice))
+
+    # Z軸範囲でクリップ（表示用）
+    if z_range is not None:
+        z_lo, z_hi = float(z_range[0]), float(z_range[1])
+        Z_slice = np.clip(Z_slice, z_lo, z_hi)
+
+    # 平滑化: ①なし / ②現在の処理（制約付き反復＋角丸め） / ③ガウスぼかしのみ（高さ維持なし）
+    Z_draw = Z_slice.astype(float).copy()
+    branch = "none"
+    if smoothing_mode == "current":
+        branch = "current"
+        mask_nonzero = Z_slice > 0
+        for _ in range(20):
+            Z_draw[:] = gaussian_filter(Z_draw, sigma=(2.0, 0.6), mode="constant", cval=0.0)
+            Z_draw[mask_nonzero] = Z_slice[mask_nonzero]
+        Z_draw[:] = gaussian_filter(Z_draw, sigma=(1.2, 1.2), mode="constant", cval=0.0)
+        Z_draw = np.maximum(Z_draw, 0.0)
+    elif smoothing_mode == "gaussian_only":
+        branch = "gaussian_only"
+        # Y方向の裾を②と同程度に広げるため sigma=(2.0, 0.6)（日付方向=Y, 株価方向=X）
+        Z_draw = gaussian_filter(Z_draw, sigma=(2.0, 0.6), mode="constant", cval=0.0)
+        Z_draw = np.maximum(Z_draw, 0.0)
+    # "none" のときは Z_draw をそのまま（平滑化なし）
+
+    z_max_val = float(np.nanmax(Z_draw)) if Z_draw.size else 1.0
+    vol_M = Z_draw / 1e6
+    opacity = max(0.05, min(1.0, float(surface_opacity)))
+
+    # XY平面（Z=0）に5分足ローソクを描く（先に描画して山脈の下で透けて見える）
+    traces: list = []
+    if df_5m is not None and not df_5m.empty and ensure_columns(df_5m).shape[0] > 0:
+        df_bar = ensure_columns(df_5m)
+        idx = pd.to_datetime(df_bar.index)
+        x_wick, y_wick, z_wick = [], [], []
+        x_body_down, y_body_down, z_body_down = [], [], []
+        x_body_up, y_body_up, z_body_up = [], [], []
+        for day_idx, date_str in enumerate(date_slice):
+            mask = idx.strftime("%Y-%m-%d") == date_str
+            if not mask.any():
+                continue
+            rows = df_bar.loc[mask].sort_index()
+            n_bars = len(rows)
+            for i, (ts, row) in enumerate(rows.iterrows()):
+                op = float(row["Open"])
+                hi = float(row["High"])
+                lo = float(row["Low"])
+                cl = float(row["Close"])
+                if np.isnan(lo) or np.isnan(hi):
+                    continue
+                y_pos = day_idx + (i / n_bars) if n_bars > 0 else day_idx
+                x_wick.extend([lo, hi, None])
+                y_wick.extend([y_pos, y_pos, None])
+                z_wick.extend([0, 0, None])
+                if np.isnan(op) or np.isnan(cl):
+                    continue
+                if cl < op:
+                    x_body_down.extend([op, cl, None])
+                    y_body_down.extend([y_pos, y_pos, None])
+                    z_body_down.extend([0, 0, None])
+                else:
+                    x_body_up.extend([op, cl, None])
+                    y_body_up.extend([y_pos, y_pos, None])
+                    z_body_up.extend([0, 0, None])
+        if x_wick:
+            traces.append(
+                go.Scatter3d(
+                    x=x_wick, y=y_wick, z=z_wick, mode="lines",
+                    line=dict(color="rgba(200,200,200,0.9)", width=1),
+                    name="ヒゲ", showlegend=False,
+                )
+            )
+        if x_body_down:
+            traces.append(
+                go.Scatter3d(
+                    x=x_body_down, y=y_body_down, z=z_body_down, mode="lines",
+                    line=dict(color="rgba(255,80,80,0.95)", width=3),
+                    name="陰線", showlegend=False,
+                )
+            )
+        if x_body_up:
+            traces.append(
+                go.Scatter3d(
+                    x=x_body_up, y=y_body_up, z=z_body_up, mode="lines",
+                    line=dict(color="rgba(80,255,120,0.95)", width=3),
+                    name="陽線", showlegend=False,
+                )
+            )
+
+    # 山脈サーフェス（半透明でローソクが透けて見える）
     surface = go.Surface(
-        x=price_bins,
+        x=price_slice,
         y=y_indices,
-        z=Z,
-        colorscale="Viridis",
-        colorbar=dict(title="出来高"),
+        z=Z_draw,
+        surfacecolor=vol_M,
+        cmin=0,
+        cmax=z_max_val / 1e6,
+        colorscale="Turbo",
+        colorbar=dict(title="出来高 (M)", thickness=20, len=0.7),
         showscale=True,
-        hovertemplate="株価: %{x:.2f}<br>日付: %{y}<br>出来高: %{z:.0f}<extra></extra>",
+        opacity=opacity,
     )
-    fig = go.Figure(data=[surface])
+    traces.append(surface)
 
-    # 日付軸: 表示範囲（y_range）に合わせて tickvals / ticktext を設定
-    y_min = int(y_range[0]) if y_range is not None else 0
-    y_max = int(y_range[1]) if y_range is not None else max(0, len(date_labels) - 1)
-    y_min = max(0, min(y_min, len(date_labels) - 1))
-    y_max = max(0, min(y_max, len(date_labels) - 1))
-    if y_min > y_max:
-        y_min, y_max = y_max, y_min
-    visible_len = y_max - y_min + 1
-    y_step = max(1, visible_len // 10)
-    y_tick_indices = list(range(y_min, y_max + 1, y_step))
-    if y_tick_indices and y_tick_indices[-1] != y_max:
-        y_tick_indices.append(y_max)
-    y_tickvals = [i for i in y_tick_indices if i < len(date_labels)]
-    y_ticktext = [date_labels[i] for i in y_tickvals]
+    # 現在価格の位置に半透明の壁（表示範囲内の場合のみ）
+    last_close = data.get("last_close")
+    p_lo, p_hi = float(np.min(price_slice)), float(np.max(price_slice))
+    if last_close is not None and p_lo <= last_close <= p_hi:
+        y_max = len(date_slice) - 1
+        if z_range is not None:
+            z_lo, z_hi = float(z_range[0]), float(z_range[1])
+            z_max = z_hi * 3
+        else:
+            z_max = float(np.nanmax(Z_draw)) * 1.1 if Z_draw.size else 1.0
+        wall_x = [[last_close, last_close], [last_close, last_close]]
+        wall_y = [[0, 0], [y_max, y_max]]
+        wall_z = [[0, z_max], [0, z_max]]
+        wall = go.Surface(
+            x=wall_x,
+            y=wall_y,
+            z=wall_z,
+            surfacecolor=[[1, 1], [1, 1]],
+            cmin=0,
+            cmax=1,
+            colorscale=[[0, "rgba(0,255,200,0.5)"], [1, "rgba(0,255,200,0.5)"]],
+            showscale=False,
+            opacity=0.4,
+            hovertemplate="現在価格: %{x:.2f}<extra></extra>",
+        )
+        traces.append(wall)
+
+    fig = go.Figure(data=traces)
+
+    y_step = max(1, len(date_slice) // 10)
+    y_tick_indices = list(range(0, len(date_slice), y_step))
+    if y_tick_indices and y_tick_indices[-1] != len(date_slice) - 1:
+        y_tick_indices.append(len(date_slice) - 1)
+    y_tickvals = y_tick_indices
+    y_ticktext = [date_slice[i] for i in y_tick_indices]
 
     layout_scene = dict(
         xaxis_title="X: 株価",
         yaxis_title="Y: 日付",
         zaxis_title="Z: 出来高",
+        xaxis=dict(autorange="reversed", tickmode="auto"),
         yaxis=dict(
             tickmode="array",
             tickvals=y_tickvals,
             ticktext=y_ticktext,
-            range=[y_min, y_max],
         ),
     )
-    if x_range is not None:
-        layout_scene["xaxis"] = layout_scene.get("xaxis", {}) or {}
-        layout_scene["xaxis"]["range"] = list(x_range)
-    if y_range is not None:
-        layout_scene["yaxis"] = layout_scene.get("yaxis", {}) or {}
-        layout_scene["yaxis"]["range"] = list(y_range)
     if z_range is not None:
-        layout_scene["zaxis"] = dict(layout_scene.get("zaxis", {}), range=list(z_range), title="Z: 出来高")
+        z_lo, z_hi = float(z_range[0]), float(z_range[1])
+        # 表示上限を3倍に広げて山を1/3の高さで表示
+        layout_scene["zaxis"] = dict(range=[z_lo, z_hi * 3], title="Z: 出来高")
 
     fig.update_layout(
         margin=dict(l=0, r=0, t=30, b=0),
@@ -271,11 +431,24 @@ def create_surface_figure(
 def create_date_volume_figure(
     data: dict[str, Any] | None,
     hover_date_idx: int | None,
+    date_range: tuple[int, int] | None = None,
 ) -> go.Figure:
     if data is None or not data["date_labels"]:
         return _no_data_figure()
-    x = list(range(len(data["date_labels"])))
-    y = data["daily_volume"]
+    labels = data["date_labels"]
+    vol = data["daily_volume"]
+    if date_range is not None:
+        i0, i1 = max(0, date_range[0]), min(len(labels) - 1, date_range[1])
+        if i0 > i1:
+            i0, i1 = i1, i0
+        labels = labels[i0 : i1 + 1]
+        vol = vol[i0 : i1 + 1]
+        if hover_date_idx is not None and i0 <= hover_date_idx <= i1:
+            hover_date_idx = hover_date_idx - i0
+        else:
+            hover_date_idx = None
+    x = list(range(len(labels)))
+    y = vol
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
@@ -292,7 +465,7 @@ def create_date_volume_figure(
                 x=[hover_date_idx], y=[y[hover_date_idx]],
                 mode="markers", marker=dict(color="red", size=10),
                 hovertemplate="日付: %{text}<br>出来高: %{y:,.0f}<extra></extra>",
-                text=[data["date_labels"][hover_date_idx]],
+                text=[labels[hover_date_idx]],
                 showlegend=False,
             )
         )
@@ -300,18 +473,31 @@ def create_date_volume_figure(
         margin=dict(l=40, r=10, t=30, b=40),
         xaxis_title="日付", yaxis_title="出来高",
         template="plotly_dark", title="日付-出来高",
-        xaxis=dict(tickmode="array", tickvals=x[:: max(1, len(x) // 8)], ticktext=[data["date_labels"][i] for i in range(0, len(x), max(1, len(x) // 8))]),
+        xaxis=dict(tickmode="array", tickvals=x[:: max(1, len(x) // 8)], ticktext=[labels[i] for i in range(0, len(x), max(1, len(x) // 8))]),
     )
     return fig
 
 def create_date_price_figure(
     data: dict[str, Any] | None,
     hover_date_idx: int | None,
+    date_range: tuple[int, int] | None = None,
 ) -> go.Figure:
     if data is None or not data["date_labels"]:
         return _no_data_figure()
-    x = list(range(len(data["date_labels"])))
-    y = data["daily_price"]
+    labels = data["date_labels"]
+    price = data["daily_price"]
+    if date_range is not None:
+        i0, i1 = max(0, date_range[0]), min(len(labels) - 1, date_range[1])
+        if i0 > i1:
+            i0, i1 = i1, i0
+        labels = labels[i0 : i1 + 1]
+        price = price[i0 : i1 + 1]
+        if hover_date_idx is not None and i0 <= hover_date_idx <= i1:
+            hover_date_idx = hover_date_idx - i0
+        else:
+            hover_date_idx = None
+    x = list(range(len(labels)))
+    y = price
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
@@ -335,7 +521,7 @@ def create_date_price_figure(
                 x=[hover_date_idx], y=[y[hover_date_idx]],
                 mode="markers", marker=dict(color="red", size=10),
                 hovertemplate="日付: %{text}<br>株価: %{y:.2f}<extra></extra>",
-                text=[data["date_labels"][hover_date_idx]],
+                text=[labels[hover_date_idx]],
                 showlegend=False,
             )
         )
@@ -343,7 +529,7 @@ def create_date_price_figure(
         margin=dict(l=40, r=10, t=30, b=40),
         xaxis_title="日付", yaxis_title="株価",
         template="plotly_dark", title="日付-株価",
-        xaxis=dict(tickmode="array", tickvals=x[:: max(1, len(x) // 8)], ticktext=[data["date_labels"][i] for i in range(0, len(x), max(1, len(x) // 8))]),
+        xaxis=dict(tickmode="array", tickvals=x[:: max(1, len(x) // 8)], ticktext=[labels[i] for i in range(0, len(x), max(1, len(x) // 8))]),
     )
     return fig
 
@@ -417,10 +603,10 @@ app.layout = html.Div(
             children="更新中…",
         ),
         html.Div(
-            style={"flex": "0 0 40%", "display": "flex", "flexDirection": "column", "padding": "10px", "backgroundColor": "#111", **_NO_SELECT},
+            style={"flex": "0 0 260px", "display": "flex", "flexDirection": "column", "padding": "10px", "backgroundColor": "#111", "overflowY": "auto", **_NO_SELECT},
             children=[
                 html.Div(
-                    style={"marginBottom": "8px", **_NO_SELECT},
+                    style={"marginBottom": "8px", "flexShrink": 0, **_NO_SELECT},
                     children=[
                         html.Label("銘柄コード"),
                         html.Div(
@@ -448,37 +634,97 @@ app.layout = html.Div(
                             style={"marginTop": "8px"},
                             children=[
                                 html.Label("X軸(日付)範囲"),
-                                dcc.RangeSlider(id="range-x", min=0, max=1, value=[0, 1], allowCross=False, tooltip={"placement": "bottom"}),
+                                dcc.DatePickerRange(
+                                    id="range-x-date",
+                                    start_date=None,
+                                    end_date=None,
+                                    display_format="YYYY-MM-DD",
+                                    style={"color": "#111"},
+                                ),
                             ],
                         ),
                         html.Div(
-                            style={"marginTop": "4px"},
+                            style={"marginTop": "8px"},
                             children=[
                                 html.Label("Y軸(株価)範囲"),
-                                dcc.RangeSlider(id="range-y", min=0, max=1, value=[0, 1], allowCross=False, tooltip={"placement": "bottom"}),
+                                dcc.RangeSlider(
+                                    id="range-y-slider",
+                                    min=0,
+                                    max=100,
+                                    value=[0, 100],
+                                    step=None,
+                                    tooltip={"placement": "bottom", "always_visible": True},
+                                    updatemode="drag",
+                                ),
                             ],
                         ),
                         html.Div(
-                            style={"marginTop": "4px"},
+                            style={"marginTop": "8px"},
                             children=[
                                 html.Label("Z軸(出来高)範囲"),
-                                dcc.RangeSlider(id="range-z", min=0, max=1, value=[0, 1], allowCross=False, tooltip={"placement": "bottom"}),
+                                dcc.RangeSlider(
+                                    id="range-z-slider",
+                                    min=0,
+                                    max=1,
+                                    value=[0, 1],
+                                    step=None,
+                                    tooltip={"placement": "bottom", "always_visible": True},
+                                    updatemode="drag",
+                                ),
                             ],
                         ),
-                        html.Button("全体表示に戻す", id="btn-reset-range", n_clicks=0, style={"marginTop": "4px"}),
+                        html.Div(
+                            style={"marginTop": "8px"},
+                            children=[
+                                html.Label("平滑化"),
+                                dcc.Dropdown(
+                                    id="smoothing-dropdown",
+                                    options=[
+                                        {"label": "平滑化なし", "value": "none"},
+                                        {"label": "現在の平滑化（高さ維持＋角丸め）", "value": "current"},
+                                        {"label": "ガウスぼかしのみ（高さ維持なし）", "value": "gaussian_only"},
+                                    ],
+                                    value="current",
+                                    clearable=False,
+                                    style={"minWidth": "200px", "color": "#111", "backgroundColor": "#fff"},
+                                    className="ticker-dropdown-dark-text",
+                                ),
+                            ],
+                        ),
+                        html.Div(
+                            style={"marginTop": "8px"},
+                            children=[
+                                html.Label("山脈の半透明度"),
+                                dcc.Slider(
+                                    id="surface-opacity-slider",
+                                    min=0.05,
+                                    max=1.0,
+                                    value=0.5,
+                                    step=0.05,
+                                    marks={0.05: "5%", 0.25: "25%", 0.5: "50%", 0.75: "75%", 1.0: "100%"},
+                                    tooltip={"placement": "bottom", "always_visible": True},
+                                    updatemode="drag",
+                                ),
+                            ],
+                        ),
+                        html.Div(
+                            style={"display": "flex", "gap": "8px", "marginTop": "4px"},
+                            children=[
+                                html.Button("範囲を適用", id="btn-apply-range", n_clicks=0),
+                                html.Button("全体表示に戻す", id="btn-reset-range", n_clicks=0),
+                            ],
+                        ),
                     ],
                 ),
-                dcc.Graph(id="graph-date-volume", style={"flex": "1 1 33%", "minHeight": "120px", **_NO_SELECT}),
-                dcc.Graph(id="graph-date-price", style={"flex": "1 1 33%", "minHeight": "120px", **_NO_SELECT}),
-                dcc.Graph(id="graph-volume-price", style={"flex": "1 1 33%", "minHeight": "120px", **_NO_SELECT}),
             ],
         ),
         html.Div(
-            style={"flex": "1 1 60%", "padding": "10px", **_NO_SELECT},
-            children=[dcc.Graph(id="surface-graph", style={"height": "100%", **_NO_SELECT})],
+            style={"flex": "1 1 auto", "display": "flex", "alignItems": "center", "justifyContent": "center", "padding": "10px", "minWidth": 0, **_NO_SELECT},
+            children=[dcc.Graph(id="surface-graph", style={"height": "100%", "width": "100%", **_NO_SELECT})],
         ),
         dcc.Store(id="store-ticker", data=None),
         dcc.Store(id="store-display-data", data=None),
+        dcc.Store(id="store-current-range", data=None),
     ],
 )
 
@@ -522,7 +768,7 @@ def on_fetch_or_select(n_fetch, fav_value, input_ticker, current_ticker):
         if data is None:
             return ticker, None, "データなし", [{"label": t, "value": t} for t in load_favorites()]
         _DISPLAY_CACHE[ticker] = data
-        return ticker, {"ticker": ticker}, f"価格刻み: {data['step']:.2f}（直近終値 {data['last_close']:.2f} の5%）", [{"label": t, "value": t} for t in load_favorites()]
+        return ticker, {"ticker": ticker}, f"価格刻み: {data['step']:.2f}（直近終値 {data['last_close']:.2f} の1%）", [{"label": t, "value": t} for t in load_favorites()]
 
     # お気に入り選択 or 起動時: 既存CSVのみ読む
     df = load_csv(ticker)
@@ -532,13 +778,25 @@ def on_fetch_or_select(n_fetch, fav_value, input_ticker, current_ticker):
     if data is None:
         return ticker, None, "", [{"label": t, "value": t} for t in load_favorites()]
     _DISPLAY_CACHE[ticker] = data
-    return ticker, {"ticker": ticker}, f"価格刻み: {data['step']:.2f}（直近終値 {data['last_close']:.2f} の5%）", [{"label": t, "value": t} for t in load_favorites()]
+    return ticker, {"ticker": ticker}, f"価格刻み: {data['step']:.2f}（直近終値 {data['last_close']:.2f} の1%）", [{"label": t, "value": t} for t in load_favorites()]
 
 
 def _get_cached_data(ticker: str | None) -> dict[str, Any] | None:
     if not ticker:
         return None
     return _DISPLAY_CACHE.get(ticker)
+
+
+def _save_graph_data_csv(ticker: str, date_slice: list, price_slice: np.ndarray, Z_slice: np.ndarray) -> None:
+    """描画用Z行列を data/{ticker}_graph_data.csv に保存する。"""
+    if not date_slice or price_slice is None or Z_slice is None or len(Z_slice) == 0:
+        return
+    safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in ticker)
+    path = DATA_DIR / f"{safe}_graph_data.csv"
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    df = pd.DataFrame(Z_slice, index=date_slice, columns=[f"{p:.2f}" for p in price_slice])
+    df.index.name = "日付"
+    df.to_csv(path, encoding="utf-8-sig")
 
 
 @app.callback(
@@ -572,7 +830,7 @@ def on_update(n, current_ticker):
     if data is None:
         return current_ticker, None, ""
     _DISPLAY_CACHE[current_ticker] = data
-    return current_ticker, {"ticker": current_ticker}, f"価格刻み: {data['step']:.2f}（直近終値 {data['last_close']:.2f} の5%）"
+    return current_ticker, {"ticker": current_ticker}, f"価格刻み: {data['step']:.2f}（直近終値 {data['last_close']:.2f} の1%）"
 
 @app.callback(
     Output("favorites-dropdown", "options", allow_duplicate=True),
@@ -585,98 +843,180 @@ def on_add_favorite(n, ticker):
         add_favorite(ticker)
     return [{"label": t, "value": t} for t in load_favorites()]
 
-# 軸範囲スライダー初期化（データ変更時）
+# 軸範囲入力の初期化（データ変更時）。X初期範囲は山脈が0でない範囲
 @app.callback(
-    Output("range-x", "min"), Output("range-x", "max"), Output("range-x", "value"),
-    Output("range-y", "min"), Output("range-y", "max"), Output("range-y", "value"),
-    Output("range-z", "min"), Output("range-z", "max"), Output("range-z", "value"),
+    Output("range-x-date", "start_date"),
+    Output("range-x-date", "end_date"),
+    Output("range-x-date", "min_date_allowed"),
+    Output("range-x-date", "max_date_allowed"),
+    Output("range-y-slider", "min"),
+    Output("range-y-slider", "max"),
+    Output("range-y-slider", "value"),
+    Output("range-z-slider", "min"),
+    Output("range-z-slider", "max"),
+    Output("range-z-slider", "value"),
+    Output("store-current-range", "data"),
     Input("store-display-data", "data"),
     State("store-ticker", "data"),
 )
-def init_axis_sliders(_display_data, ticker):
+def init_axis_inputs(_display_data, ticker):
     data = _get_cached_data(ticker)
     if data is None or data.get("n_dates", 0) == 0:
-        return 0, 1, [0, 1], 0, 1, [0, 1], 0, 1, [0, 1]
-    n_d = data["n_dates"]
+        return None, None, None, None, 0, 100, [0, 100], 0, 1, [0, 1], None
+    date_labels = data["date_labels"]
+    Z_arr = np.array(data["Z"])
+    row_sums = np.sum(Z_arr, axis=1)
+    nonzero = np.where(row_sums > 0)[0]
+    if len(nonzero) == 0:
+        first_date = date_labels[0]
+        last_date = date_labels[-1]
+        i0, i1 = 0, len(date_labels) - 1
+    else:
+        i0, i1 = int(nonzero[0]), int(nonzero[-1])
+        first_date = date_labels[i0]
+        last_date = date_labels[i1]
     pb = data["price_bins"]
-    z_arr = np.array(data["Z"])
-    z_min = float(np.nanmin(z_arr)) if z_arr.size else 0.0
-    z_max = float(np.nanmax(z_arr)) if z_arr.size else 1.0
+    price_min = float(min(pb)) if pb else 0
+    price_max = float(max(pb)) if pb else 100
+    z_min = float(np.nanmin(Z_arr)) if Z_arr.size else 0
+    z_max = float(np.nanmax(Z_arr)) if Z_arr.size else 1
+    range_data = {"y_range": [i0, i1], "x_range": [price_min, price_max], "z_range": [z_min, z_max]}
     return (
-        0, max(0, n_d - 1), [0, max(0, n_d - 1)],
-        0, max(0, len(pb) - 1), [0, max(0, len(pb) - 1)],
-        0, 1, [0, 1],
+        first_date, last_date, date_labels[0], date_labels[-1],
+        price_min, price_max, [price_min, price_max],
+        z_min, z_max, [z_min, z_max],
+        range_data,
     )
 
 # 全体表示に戻す
 @app.callback(
-    Output("range-x", "value", allow_duplicate=True),
-    Output("range-y", "value", allow_duplicate=True),
-    Output("range-z", "value", allow_duplicate=True),
+    Output("range-x-date", "start_date", allow_duplicate=True),
+    Output("range-x-date", "end_date", allow_duplicate=True),
+    Output("range-y-slider", "value", allow_duplicate=True),
+    Output("range-z-slider", "value", allow_duplicate=True),
     Input("btn-reset-range", "n_clicks"),
-    State("range-x", "max"), State("range-y", "max"), State("range-z", "max"),
+    State("store-ticker", "data"),
     prevent_initial_call=True,
 )
-def on_reset_range(n, x_max, y_max, z_max):
-    return [0, max(0, x_max)], [0, max(0, y_max)], [0, 1]
+def on_reset_range(n, ticker):
+    data = _get_cached_data(ticker)
+    if data is None or data.get("n_dates", 0) == 0:
+        return None, None, [0, 100], [0, 1]
+    date_labels = data["date_labels"]
+    pb = data["price_bins"]
+    z_arr = np.array(data["Z"])
+    z_min = float(np.nanmin(z_arr)) if z_arr.size else 0
+    z_max = float(np.nanmax(z_arr)) if z_arr.size else 1
+    return (
+        date_labels[0], date_labels[-1],
+        [float(min(pb)) if pb else 0, float(max(pb)) if pb else 100],
+        [z_min, z_max],
+    )
 
-# 3D サーフェス更新（store + 軸範囲）
+# 3D サーフェス更新＋現在範囲を store に保存（スライダー・平滑化・日付・銘柄変更で即時反映）
 @app.callback(
     Output("surface-graph", "figure"),
+    Output("store-current-range", "data", allow_duplicate=True),
+    Input("btn-apply-range", "n_clicks"),
     Input("store-display-data", "data"),
     Input("store-ticker", "data"),
-    Input("range-x", "value"),
-    Input("range-y", "value"),
-    Input("range-z", "value"),
+    Input("smoothing-dropdown", "value"),
+    Input("range-y-slider", "value"),
+    Input("range-z-slider", "value"),
+    Input("surface-opacity-slider", "value"),
+    State("range-x-date", "start_date"),
+    State("range-x-date", "end_date"),
+    prevent_initial_call="initial_duplicate",
 )
-def update_surface(_display_data, ticker, rx, ry, rz):
+def update_surface(_apply_clicks, _display_data, ticker, smoothing_mode, y_slider_val, z_slider_val, surface_opacity, start_date, end_date):
     data = _get_cached_data(ticker)
     if data is None or not ticker:
-        return _no_data_figure()
+        return _no_data_figure(), None
+    date_labels = data["date_labels"]
     pb = data["price_bins"]
-    nb = len(pb)
-    j0 = max(0, min(int(ry[0]), nb - 1)) if ry else 0
-    j1 = max(0, min(int(ry[1]), nb - 1)) if ry else max(0, nb - 1)
-    x_range = (float(pb[j0]), float(pb[j1])) if nb else None
-    y_range = (int(rx[0]), int(rx[1])) if rx else None
     Z_arr = np.array(data["Z"])
-    z_max = float(np.nanmax(Z_arr)) if Z_arr.size else 1.0
-    z_min = float(np.nanmin(Z_arr)) if Z_arr.size else 0.0
-    if rz and len(rz) == 2:
-        z_range = (z_min + (z_max - z_min) * rz[0], z_min + (z_max - z_min) * rz[1])
+    data_z_min = float(np.nanmin(Z_arr)) if Z_arr.size else 0.0
+    data_z_max = float(np.nanmax(Z_arr)) if Z_arr.size else 1.0
+
+    # X軸(日付): カレンダーで選択した日付をインデックスに変換
+    y_range = (0, len(date_labels) - 1)
+    if start_date is not None and end_date is not None:
+        try:
+            start_s = (start_date[:10] if isinstance(start_date, str) else str(start_date)[:10]).strip()
+            end_s = (end_date[:10] if isinstance(end_date, str) else str(end_date)[:10]).strip()
+            if start_s in date_labels and end_s in date_labels:
+                i0 = date_labels.index(start_s)
+                i1 = date_labels.index(end_s)
+                y_range = (min(i0, i1), max(i0, i1))
+            elif start_s in date_labels:
+                i0 = date_labels.index(start_s)
+                y_range = (i0, len(date_labels) - 1)
+            elif end_s in date_labels:
+                i1 = date_labels.index(end_s)
+                y_range = (0, i1)
+        except (ValueError, TypeError, AttributeError):
+            pass
+
+    # Y軸(株価): スライダー値 [min, max]
+    x_range = None
+    p_data_min = float(min(pb)) if pb else 0.0
+    p_data_max = float(max(pb)) if pb else 0.0
+    if pb is not None and len(pb) > 0 and y_slider_val is not None and len(y_slider_val) >= 2:
+        p_min = float(y_slider_val[0])
+        p_max = float(y_slider_val[1])
+        x_range = (min(p_min, p_max), max(p_min, p_max))
+
+    # Z軸(出来高): スライダー値 [min, max]
+    if z_slider_val is not None and len(z_slider_val) >= 2:
+        z_min_in = float(z_slider_val[0])
+        z_max_in = float(z_slider_val[1])
+        z_range = (min(z_min_in, z_max_in), max(z_min_in, z_max_in))
     else:
-        z_range = (z_min, z_max)
-    return create_surface_figure(data, ticker, x_range=x_range, y_range=y_range, z_range=z_range)
+        z_range = (data_z_min, data_z_max)
 
-# 2D グラフ更新（store + 3D hoverData）
-@app.callback(
-    Output("graph-date-volume", "figure"),
-    Output("graph-date-price", "figure"),
-    Output("graph-volume-price", "figure"),
-    Input("store-display-data", "data"),
-    Input("store-ticker", "data"),
-    Input("surface-graph", "hoverData"),
-)
-def update_2d_graphs(_display_data, ticker, hover_data):
-    data = _get_cached_data(ticker)
-    hover_idx = None
-    if data and hover_data and hover_data.get("points"):
-        pt = hover_data["points"][0]
-        y_val = pt.get("y")
-        if isinstance(y_val, (int, float)):
-            hover_idx = int(round(y_val))
-        pi = pt.get("pointIndex")
-        if isinstance(pi, (list, tuple)) and len(pi) >= 1:
-            hover_idx = int(pi[0])
-        if hover_idx is not None and data.get("n_dates"):
-            hover_idx = max(0, min(hover_idx, data["n_dates"] - 1))
+    range_data = {"y_range": list(y_range), "x_range": list(x_range) if x_range else [p_data_min, p_data_max], "z_range": list(z_range)}
+    date_slice, price_slice, Z_slice, _, _ = _sliced_display_data(data, range_data)
+    if date_slice is not None and price_slice is not None and Z_slice is not None:
+        _save_graph_data_csv(ticker, date_slice, price_slice, Z_slice)
+    sm = smoothing_mode if smoothing_mode in ("none", "current", "gaussian_only") else "current"
+    opacity_val = float(surface_opacity) if surface_opacity is not None else 0.5
+    df_5m = load_csv(ticker) if ticker else None
+    return create_surface_figure(data, ticker, x_range=x_range, y_range=y_range, z_range=z_range, smoothing_mode=sm, surface_opacity=opacity_val, df_5m=df_5m), range_data
 
-    df = load_csv(ticker) if ticker else None
-    day_df = get_day_df(df, data["date_labels"] if data else [], hover_idx) if data and hover_idx is not None else None
-    f1 = create_date_volume_figure(data, hover_idx)
-    f2 = create_date_price_figure(data, hover_idx)
-    f3 = create_volume_price_figure(data, day_df, hover_idx)
-    return f1, f2, f3
+def _sliced_display_data(data: dict[str, Any], range_data: dict | None):
+    """store-current-range に従って日付・株価でスライスしたデータを返す。"""
+    if not data or not data.get("date_labels"):
+        return None, None, None, None, None
+    date_labels = data["date_labels"]
+    price_bins = np.array(data["price_bins"])
+    Z = np.array(data["Z"])
+    daily_volume = data.get("daily_volume", [])
+    daily_price = data.get("daily_price", [])
+
+    i0, i1 = 0, len(date_labels) - 1
+    j0, j1 = 0, len(price_bins) - 1
+    if range_data:
+        yr = range_data.get("y_range")
+        if yr and len(yr) >= 2:
+            i0 = max(0, min(int(yr[0]), len(date_labels) - 1))
+            i1 = max(0, min(int(yr[1]), len(date_labels) - 1))
+            if i0 > i1:
+                i0, i1 = i1, i0
+        xr = range_data.get("x_range")
+        if xr and len(xr) >= 2 and len(price_bins) > 0:
+            p_min, p_max = float(xr[0]), float(xr[1])
+            j_mask = (price_bins >= p_min) & (price_bins <= p_max)
+            if np.any(j_mask):
+                j_idx = np.where(j_mask)[0]
+                j0, j1 = int(j_idx[0]), int(j_idx[-1])
+
+    date_slice = date_labels[i0 : i1 + 1]
+    price_slice = price_bins[j0 : j1 + 1]
+    Z_slice = Z[i0 : i1 + 1, j0 : j1 + 1]
+    vol_slice = daily_volume[i0 : i1 + 1] if daily_volume else []
+    price_slice_daily = daily_price[i0 : i1 + 1] if daily_price else []
+    return date_slice, price_slice, Z_slice, vol_slice, price_slice_daily
+
 
 if __name__ == "__main__":
     app.run(debug=True)
