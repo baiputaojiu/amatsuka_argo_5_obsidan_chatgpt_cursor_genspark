@@ -82,7 +82,7 @@
  [],
  False,
  False,
- 1775806656,
+ 1775807847,
  [('runw.exe',
    'D:\\workspace\\amatsuka_argo_5_obsidan_chatgpt_cursor_genspark\\outlook_google_sync\\.venv\\Lib\\site-packages\\PyInstaller\\bootloader\\Windows-64bit-intel\\runw.exe',
    'EXECUTABLE')],
