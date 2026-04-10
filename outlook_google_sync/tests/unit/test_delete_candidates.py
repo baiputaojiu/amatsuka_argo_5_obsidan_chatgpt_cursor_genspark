@@ -68,3 +68,14 @@ def test_del05_moved_outside_range():
     r_end = datetime(2026, 1, 31, 23, 59, 59)
     result = select_delete_candidates(existing, [], r_start, r_end)
     assert len(result) == 0
+
+
+def test_del02_range_overlap_google_api_offset_datetimes():
+    """Google が返す RFC3339（オフセット付き）でも naive な R と比較できること。"""
+    existing = {
+        "k1": _make_item("k1", "2026-01-15T10:00:00+09:00", "2026-01-15T11:00:00+09:00"),
+    }
+    r_start = datetime(2026, 1, 1)
+    r_end = datetime(2026, 1, 31, 23, 59, 59)
+    result = select_delete_candidates(existing, [], r_start, r_end)
+    assert len(result) == 1

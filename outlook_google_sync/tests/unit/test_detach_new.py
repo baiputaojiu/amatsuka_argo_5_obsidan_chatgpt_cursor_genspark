@@ -20,7 +20,7 @@ def test_detach_new_uses_source_sync_key():
         input_method="ics_manual",
         sync_key_kind="primary",
     )
-    body = e.to_google_body("full")
+    body = e.to_google_body("full", time_zone="Asia/Tokyo")
     private = body["extendedProperties"]["private"]
     assert private["sync_key"] == "source_derived_key_abc"
     assert private["sync_key_kind"] == "primary"
