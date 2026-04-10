@@ -89,6 +89,43 @@ def list_managed_events(calendar_id: str, time_min: datetime, time_max: datetime
     return by_key
 
 
+def list_managed_event_items(calendar_id: str, time_min: datetime, time_max: datetime) -> list[dict]:
+    """Return all tool-managed events in the range (multiple rows may share one sync_key)."""
+    service = get_service()
+    items = (
+        service.events()
+        .list(
+            calendarId=calendar_id,
+            timeMin=time_min.isoformat() + "Z",
+            timeMax=time_max.isoformat() + "Z",
+            singleEvents=True,
+            maxResults=2500,
+        )
+        .execute()
+        .get("items", [])
+    )
+    out: list[dict] = []
+    for item in items:
+        private = ((item.get("extendedProperties") or {}).get("private") or {})
+        if private.get("tool_marker") != TOOL_MARKER:
+            continue
+        if private.get("sync_key"):
+            out.append(item)
+    return out
+
+
+def get_event(calendar_id: str, event_id: str) -> dict:
+    """Full event resource (for preview: description, attendees, etc.)."""
+    service = get_service()
+    return service.events().get(calendarId=calendar_id, eventId=event_id).execute()
+
+
+def patch_event_merge(calendar_id: str, event_id: str, body: dict) -> dict:
+    """Patch event without injecting TOOL_MARKER (duplicate merge for unmanaged-only groups)."""
+    service = get_service()
+    return service.events().patch(calendarId=calendar_id, eventId=event_id, body=body).execute()
+
+
 def list_all_events_in_range(calendar_id: str, time_min: datetime, time_max: datetime) -> list[dict]:
     """Return all events (including non-managed) in the range — used for merge candidate search."""
     service = get_service()
