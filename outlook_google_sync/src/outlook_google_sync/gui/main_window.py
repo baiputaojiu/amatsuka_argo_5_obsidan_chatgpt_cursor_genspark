@@ -31,6 +31,7 @@ from .settings_window import SettingsWindow
 from .preview_window import PreviewWindow
 from .duplicate_repair_window import DuplicateRepairWindow
 from .dialogs import DeleteConfirmDialog, DuplicateRepairOptionsDialog, SummaryDialog, RetryDialog
+from .progress_window import ProgressWindow
 from .ttk_style import apply_button_contrast_style
 
 
@@ -59,6 +60,7 @@ class MainWindow(tk.Tk):
         self.state_data.setdefault("duplicate_repair_description_mode", "longer")
         self._cancel_flag = threading.Event()
         self._last_preview = None
+        self._progress_win: ProgressWindow | None = None
         self._build()
         self.protocol("WM_DELETE_WINDOW", self._force_quit)
 
@@ -199,8 +201,31 @@ class MainWindow(tk.Tk):
         threading.Thread(target=run, daemon=True).start()
 
     def _worker_done(self):
+        self._close_progress()
         self._set_main_busy(False)
         self.status.set("待機中")
+
+    def _open_progress(self, title: str, message: str) -> None:
+        self._close_progress()
+        self._progress_win = ProgressWindow(self, title=title)
+        self._progress_win.set_indeterminate(message)
+
+    def _close_progress(self) -> None:
+        if self._progress_win is not None:
+            self._progress_win.close_safe()
+            self._progress_win = None
+
+    def _progress_from_message(self, message: str) -> None:
+        if self._progress_win is None:
+            return
+        import re
+        m = re.search(r"(\d+)\s*/\s*(\d+)", message)
+        if m:
+            cur = int(m.group(1))
+            total = int(m.group(2))
+            self._progress_win.set_progress(cur, total, message)
+        else:
+            self._progress_win.set_indeterminate(message)
 
     # ── Read source with filters ──
 
@@ -324,6 +349,8 @@ class MainWindow(tk.Tk):
         eng = SyncEngine(self.logger)
         cal_id = self.state_data.get("calendar_id", "primary")
         fp = self.settings.get("sync_metadata", {}).get("per_source_fingerprint", {})
+        sync_title = "同期中" if mode == "normal" else "フル同期中"
+        self.after(0, lambda: self._open_progress(sync_title, "準備中..."))
 
         def on_error(msg):
             result = [None]
@@ -344,7 +371,13 @@ class MainWindow(tk.Tk):
             conflict_policy=self.state_data.get("conflict_policy", "overwrite"),
             range_start=range_start,
             range_end=range_end,
-            progress=lambda m: self.after(0, lambda: self.status.set(m)),
+            progress=lambda m: self.after(
+                0,
+                lambda msg=m: (
+                    self.status.set(msg),
+                    self._progress_from_message(msg),
+                ),
+            ),
             cancel_check=lambda: self._cancel_flag.is_set(),
             on_error=on_error,
         )
@@ -365,7 +398,13 @@ class MainWindow(tk.Tk):
             if approved[0]:
                 deleted, del_errors = eng.execute_deletions(
                     cal_id, approved[0],
-                    progress=lambda m: self.after(0, lambda: self.status.set(m)),
+                    progress=lambda m: self.after(
+                        0,
+                        lambda msg=m: (
+                            self.status.set(msg),
+                            self._progress_from_message(msg),
+                        ),
+                    ),
                 )
                 res.deleted = deleted
                 res.errors.extend(del_errors)
