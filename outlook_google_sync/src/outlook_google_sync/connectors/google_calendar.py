@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import logging
+import threading
 from datetime import UTC, datetime
 
 from google.auth.transport.requests import Request
@@ -24,8 +25,14 @@ DETACH_KEYS = [
     "reader_engine", "input_method", "last_tool_write_utc",
 ]
 
+_SERVICE_LOCAL = threading.local()
+
 
 def get_service():
+    cached = getattr(_SERVICE_LOCAL, "service", None)
+    if cached is not None:
+        return cached
+
     creds = None
     tp = token_path()
     if tp.exists():
@@ -38,7 +45,9 @@ def get_service():
             creds = flow.run_local_server(port=0)
         tp.parent.mkdir(parents=True, exist_ok=True)
         tp.write_text(creds.to_json(), encoding="utf-8")
-    return build("calendar", "v3", credentials=creds)
+    service = build("calendar", "v3", credentials=creds)
+    _SERVICE_LOCAL.service = service
+    return service
 
 
 def list_calendars() -> list[dict]:
@@ -150,23 +159,22 @@ def upsert_event(
 ) -> tuple[str, str]:
     """Insert or patch a single event. Returns (action, event_id).
 
-    Sets last_tool_write_utc after successful write (Ch11.2.1, Ch14.1 step 6).
+    Stamps last_tool_write_utc in the primary write body.
     """
     service = get_service()
     private = body.setdefault("extendedProperties", {}).setdefault("private", {})
     private["tool_marker"] = TOOL_MARKER
+    private["last_tool_write_utc"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
     if event_id:
         result = service.events().patch(
             calendarId=calendar_id, eventId=event_id, body=body,
         ).execute()
-        _stamp_last_write(calendar_id, result["id"], service)
         return "updated", result["id"]
     else:
         result = service.events().insert(
             calendarId=calendar_id, body=body,
         ).execute()
-        _stamp_last_write(calendar_id, result["id"], service)
         return "created", result["id"]
 
 
@@ -185,16 +193,6 @@ def detach_event(calendar_id: str, event_id: str) -> None:
         private.pop(key, None)
     body = {"extendedProperties": {"private": private if private else {}}}
     service.events().patch(calendarId=calendar_id, eventId=event_id, body=body).execute()
-
-
-def _stamp_last_write(calendar_id: str, event_id: str, service) -> None:
-    """Ch11.2.1: Write last_tool_write_utc immediately after successful write."""
-    now_utc = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-    body = {"extendedProperties": {"private": {"last_tool_write_utc": now_utc}}}
-    try:
-        service.events().patch(calendarId=calendar_id, eventId=event_id, body=body).execute()
-    except Exception as exc:
-        logger.warning("Failed to stamp last_tool_write_utc: %s", exc)
 
 
 # Legacy compat wrapper

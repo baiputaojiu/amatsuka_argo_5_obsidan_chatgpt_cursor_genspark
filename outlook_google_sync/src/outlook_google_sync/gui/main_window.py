@@ -27,10 +27,17 @@ from ..services.notifications import notify
 from ..sync.engine import SyncEngine
 from ..sync.filters import apply_filters
 from ..sync.preview import build_preview
+from ..sync.duplicate_merge import execute_duplicate_merge
+from ..sync.duplicate_repair import (
+    build_groups_for_mode,
+    filter_events_within_start_end_dates,
+    pick_winner_event_id,
+)
 from .settings_window import SettingsWindow
 from .preview_window import PreviewWindow
 from .duplicate_repair_window import DuplicateRepairWindow
 from .dialogs import DeleteConfirmDialog, DuplicateRepairOptionsDialog, SummaryDialog, RetryDialog
+from .progress_window import ProgressWindow
 from .ttk_style import apply_button_contrast_style
 
 
@@ -59,6 +66,7 @@ class MainWindow(tk.Tk):
         self.state_data.setdefault("duplicate_repair_description_mode", "longer")
         self._cancel_flag = threading.Event()
         self._last_preview = None
+        self._progress_win: ProgressWindow | None = None
         self._build()
         self.protocol("WM_DELETE_WINDOW", self._force_quit)
 
@@ -99,6 +107,7 @@ class MainWindow(tk.Tk):
             ("フルプレビュー", lambda: self.worker(self.preview_full)),
             ("フル同期", lambda: self.worker(lambda: self.sync("full"))),
             ("重複修復", lambda: self.worker(self.duplicate_repair)),
+            ("クイック同期", lambda: self.worker(self.quick_sync)),
         ]:
             b = ttk.Button(bar, text=text, command=cmd)
             b.pack(side="left", padx=3)
@@ -199,8 +208,31 @@ class MainWindow(tk.Tk):
         threading.Thread(target=run, daemon=True).start()
 
     def _worker_done(self):
+        self._close_progress()
         self._set_main_busy(False)
         self.status.set("待機中")
+
+    def _open_progress(self, title: str, message: str) -> None:
+        self._close_progress()
+        self._progress_win = ProgressWindow(self, title=title)
+        self._progress_win.set_indeterminate(message)
+
+    def _close_progress(self) -> None:
+        if self._progress_win is not None:
+            self._progress_win.close_safe()
+            self._progress_win = None
+
+    def _progress_from_message(self, message: str) -> None:
+        if self._progress_win is None:
+            return
+        import re
+        m = re.search(r"(\d+)\s*/\s*(\d+)", message)
+        if m:
+            cur = int(m.group(1))
+            total = int(m.group(2))
+            self._progress_win.set_progress(cur, total, message)
+        else:
+            self._progress_win.set_indeterminate(message)
 
     # ── Read source with filters ──
 
@@ -320,10 +352,70 @@ class MainWindow(tk.Tk):
         events, sd, ed = self.read_source()
         self._sync_events(events, mode, range_start=sd, range_end=ed)
 
+    def quick_sync(self):
+        """Run normal sync, then auto merge content-duplicates with description=longer."""
+        events, sd, ed = self.read_source()
+        self._sync_events(events, "normal", range_start=sd, range_end=ed)
+
+        cal_id = self.state_data.get("calendar_id", "primary")
+        self.after(
+            0,
+            lambda: (
+                self.status.set("クイック同期: 重複確認中..."),
+                self._progress_from_message("重複確認中..."),
+            ),
+        )
+
+        all_events = list_all_events_in_range(cal_id, sd, ed)
+        all_events = filter_events_within_start_end_dates(all_events, sd, ed)
+        groups = build_groups_for_mode("content", all_events)
+
+        blocked = 0
+        merge_targets: list[tuple[str, list[dict], str]] = []
+        for g in groups:
+            if not g.mergeable:
+                blocked += 1
+                continue
+            winner_id = pick_winner_event_id(g.items)
+            if not winner_id:
+                continue
+            merge_targets.append((winner_id, g.items, g.group_id))
+
+        merged_count = 0
+        failed_count = 0
+        errors: list[str] = []
+        total = len(merge_targets)
+        for i, (winner_id, items, gid) in enumerate(merge_targets, start=1):
+            self.after(
+                0,
+                lambda cur=i, t=total, g=gid: (
+                    self.status.set(f"クイック同期: 重複修復 {cur}/{t}"),
+                    self._progress_from_message(f"重複修復 {cur}/{t}: {g[:18]}"),
+                ),
+            )
+            try:
+                execute_duplicate_merge(cal_id, winner_id, items, "longer")
+                merged_count += 1
+            except Exception as exc:
+                failed_count += 1
+                errors.append(f"{gid[:16]}: {exc}")
+
+        self.after(
+            0,
+            lambda: self.log_msg(
+                f"クイック同期完了: 自動マージ={merged_count} "
+                f"場所不一致スキップ={blocked} 失敗={failed_count}"
+            ),
+        )
+        if errors:
+            self.after(0, lambda: self.log_msg("クイック同期エラー(先頭10件):\n" + "\n".join(errors[:10])))
+
     def _sync_events(self, events, mode, range_start=None, range_end=None):
         eng = SyncEngine(self.logger)
         cal_id = self.state_data.get("calendar_id", "primary")
         fp = self.settings.get("sync_metadata", {}).get("per_source_fingerprint", {})
+        sync_title = "同期中" if mode == "normal" else "フル同期中"
+        self.after(0, lambda: self._open_progress(sync_title, "準備中..."))
 
         def on_error(msg):
             result = [None]
@@ -344,7 +436,13 @@ class MainWindow(tk.Tk):
             conflict_policy=self.state_data.get("conflict_policy", "overwrite"),
             range_start=range_start,
             range_end=range_end,
-            progress=lambda m: self.after(0, lambda: self.status.set(m)),
+            progress=lambda m: self.after(
+                0,
+                lambda msg=m: (
+                    self.status.set(msg),
+                    self._progress_from_message(msg),
+                ),
+            ),
             cancel_check=lambda: self._cancel_flag.is_set(),
             on_error=on_error,
         )
@@ -365,7 +463,13 @@ class MainWindow(tk.Tk):
             if approved[0]:
                 deleted, del_errors = eng.execute_deletions(
                     cal_id, approved[0],
-                    progress=lambda m: self.after(0, lambda: self.status.set(m)),
+                    progress=lambda m: self.after(
+                        0,
+                        lambda msg=m: (
+                            self.status.set(msg),
+                            self._progress_from_message(msg),
+                        ),
+                    ),
                 )
                 res.deleted = deleted
                 res.errors.extend(del_errors)
