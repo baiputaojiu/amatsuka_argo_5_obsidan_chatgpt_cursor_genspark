@@ -98,6 +98,21 @@ def _norm_loc(item: dict) -> str:
     return str(loc).strip()
 
 
+def _start_sort_key(item: dict) -> str:
+    st = item.get("start") or {}
+    return str(st.get("dateTime") or st.get("date") or "")
+
+
+def pick_winner_event_id(items: list[dict]) -> str:
+    """Pick representative event id: earliest start, then first row."""
+    sorted_items = sorted(items, key=_start_sort_key)
+    for it in sorted_items:
+        eid = str(it.get("id", "")).strip()
+        if eid:
+            return eid
+    return ""
+
+
 def location_merge_allowed(items: list[dict]) -> bool:
     """False if two or more distinct non-empty locations exist."""
     distinct: set[str] = set()
