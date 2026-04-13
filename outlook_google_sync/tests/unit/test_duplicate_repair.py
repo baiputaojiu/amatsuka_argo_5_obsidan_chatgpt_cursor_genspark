@@ -4,11 +4,13 @@ from datetime import datetime
 
 from outlook_google_sync.sync.duplicate_merge import build_merged_body
 from outlook_google_sync.sync.duplicate_repair import (
+    build_groups_for_mode,
     event_start_local_date,
     filter_events_within_start_end_dates,
     find_duplicates,
     find_duplicates_by_summary_time,
     location_merge_allowed,
+    pick_winner_event_id,
 )
 from outlook_google_sync.connectors.google_calendar import TOOL_MARKER
 
@@ -109,3 +111,41 @@ def test_filter_events_within_start_end_dates():
     ev_before = {"id": "b", "start": {"dateTime": "2025-01-05T10:00:00+09:00"}}
     out = filter_events_within_start_end_dates([ev_in, ev_before], rs, re)
     assert [x["id"] for x in out] == ["a"]
+
+
+def test_pick_winner_event_id_selects_earliest_start():
+    items = [
+        {"id": "late", "start": {"dateTime": "2025-01-10T12:00:00+09:00"}},
+        {"id": "early", "start": {"dateTime": "2025-01-10T09:00:00+09:00"}},
+    ]
+    assert pick_winner_event_id(items) == "early"
+
+
+def test_content_mode_auto_merge_prefers_longer_description():
+    a = {
+        "id": "e1",
+        "summary": "Daily",
+        "start": {"dateTime": "2025-01-10T09:00:00+09:00"},
+        "end": {"dateTime": "2025-01-10T09:30:00+09:00"},
+        "description": "short",
+        "extendedProperties": {"private": {"tool_marker": TOOL_MARKER, "sync_key": "k1"}},
+    }
+    b = {
+        "id": "e2",
+        "summary": "Daily",
+        "start": {"dateTime": "2025-01-10T09:00:00+09:00"},
+        "end": {"dateTime": "2025-01-10T09:30:00+09:00"},
+        "description": "this is longer description",
+        "extendedProperties": {"private": {"tool_marker": TOOL_MARKER, "sync_key": "k2"}},
+    }
+    groups = build_groups_for_mode("content", [a, b])
+    assert len(groups) == 1
+    g = groups[0]
+    winner = pick_winner_event_id(g.items)
+    winner_item = next(x for x in g.items if x["id"] == winner)
+    body = build_merged_body(
+        winner_item,
+        description_mode="longer",
+        group_items=g.items,
+    )
+    assert body["description"] == "this is longer description"
