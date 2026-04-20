@@ -2,6 +2,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Optional
 
+from ..constants import TOOL_MARKER
+
 
 @dataclass
 class EventModel:
@@ -43,7 +45,7 @@ class EventModel:
             "visibility": "private" if self.is_private else "default",
             "extendedProperties": {
                 "private": {
-                    "tool_marker": "outlook_google_sync_v1",
+                    "tool_marker": TOOL_MARKER,
                     "sync_key": self.sync_key,
                     "sync_key_kind": self.sync_key_kind,
                     "reader_engine": self.reader_engine,
