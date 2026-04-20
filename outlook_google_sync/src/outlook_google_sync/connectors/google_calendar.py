@@ -5,6 +5,7 @@ import logging
 import threading
 from datetime import UTC, datetime
 
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -28,6 +29,12 @@ DETACH_KEYS = [
 _SERVICE_LOCAL = threading.local()
 
 
+def _run_oauth_flow() -> Credentials:
+    """ブラウザでの新規認可フローを実行して Credentials を返す。"""
+    flow = InstalledAppFlow.from_client_secrets_file(str(credentials_path()), SCOPES)
+    return flow.run_local_server(port=0)
+
+
 def get_service():
     cached = getattr(_SERVICE_LOCAL, "service", None)
     if cached is not None:
@@ -39,10 +46,23 @@ def get_service():
         creds = Credentials.from_authorized_user_file(str(tp), SCOPES)
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+            try:
+                creds.refresh(Request())
+            except RefreshError as exc:
+                # refresh_token が失効/取消（OAuth同意画面がTesting時の7日ルール、
+                # ユーザーによる権限取消、長期未使用、パスワード変更等）。
+                # 壊れたトークンを破棄し、新規認可フローに切り替える。
+                logger.warning(
+                    "Google OAuth refresh_token が無効です（%s）。token.json を破棄して再認可を行います。",
+                    exc,
+                )
+                try:
+                    tp.unlink(missing_ok=True)
+                except OSError as unlink_exc:
+                    logger.warning("token.json の削除に失敗: %s", unlink_exc)
+                creds = _run_oauth_flow()
         else:
-            flow = InstalledAppFlow.from_client_secrets_file(str(credentials_path()), SCOPES)
-            creds = flow.run_local_server(port=0)
+            creds = _run_oauth_flow()
         tp.parent.mkdir(parents=True, exist_ok=True)
         tp.write_text(creds.to_json(), encoding="utf-8")
     service = build("calendar", "v3", credentials=creds)
