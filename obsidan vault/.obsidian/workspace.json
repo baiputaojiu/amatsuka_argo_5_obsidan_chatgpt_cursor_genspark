@@ -34,9 +34,23 @@
               "icon": "lucide-file",
               "title": "★ToDoリスト"
             }
+          },
+          {
+            "id": "058a446a3c1b53c1",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "51_Daily/20260414.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "20260414"
+            }
           }
         ],
-        "currentTab": 1
+        "currentTab": 2
       }
     ],
     "direction": "vertical"
@@ -109,7 +123,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "30_Permanent/★業務/★ToDoリスト.md",
+                "file": "51_Daily/20260414.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -119,7 +133,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "★ToDoリストへのバックリンク"
+              "title": "20260414へのバックリンク"
             }
           },
           {
@@ -208,8 +222,11 @@
       "table-editor-obsidian:Advanced Tables Toolbar": false
     }
   },
-  "active": "d8133fbe03962a66",
+  "active": "60b88fccc1566d45",
   "lastOpenFiles": [
+    "30_Permanent/★業務/★ToDoリスト.md",
+    "51_Daily/20260414.md",
+    "51_Daily",
     "20_Literature/履歴/20260117_り_貴金属_ゴールドシルバー枯渇説の真実と信用市場の構造.md",
     "20_Literature/履歴/20260117_とも_米国株_2025年12月雇用統計と2026年投資戦略.md",
     "20_Literature/履歴/20260114_げ太郎_株式投資_高市解散トレードの注意点と注目銘柄4選.md",
@@ -224,7 +241,6 @@
     "Attachments/IMG_6773.png",
     "30_Permanent/★業務/★予備知識.md",
     "30_Permanent/★業務/★予備知識",
-    "30_Permanent/★業務/★ToDoリスト.md",
     "20_Literature/履歴/20260112_作者不明_株式投資_おすすめ無料株サイト5選.md",
     "10_Fleeting/投資アイデア_分散投資ウォッチリスト_2026年1月.md",
     "Templates/Fleeting Note.md",
@@ -242,13 +258,11 @@
     "00_Inbox/無題のファイル.base",
     "00_Inbox/無題のファイル 1.base",
     "20_Literature/履歴/20260118_chatgpt_アクティビスト参入調査.md",
-    "30_Permanent/調査レポート/20260115_Cursor_貴金属_シルバー市場調査レポート_供給危機と価格高騰の構造分析.md",
     "30_Permanent/★業務/巻取カメラ",
     "30_Permanent/★投資",
     "30_Permanent/★業務",
     "20_Literature/履歴",
     "無題のフォルダ 1",
-    "20_Literature/Untitled",
     "無題のファイル.canvas"
   ]
 }
