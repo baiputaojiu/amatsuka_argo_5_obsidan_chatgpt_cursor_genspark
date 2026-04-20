@@ -172,14 +172,85 @@ def list_all_events_in_range(calendar_id: str, time_min: datetime, time_max: dat
     )
 
 
+# update() フォールバック時、本体から除外する読み取り専用/派生フィールド。
+# これらを送信するとサーバー側で弾かれたり意図しない動作になり得るため削除する。
+_UPDATE_STRIP_KEYS = frozenset({
+    "etag",
+    "kind",
+    "id",
+    "iCalUID",
+    "created",
+    "updated",
+    "htmlLink",
+    "creator",
+    "organizer",
+    "hangoutLink",
+    "conferenceData",
+})
+
+
+def _start_end_kind(obj: object) -> str | None:
+    """start/end オブジェクトが date 型か dateTime 型かを返す（判定不能は None）。"""
+    if not isinstance(obj, dict):
+        return None
+    if obj.get("dateTime"):
+        return "dateTime"
+    if obj.get("date"):
+        return "date"
+    return None
+
+
+def _needs_update_fallback(existing_event: dict, body: dict) -> bool:
+    """既存イベントと送信ボディで start/end の型（date↔dateTime）が食い違うなら True。
+
+    Google Calendar API の patch 意味論では、start/end のネストオブジェクトを
+    送っても反対側のフィールド（dateTime と date）が残り続けてしまい、
+    "Invalid start time." 400 エラーが発生する。型が食い違うときだけ
+    events().update() にフォールバックして完全置換する。
+    """
+    for key in ("start", "end"):
+        e_kind = _start_end_kind(existing_event.get(key))
+        b_kind = _start_end_kind(body.get(key))
+        if e_kind and b_kind and e_kind != b_kind:
+            return True
+    return False
+
+
+def _build_update_body(existing_event: dict, body: dict) -> dict:
+    """update() 用に、既存リソースへ送信ボディを重ねたフルボディを生成する。"""
+    merged: dict = {
+        k: v for k, v in existing_event.items() if k not in _UPDATE_STRIP_KEYS
+    }
+    for key, val in body.items():
+        if key in ("start", "end"):
+            # 反対側のフィールドが残存しないよう完全置換する
+            merged[key] = dict(val) if isinstance(val, dict) else val
+        elif key == "extendedProperties" and isinstance(val, dict):
+            existing_ext = merged.get("extendedProperties") or {}
+            existing_priv = dict(existing_ext.get("private") or {})
+            existing_priv.update(val.get("private") or {})
+            new_ext: dict = {"private": existing_priv}
+            shared = existing_ext.get("shared")
+            if shared:
+                new_ext["shared"] = dict(shared)
+            merged["extendedProperties"] = new_ext
+        else:
+            merged[key] = val
+    return merged
+
+
 def upsert_event(
     calendar_id: str,
     event_id: str | None,
     body: dict,
+    existing_event: dict | None = None,
 ) -> tuple[str, str]:
     """Insert or patch a single event. Returns (action, event_id).
 
     Stamps last_tool_write_utc in the primary write body.
+
+    existing_event を渡すと、start/end の型（date/dateTime）が食い違う場合に
+    patch ではなく update で完全置換してフォールバックする。
     """
     service = get_service()
     private = body.setdefault("extendedProperties", {}).setdefault("private", {})
@@ -187,9 +258,19 @@ def upsert_event(
     private["last_tool_write_utc"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
     if event_id:
-        result = service.events().patch(
-            calendarId=calendar_id, eventId=event_id, body=body,
-        ).execute()
+        if existing_event and _needs_update_fallback(existing_event, body):
+            update_body = _build_update_body(existing_event, body)
+            logger.info(
+                "start/end 型不一致のため update フォールバック: eventId=%s",
+                event_id,
+            )
+            result = service.events().update(
+                calendarId=calendar_id, eventId=event_id, body=update_body,
+            ).execute()
+        else:
+            result = service.events().patch(
+                calendarId=calendar_id, eventId=event_id, body=body,
+            ).execute()
         return "updated", result["id"]
     else:
         result = service.events().insert(
@@ -231,8 +312,9 @@ def upsert_events(calendar_id: str, events, detail_level: str = "full"):
     for e in events:
         body = e.to_google_body(detail_level, time_zone=tz)
         try:
-            eid = existing.get(e.sync_key, {}).get("id")
-            action, _ = upsert_event(calendar_id, eid, body)
+            google_item = existing.get(e.sync_key) or {}
+            eid = google_item.get("id")
+            action, _ = upsert_event(calendar_id, eid, body, existing_event=google_item or None)
             if action == "created":
                 created += 1
             else:

@@ -87,7 +87,9 @@ class SyncEngine:
                         calendar_id, e, body, google_item, conflict_policy, detail_level, r,
                     )
                 else:
-                    action, _ = upsert_event(calendar_id, event_id, body)
+                    action, _ = upsert_event(
+                        calendar_id, event_id, body, existing_event=google_item,
+                    )
                     if action == "created":
                         r.created += 1
                     else:
@@ -128,7 +130,7 @@ class SyncEngine:
         event_id = google_item["id"]
 
         if policy == "overwrite":
-            upsert_event(calendar_id, event_id, body)
+            upsert_event(calendar_id, event_id, body, existing_event=google_item)
             result.updated += 1
             self.logger.info("Conflict overwrite: %s", event.summary)
 
@@ -141,13 +143,13 @@ class SyncEngine:
 
         elif policy == "merge":
             merged = merge_fields(body, google_item)
-            upsert_event(calendar_id, event_id, merged)
+            upsert_event(calendar_id, event_id, merged, existing_event=google_item)
             result.updated += 1
             result.merged += 1
             self.logger.info("Conflict merge: %s", event.summary)
 
         else:
-            upsert_event(calendar_id, event_id, body)
+            upsert_event(calendar_id, event_id, body, existing_event=google_item)
             result.updated += 1
 
     def execute_deletions(
