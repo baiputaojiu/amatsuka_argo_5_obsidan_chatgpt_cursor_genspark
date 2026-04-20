@@ -7,7 +7,7 @@ import tkinter as tk
 from datetime import datetime
 from tkinter import ttk, filedialog, messagebox
 
-from tkcalendar import DateEntry
+from .focus_safe_date_entry import FocusSafeDateEntry
 
 from ..config.settings_store import load_settings, save_settings
 from ..connectors.outlook_com import read_events_from_outlook
@@ -79,10 +79,10 @@ class MainWindow(tk.Tk):
         top = ttk.Frame(self)
         top.pack(fill="x", padx=8, pady=8)
         ttk.Label(top, text="開始日").grid(row=0, column=0, sticky="w")
-        self.start = DateEntry(top)
+        self.start = FocusSafeDateEntry(top)
         self.start.grid(row=0, column=1)
         ttk.Label(top, text="終了日").grid(row=0, column=2, sticky="w", padx=(10, 0))
-        self.end = DateEntry(top)
+        self.end = FocusSafeDateEntry(top)
         self.end.grid(row=0, column=3)
 
         ttk.Label(top, text="ICS").grid(row=1, column=0, sticky="w")
