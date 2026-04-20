@@ -102,7 +102,7 @@ def execute_duplicate_merge(
     )
     managed = pick_managed_source_for_private(group_items)
     if managed is not None:
-        upsert_event(calendar_id, winner_id, body)
+        upsert_event(calendar_id, winner_id, body, existing_event=winner)
     else:
         patch_event_merge(calendar_id, winner_id, body)
 
