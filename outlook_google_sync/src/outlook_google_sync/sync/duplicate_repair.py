@@ -1,29 +1,29 @@
-"""Ch27: Duplicate grouping for repair / merge."""
+"""Ch27: Duplicate grouping for repair / merge.
+
+Phase 2: raw-dict access replaced with :class:`GoogleEventView`. Public
+function signatures still accept plain dicts for backward compatibility
+with callers in ``gui/`` and ``sync/duplicate_merge.py``.
+"""
 
 from __future__ import annotations
 
 import hashlib
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from typing import Literal
 
 from ..constants import TOOL_MARKER
+from ..models.google_event import GoogleEventView
 
 
 def event_start_local_date(ev: dict) -> date | None:
-    """Calendar date of event start in local timezone (for range filtering)."""
-    st = ev.get("start") or {}
-    if st.get("date"):
-        return date.fromisoformat(str(st["date"]))
-    raw = st.get("dateTime")
-    if not raw:
-        return None
-    s = str(raw).replace("Z", "+00:00")
-    dt = datetime.fromisoformat(s)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    return dt.astimezone().date()
+    """Calendar date of event start in local timezone (for range filtering).
+
+    Kept as a free function for backward compatibility with existing
+    imports; delegates to :meth:`GoogleEventView.start_local_date`.
+    """
+    return GoogleEventView(ev).start_local_date()
 
 
 def filter_events_within_start_end_dates(
@@ -61,20 +61,17 @@ def find_duplicates(events: list) -> dict[str, list]:
     """Group tool-managed events by sync_key; return groups with 2+ items."""
     groups: dict[str, list] = defaultdict(list)
     for item in events:
-        private = ((item.get("extendedProperties") or {}).get("private") or {})
-        key = private.get("sync_key")
+        view = GoogleEventView(item)
+        key = view.sync_key
         if key:
             groups[key].append(item)
     return {k: v for k, v in groups.items() if len(v) > 1}
 
 
 def _content_group_key(item: dict) -> tuple[str, str, str]:
-    summ = (item.get("summary") or "").strip().lower()
-    st = item.get("start") or {}
-    en = item.get("end") or {}
-    s_key = st.get("dateTime") or st.get("date") or ""
-    e_key = en.get("dateTime") or en.get("date") or ""
-    return (summ, str(s_key), str(e_key))
+    view = GoogleEventView(item)
+    summ = view.summary.strip().lower()
+    return (summ, view.start_value, view.end_value)
 
 
 def find_duplicates_by_summary_time(events: list) -> dict[str, list]:
@@ -99,8 +96,7 @@ def _norm_loc(item: dict) -> str:
 
 
 def _start_sort_key(item: dict) -> str:
-    st = item.get("start") or {}
-    return str(st.get("dateTime") or st.get("date") or "")
+    return GoogleEventView(item).start_value
 
 
 def pick_winner_event_id(items: list[dict]) -> str:
@@ -157,7 +153,7 @@ def build_groups_for_mode(
 def pick_managed_source_for_private(items: list[dict]) -> dict | None:
     """First item with tool_marker + sync_key, or None."""
     for item in items:
-        private = ((item.get("extendedProperties") or {}).get("private") or {})
-        if private.get("tool_marker") == TOOL_MARKER and private.get("sync_key"):
+        view = GoogleEventView(item)
+        if view.is_managed and view.sync_key:
             return item
     return None

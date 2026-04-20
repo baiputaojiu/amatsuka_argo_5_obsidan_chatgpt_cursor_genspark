@@ -3,6 +3,8 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 
+from ..models.google_event import GoogleEventView
+
 
 def ask_yes_no(title: str, message: str) -> bool:
     return messagebox.askyesno(title, message)
@@ -154,11 +156,11 @@ class DeleteConfirmDialog(tk.Toplevel):
 
         self.checks: dict[str, tk.BooleanVar] = {}
         for item in candidates:
-            iid = item.get("id", "")
-            private = ((item.get("extendedProperties") or {}).get("private") or {})
-            start_val = (item.get("start") or {}).get("dateTime", (item.get("start") or {}).get("date", ""))
-            summary = item.get("summary", "(no subject)")
-            sync_key = private.get("sync_key", "")[:16]
+            view = GoogleEventView(item)
+            iid = view.id
+            start_val = view.start_value
+            summary = view.summary or "(no subject)"
+            sync_key = view.sync_key[:16]
             self.checks[iid] = tk.BooleanVar(value=True)
             self.tree.insert("", "end", iid=iid, values=("✓", start_val, summary, sync_key))
 
