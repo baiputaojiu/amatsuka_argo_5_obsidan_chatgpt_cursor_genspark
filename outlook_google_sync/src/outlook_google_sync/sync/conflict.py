@@ -1,7 +1,8 @@
 """Ch17: Conflict detection (fixed 3-condition algorithm)."""
 
+from ..constants import TOOL_MARKER
 
-TOOL_MARKER = "outlook_google_sync_v1"
+__all__ = ["TOOL_MARKER", "COMPARE_FIELDS", "has_conflict"]
 
 COMPARE_FIELDS = ("summary", "description", "location", "visibility", "colorId", "start", "end")
 
