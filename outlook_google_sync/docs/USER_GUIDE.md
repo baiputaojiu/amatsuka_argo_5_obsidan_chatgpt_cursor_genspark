@@ -81,6 +81,16 @@ cd D:\workspace\amatsuka_argo_5_obsidan_chatgpt_cursor_genspark\outlook_google_s
 
 - OAuth 同意画面が Testing のときは、認証に使う Gmail を「テストユーザー」に追加します。
 
+> **補足: refresh_token の失効について**
+>
+> OAuth 同意画面が **Testing** ステータスのままの場合、`token.json`（refresh_token）は **約7日で失効** します。失効すると「`認証エラー: invalid_grant: Token has been expired or revoked.`」が表示されます。
+>
+> - 本ツールは失効を検知すると `token.json` を自動で破棄し、ブラウザで再認可画面を開きます。表示されたらそのまま許可してください。
+> - 毎週の再認可を避けたい場合は、Google Cloud Console の OAuth 同意画面で次のどちらかを設定します。
+>   - User type を **Internal**（Google Workspace のみ）にする
+>   - 公開ステータスを **In production** に変更する（個人 Gmail での運用はこちら）
+> - 上記対応後も、ユーザーが権限を取り消した／6ヶ月以上未使用／パスワード変更 等のイベントで失効することがあります。その場合も同様に再認可すれば復旧します。
+
 ---
 
 ## 3. 日常運用（毎回ここから）
@@ -146,6 +156,7 @@ cd D:\workspace\amatsuka_argo_5_obsidan_chatgpt_cursor_genspark\outlook_google_s
 | `ModuleNotFoundError` / GUI起動不可 | `.\scripts\setup_env.bat` で `.venv` を再構築 |
 | `run_gui.bat` が認識されない | カレントを確認し `.\scripts\run_gui.bat` で実行 |
 | 認証失敗 / トークン期限切れ | `credentials.json` 配置確認後、再認証 |
+| `invalid_grant: Token has been expired or revoked.` | 再起動すると自動で再認可画面が開くので許可。頻発するなら OAuth 同意画面を **In production**（または Internal）に変更（2-2 の補足参照） |
 | `403: access_denied` | OAuth 同意画面のテストユーザーに該当 Gmail を追加 |
 | 重複イベント発生 | 重複修復ツールを実行 |
 | ICS パースエラー | 接続テストと ICS ファイル内容を確認 |
