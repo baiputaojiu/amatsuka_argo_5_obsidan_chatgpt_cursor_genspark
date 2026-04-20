@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Literal
 
-from ..connectors.google_calendar import TOOL_MARKER
+from ..constants import TOOL_MARKER
 
 
 def event_start_local_date(ev: dict) -> date | None:

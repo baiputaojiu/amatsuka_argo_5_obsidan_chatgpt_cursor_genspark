@@ -2,7 +2,9 @@
 
 from datetime import datetime
 
-TOOL_MARKER = "outlook_google_sync_v1"
+from ..constants import TOOL_MARKER
+
+__all__ = ["TOOL_MARKER", "select_delete_candidates"]
 
 
 def _to_local_naive(dt: datetime) -> datetime:
