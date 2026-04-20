@@ -19,6 +19,7 @@ from ..constants import (
     GOOGLE_OAUTH_SCOPES,
     TOOL_MARKER,
 )
+from ..models.google_event import GoogleEventView
 
 logger = logging.getLogger("outlook_google_sync")
 
@@ -135,12 +136,11 @@ def list_managed_events(calendar_id: str, time_min: datetime, time_max: datetime
     )
     by_key: dict[str, dict] = {}
     for item in items:
-        private = ((item.get("extendedProperties") or {}).get("private") or {})
-        if private.get("tool_marker") != TOOL_MARKER:
+        view = GoogleEventView(item)
+        if not view.is_managed:
             continue
-        key = private.get("sync_key")
-        if key:
-            by_key[key] = item
+        if view.sync_key:
+            by_key[view.sync_key] = item
     return by_key
 
 
@@ -161,10 +161,10 @@ def list_managed_event_items(calendar_id: str, time_min: datetime, time_max: dat
     )
     out: list[dict] = []
     for item in items:
-        private = ((item.get("extendedProperties") or {}).get("private") or {})
-        if private.get("tool_marker") != TOOL_MARKER:
+        view = GoogleEventView(item)
+        if not view.is_managed:
             continue
-        if private.get("sync_key"):
+        if view.sync_key:
             out.append(item)
     return out
 

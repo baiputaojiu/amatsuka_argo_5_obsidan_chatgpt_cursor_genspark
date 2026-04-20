@@ -9,16 +9,14 @@ from tkinter import ttk, messagebox
 
 from ..config.settings_store import save_settings
 from ..connectors.google_calendar import get_event
+from ..models.google_event import GoogleEventView
 from ..sync.duplicate_merge import build_merged_body, execute_duplicate_merge, preview_merged_location
 from ..sync.duplicate_repair import DuplicateGroup
 
 
 def _fmt_se_time(ev: dict) -> tuple[str, str]:
-    st = ev.get("start") or {}
-    en = ev.get("end") or {}
-    s = st.get("dateTime") or st.get("date") or ""
-    e = en.get("dateTime") or en.get("date") or ""
-    return (str(s), str(e))
+    view = GoogleEventView(ev)
+    return (view.start_value, view.end_value)
 
 
 def _fmt_attendees(ev: dict) -> str:
@@ -161,18 +159,17 @@ class MergePreviewWindow(tk.Toplevel):
         for w in self._merged.winfo_children():
             w.destroy()
 
-        self._lbl_summary = ttk.Label(self._merged, text=f"件名: {body.get('summary', '')}")
+        body_view = GoogleEventView(body)
+        self._lbl_summary = ttk.Label(self._merged, text=f"件名: {body_view.summary}")
         self._lbl_summary.pack(anchor="w", padx=6, pady=2)
-        st = body.get("start") or {}
-        en = body.get("end") or {}
         self._lbl_start = ttk.Label(
             self._merged,
-            text=f"開始: {st.get('dateTime') or st.get('date', '')}",
+            text=f"開始: {body_view.start_value}",
         )
         self._lbl_start.pack(anchor="w", padx=6)
         self._lbl_end = ttk.Label(
             self._merged,
-            text=f"終了: {en.get('dateTime') or en.get('date', '')}",
+            text=f"終了: {body_view.end_value}",
         )
         self._lbl_end.pack(anchor="w", padx=6)
         self._lbl_loc = ttk.Label(
