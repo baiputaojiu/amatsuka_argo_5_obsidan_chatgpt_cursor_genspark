@@ -1,31 +1,42 @@
-"""Ch17: Conflict detection (fixed 3-condition algorithm)."""
+"""Ch17: Conflict detection (fixed 3-condition algorithm).
+
+Phase 2: the implementation now operates on :class:`GoogleEventView`
+internally, but the public ``has_conflict(google_item: dict, ...)`` signature
+is preserved so existing callers and tests work unchanged.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
 
 from ..constants import TOOL_MARKER
+from ..models.google_event import GoogleEventView
 
 __all__ = ["TOOL_MARKER", "COMPARE_FIELDS", "has_conflict"]
 
 COMPARE_FIELDS = ("summary", "description", "location", "visibility", "colorId", "start", "end")
 
 
-def has_conflict(google_item: dict, candidate_body: dict) -> bool:
-    """Return True if the 3-condition algorithm detects a conflict.
+def has_conflict(google_item: Mapping[str, Any], candidate_body: Mapping[str, Any]) -> bool:
+    """Return True iff the 3-condition algorithm detects a conflict.
 
-    Condition 1: tool_marker matches our tool.
-    Condition 2: Google ``updated`` is strictly newer than ``last_tool_write_utc``.
-    Condition 3: At least one sync-target field differs between source and Google.
+    Condition 1: ``tool_marker`` matches our tool.
+    Condition 2: Google ``updated`` is strictly newer than
+    ``last_tool_write_utc``.
+    Condition 3: At least one sync-target field differs between source
+    and Google.
     """
-    private = ((google_item.get("extendedProperties") or {}).get("private") or {})
+    view = GoogleEventView(google_item)
 
     # Condition 1
-    if private.get("tool_marker") != TOOL_MARKER:
+    if not view.is_managed:
         return False
 
     # Condition 2
-    updated = google_item.get("updated")
-    last_write = private.get("last_tool_write_utc")
-    if not updated or not last_write:
+    if not view.updated or not view.last_tool_write_utc:
         return False
-    if updated <= last_write:
+    if view.updated <= view.last_tool_write_utc:
         return False
 
     # Condition 3
@@ -37,8 +48,8 @@ def has_conflict(google_item: dict, candidate_body: dict) -> bool:
     return False
 
 
-def _norm(val) -> str:
-    """Normalize field value for comparison."""
+def _norm(val: Any) -> str:
+    """Normalize a field value for string comparison."""
     if val is None:
         return ""
     if isinstance(val, dict):

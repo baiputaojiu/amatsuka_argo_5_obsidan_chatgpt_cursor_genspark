@@ -1,7 +1,13 @@
-"""Ch18: Merge logic for existing events."""
+"""Ch18: Merge logic for existing events.
+
+Phase 2: ``extendedProperties.private`` + start/end lookups go through
+:class:`GoogleEventView`.
+"""
 
 from __future__ import annotations
 from typing import TYPE_CHECKING
+
+from ..models.google_event import GoogleEventView, parse_event_datetime
 
 if TYPE_CHECKING:
     from ..models.profile import MergeSettings
@@ -54,16 +60,15 @@ def is_merge_candidate(
     """Ch18.1: Check if a Google event is a merge candidate."""
     from datetime import datetime, timedelta
 
-    private = ((google_item.get("extendedProperties") or {}).get("private") or {})
-    if private.get("tool_marker"):
+    view = GoogleEventView(google_item)
+    if view.tool_marker:
         return False  # Already managed, not a merge candidate
 
-    g_summary = (google_item.get("summary") or "").strip().lower()
-    if g_summary != source_summary.strip().lower():
+    if view.summary.strip().lower() != source_summary.strip().lower():
         return False
 
-    g_start = _extract_dt(google_item.get("start", {}))
-    g_end = _extract_dt(google_item.get("end", {}))
+    g_start = parse_event_datetime(view.start_raw)
+    g_end = parse_event_datetime(view.end_raw)
     if not g_start or not g_end:
         return False
 
@@ -75,14 +80,3 @@ def is_merge_candidate(
 
     tol = timedelta(minutes=tolerance_minutes)
     return abs(g_start - s_start) <= tol and abs(g_end - s_end) <= tol
-
-
-def _extract_dt(val: dict):
-    from datetime import datetime
-    raw = val.get("dateTime") or val.get("date")
-    if not raw:
-        return None
-    try:
-        return datetime.fromisoformat(str(raw))
-    except (ValueError, TypeError):
-        return None

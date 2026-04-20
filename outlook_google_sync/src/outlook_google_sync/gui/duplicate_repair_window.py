@@ -8,6 +8,7 @@ from tkinter import messagebox, ttk
 
 from ..config.settings_store import save_settings
 from ..connectors.google_calendar import get_event
+from ..models.google_event import GoogleEventView
 from ..sync.duplicate_merge import execute_duplicate_merge
 from ..sync.duplicate_repair import DuplicateGroup
 from .progress_window import ProgressWindow
@@ -21,8 +22,7 @@ _CHOICES_INV = {v: k for k, v in _CHOICES.items()}
 
 
 def _start_sort_key(item: dict) -> str:
-    st = item.get("start") or {}
-    return str(st.get("dateTime") or st.get("date") or "")
+    return GoogleEventView(item).start_value
 
 
 def _fmt_attendees(item: dict) -> str:
@@ -133,15 +133,14 @@ class DuplicateRepairWindow(tk.Toplevel):
             default = self.initial_description_mode if g.mergeable else "skip"
             self._group_choice[gid] = tk.StringVar(value=default)
             for item in g.items:
-                s = _start_sort_key(item)
-                iid = str(item.get("id", ""))
-                private = ((item.get("extendedProperties") or {}).get("private") or {})
-                sk_part = (private.get("sync_key") or "")[:16]
+                view = GoogleEventView(item)
+                iid = view.id
+                sk_part = view.sync_key[:16]
                 self.tree.insert(
                     parent_iid,
                     "end",
                     iid=f"{gid}:{iid}",
-                    values=(sk_part, item.get("summary", ""), s, "", iid[:24]),
+                    values=(sk_part, view.summary, view.start_value, "", iid[:24]),
                 )
 
     def _build_choice_list(self, parent: ttk.Frame) -> None:
@@ -227,15 +226,14 @@ class DuplicateRepairWindow(tk.Toplevel):
         lines.append(f"マージ可否: {'可' if group.mergeable else '不可'}")
         lines.append("-" * 88)
         for i, ev in enumerate(full, start=1):
-            st = ev.get("start") or {}
-            en = ev.get("end") or {}
-            lines.append(f"[{i}] id={ev.get('id', '')}")
-            lines.append(f"件名: {ev.get('summary', '')}")
-            lines.append(f"開始: {st.get('dateTime') or st.get('date', '')}")
-            lines.append(f"終了: {en.get('dateTime') or en.get('date', '')}")
-            lines.append(f"場所: {(ev.get('location') or '').strip() or '（なし）'}")
+            view = GoogleEventView(ev)
+            lines.append(f"[{i}] id={view.id}")
+            lines.append(f"件名: {view.summary}")
+            lines.append(f"開始: {view.start_value}")
+            lines.append(f"終了: {view.end_value}")
+            lines.append(f"場所: {view.location.strip() or '（なし）'}")
             lines.append("説明:")
-            lines.append((ev.get("description") or "").strip() or "（なし）")
+            lines.append(view.description.strip() or "（なし）")
             lines.append("参加者:")
             lines.append(_fmt_attendees(ev))
             lines.append("-" * 88)
