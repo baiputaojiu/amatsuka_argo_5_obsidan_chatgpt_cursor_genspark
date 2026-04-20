@@ -1,8 +1,14 @@
-google-api-python-client
-google-auth-oauthlib
-google-auth-httplib2
-icalendar
-python-dateutil
-tkcalendar
-pywin32; platform_system == "Windows"
-pytest
+# Runtime dependencies
+# Lower bounds chosen to match what is validated in the project's .venv;
+# upper bounds capped at the next major/minor boundary to avoid surprise
+# breaking changes without explicit revalidation.
+google-api-python-client>=2.100.0,<3
+google-auth-oauthlib>=1.2.0,<2
+google-auth-httplib2>=0.2.0,<1
+icalendar>=6.0.0,<8
+python-dateutil>=2.8,<3
+tkcalendar>=1.6,<2
+pywin32>=306; platform_system == "Windows"
+
+# Test dependencies
+pytest>=8.0,<10

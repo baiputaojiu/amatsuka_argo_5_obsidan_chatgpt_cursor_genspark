@@ -12,18 +12,37 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
 from ..config.paths import credentials_path, token_path
+from ..constants import (
+    DETACH_KEYS,
+    GOOGLE_API_MAX_RESULTS_PER_PAGE,
+    GOOGLE_CALENDAR_TZ_FALLBACK,
+    GOOGLE_OAUTH_SCOPES,
+    TOOL_MARKER,
+)
 
 logger = logging.getLogger("outlook_google_sync")
 
-# API 失敗時のフォールバック（環境に依存しない IANA）
-_CALENDAR_TZ_FALLBACK = "UTC"
+# Backward-compatible aliases — existing call sites and tests import these
+# names from this module. Do not remove without auditing downstream usage.
+_CALENDAR_TZ_FALLBACK = GOOGLE_CALENDAR_TZ_FALLBACK
+SCOPES = list(GOOGLE_OAUTH_SCOPES)
 
-SCOPES = ["https://www.googleapis.com/auth/calendar"]
-TOOL_MARKER = "outlook_google_sync_v1"
-
-DETACH_KEYS = [
-    "tool_marker", "sync_key", "sync_key_kind",
-    "reader_engine", "input_method", "last_tool_write_utc",
+__all__ = [
+    "TOOL_MARKER",
+    "DETACH_KEYS",
+    "SCOPES",
+    "get_service",
+    "list_calendars",
+    "get_calendar_time_zone",
+    "list_managed_events",
+    "list_managed_event_items",
+    "list_all_events_in_range",
+    "get_event",
+    "patch_event_merge",
+    "upsert_event",
+    "upsert_events",
+    "delete_event",
+    "detach_event",
 ]
 
 _SERVICE_LOCAL = threading.local()
@@ -31,7 +50,9 @@ _SERVICE_LOCAL = threading.local()
 
 def _run_oauth_flow() -> Credentials:
     """ブラウザでの新規認可フローを実行して Credentials を返す。"""
-    flow = InstalledAppFlow.from_client_secrets_file(str(credentials_path()), SCOPES)
+    flow = InstalledAppFlow.from_client_secrets_file(
+        str(credentials_path()), list(GOOGLE_OAUTH_SCOPES),
+    )
     return flow.run_local_server(port=0)
 
 
@@ -43,7 +64,7 @@ def get_service():
     creds = None
     tp = token_path()
     if tp.exists():
-        creds = Credentials.from_authorized_user_file(str(tp), SCOPES)
+        creds = Credentials.from_authorized_user_file(str(tp), list(GOOGLE_OAUTH_SCOPES))
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             try:
@@ -74,6 +95,11 @@ def list_calendars() -> list[dict]:
     return get_service().calendarList().list(maxResults=250).execute().get("items", [])
 
 
+# ``events.list`` / ``calendarList.list`` page size. Centralised in constants
+# so Phase 3 can wire ``nextPageToken`` pagination once and reuse the value.
+_LIST_PAGE_SIZE = GOOGLE_API_MAX_RESULTS_PER_PAGE
+
+
 def get_calendar_time_zone(calendar_id: str) -> str:
     """同期先カレンダーの IANA タイムゾーン（events の dateTime + timeZone に使う）。"""
     try:
@@ -87,9 +113,9 @@ def get_calendar_time_zone(calendar_id: str) -> str:
             "カレンダー timeZone 取得失敗 (%s): %s — %s を使用します",
             calendar_id,
             exc,
-            _CALENDAR_TZ_FALLBACK,
+            GOOGLE_CALENDAR_TZ_FALLBACK,
         )
-    return _CALENDAR_TZ_FALLBACK
+    return GOOGLE_CALENDAR_TZ_FALLBACK
 
 
 def list_managed_events(calendar_id: str, time_min: datetime, time_max: datetime) -> dict[str, dict]:
@@ -102,7 +128,7 @@ def list_managed_events(calendar_id: str, time_min: datetime, time_max: datetime
             timeMin=time_min.isoformat() + "Z",
             timeMax=time_max.isoformat() + "Z",
             singleEvents=True,
-            maxResults=2500,
+            maxResults=_LIST_PAGE_SIZE,
         )
         .execute()
         .get("items", [])
@@ -128,7 +154,7 @@ def list_managed_event_items(calendar_id: str, time_min: datetime, time_max: dat
             timeMin=time_min.isoformat() + "Z",
             timeMax=time_max.isoformat() + "Z",
             singleEvents=True,
-            maxResults=2500,
+            maxResults=_LIST_PAGE_SIZE,
         )
         .execute()
         .get("items", [])
@@ -165,7 +191,7 @@ def list_all_events_in_range(calendar_id: str, time_min: datetime, time_max: dat
             timeMin=time_min.isoformat() + "Z",
             timeMax=time_max.isoformat() + "Z",
             singleEvents=True,
-            maxResults=2500,
+            maxResults=_LIST_PAGE_SIZE,
         )
         .execute()
         .get("items", [])
