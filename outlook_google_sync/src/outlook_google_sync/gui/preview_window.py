@@ -5,6 +5,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import TYPE_CHECKING
 
+from ..models.google_event import GoogleEventView
+
 if TYPE_CHECKING:
     from ..sync.preview import PreviewSnapshot
 
@@ -60,17 +62,18 @@ class PreviewWindow(tk.Toplevel):
 
         for i, a in enumerate(self.snapshot.actions):
             e = a.event
-            g = a.google_item or {}
+            g_view = GoogleEventView(a.google_item) if a.google_item else None
             start_str = ""
             if e:
                 start_str = e.start.strftime("%Y-%m-%d %H:%M") if e.start else ""
-            elif g:
-                s = g.get("start", {})
-                start_str = s.get("dateTime", s.get("date", ""))
+            elif g_view:
+                start_str = g_view.start_value
 
-            summary = e.summary if e else g.get("summary", "")
-            sync_key = (e.sync_key[:16] if e else
-                        ((g.get("extendedProperties") or {}).get("private") or {}).get("sync_key", "")[:16])
+            summary = e.summary if e else (g_view.summary if g_view else "")
+            sync_key = (
+                e.sync_key[:16] if e
+                else (g_view.sync_key[:16] if g_view else "")
+            )
             method = f"{e.input_method}/{e.reader_engine}" if e else ""
 
             self.tree.insert("", "end", iid=str(i), values=(
