@@ -80,7 +80,7 @@ cd D:\workspace\amatsuka_argo_5_obsidan_chatgpt_cursor_genspark\outlook_google_s
 .\scripts\run_gui.bat
 ```
 
-上記は Cursor ターミナル（PowerShell）で `outlook_google_sync/` 配下から実行してください。`.venv` が存在する場合は **その Python で GUI が起動** します。
+上記は Cursor ターミナル（PowerShell）で `outlook_google_sync/` 配下から実行してください。`run_gui.bat` はルートへ移動したうえで **`.venv` の Python だけで GUI を起動** します（未作成ならエラー表示）。
 
 ### 4. 初回 Google 認証
 

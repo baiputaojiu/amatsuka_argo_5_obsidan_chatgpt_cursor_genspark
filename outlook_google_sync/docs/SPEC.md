@@ -24,7 +24,7 @@
 ### 実行場所の統一ルール（運用）
 
 - **初回および環境再構築時**: `scripts/setup_env.bat` で **`outlook_google_sync/.venv/` に仮想環境を作成**し依存をインストールする。`credentials.json` の配置や GUI 利用より **先行** する。
-- **GUI 起動**: `scripts/run_gui.bat` は **`.venv` が存在すればその Python で起動** する（グローバル Python への誤依存を防ぐ）。
+- **GUI 起動**: `scripts/run_gui.bat` はプロジェクトルートへ移動したうえで **`.venv` の Python のみで起動** する（未作成ならエラー表示。グローバル Python へは落とさない）。
 - `scripts/setup_env.bat`、`scripts/run_gui.bat`、`python -m pytest` 等のコマンド実行は、**`outlook_google_sync/` をカレントディレクトリにした Cursor ターミナル（PowerShell）**を正規手順とする。
 - 同等の実行環境として Windows PowerShell（単体）も許容する。
 - エクスプローラから `.bat` を直接実行する方法は補助的手段であり、標準手順ではない。

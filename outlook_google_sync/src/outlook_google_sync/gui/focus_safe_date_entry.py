@@ -20,9 +20,16 @@ from __future__ import annotations
 
 from tkcalendar import DateEntry
 
+# 起動経路（Cursor / エクスプローラー）で babel ロケールが変わっても表示を揃える
+_DEFAULT_DATE_PATTERN = "yyyy/mm/dd"
+
 
 class FocusSafeDateEntry(DateEntry):
     """月／年矢印ボタン連打でポップアップが消えないようにした DateEntry。"""
+
+    def __init__(self, master=None, **kw):
+        kw.setdefault("date_pattern", _DEFAULT_DATE_PATTERN)
+        super().__init__(master, **kw)
 
     def _on_focus_out_cal(self, event):  # type: ignore[override]
         try:
