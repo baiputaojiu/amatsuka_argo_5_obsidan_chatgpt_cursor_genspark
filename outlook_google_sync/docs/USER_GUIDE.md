@@ -70,7 +70,12 @@ cd D:\workspace\amatsuka_argo_5_obsidan_chatgpt_cursor_genspark\outlook_google_s
 .\scripts\run_gui.bat
 ```
 
+- 開始日・終了日は起動時に **標準期間（今日−1ヶ月〜今日＋2ヶ月）** が入っています。「標準期間」ボタンで同じ範囲を再適用できます。
+- `credentials.json` または Google 認証（`token.json`）が未整備の場合、**初回セットアップ** ダイアログが開きます。案内に従って配置・認証できます。「後で」で閉じても次回起動時に再表示されます。
+
 ### 2-2. Google 認証
+
+チェックリストの「Google 認証」、または次の手順のどちらかで実施します。
 
 1. 設定ウィンドウの「Google」タブを開く
 2. 「Google認証」を押す

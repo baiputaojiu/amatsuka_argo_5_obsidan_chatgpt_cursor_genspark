@@ -28,7 +28,7 @@ class Profile:
     input_method: str = "com"
     detail_level: str = "full"
     include_private_appointments: bool = True
-    default_date_range_mode: str = "relative_60"
+    default_date_range_mode: str = "relative_m1_p2"
     target_calendar_id: str = "primary"
     conflict_policy: str = "overwrite"
     merge_settings: MergeSettings = field(default_factory=MergeSettings)

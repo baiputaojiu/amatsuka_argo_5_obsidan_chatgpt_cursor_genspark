@@ -33,11 +33,14 @@ from ..sync.duplicate_repair import (
     filter_events_within_start_end_dates,
     pick_winner_event_id,
 )
+from ..utils.datetime_utils import default_sync_range
+from ..services.setup_checklist import is_setup_incomplete
 from .settings_window import SettingsWindow
 from .preview_window import PreviewWindow
 from .duplicate_repair_window import DuplicateRepairWindow
 from .dialogs import DeleteConfirmDialog, DuplicateRepairOptionsDialog, SummaryDialog, RetryDialog
 from .progress_window import ProgressWindow
+from .setup_checklist import SetupChecklistDialog
 from .ttk_style import apply_button_contrast_style
 
 
@@ -69,6 +72,7 @@ class MainWindow(tk.Tk):
         self._progress_win: ProgressWindow | None = None
         self._build()
         self.protocol("WM_DELETE_WINDOW", self._force_quit)
+        self.after(200, self._maybe_show_setup_checklist)
 
     def _force_quit(self) -> None:
         """タイトルバー × 等でプロセスを即終了（メインスレッド停止中は効かない場合あり）。"""
@@ -84,6 +88,9 @@ class MainWindow(tk.Tk):
         ttk.Label(top, text="終了日").grid(row=0, column=2, sticky="w", padx=(10, 0))
         self.end = FocusSafeDateEntry(top)
         self.end.grid(row=0, column=3)
+        self.preset_btn = ttk.Button(top, text="標準期間", command=self.apply_standard_range)
+        self.preset_btn.grid(row=0, column=4, padx=(8, 0))
+        self.apply_standard_range()
 
         ttk.Label(top, text="ICS").grid(row=1, column=0, sticky="w")
         self.ics_var = tk.StringVar(value=self.state_data.get("ics_path", ""))
@@ -93,7 +100,7 @@ class MainWindow(tk.Tk):
         self.ics_pick_btn.grid(row=1, column=4)
 
         # Profile display
-        ttk.Label(top, text=f"プロファイル: default").grid(row=0, column=5, padx=(16, 0))
+        ttk.Label(top, text="プロファイル: default").grid(row=0, column=5, padx=(16, 0))
 
         # Buttons
         bar = ttk.Frame(self)
@@ -131,6 +138,12 @@ class MainWindow(tk.Tk):
         self.log.insert("end", m + "\n")
         self.log.see("end")
 
+    def apply_standard_range(self) -> None:
+        """開始日=今日−1ヶ月、終了日=今日＋2ヶ月を適用する。"""
+        start, end = default_sync_range()
+        self.start.set_date(start)
+        self.end.set_date(end)
+
     def pick_ics(self):
         p = filedialog.askopenfilename(filetypes=[("ICS", "*.ics"), ("All", "*.*")])
         if p:
@@ -141,6 +154,16 @@ class MainWindow(tk.Tk):
             self, self.state_data,
             on_google_auth=self._google_auth,
             on_list_calendars=list_calendars,
+        )
+
+    def _maybe_show_setup_checklist(self) -> None:
+        if not is_setup_incomplete(self.state_data):
+            return
+        SetupChecklistDialog(
+            self,
+            self.state_data,
+            on_google_auth=self._google_auth,
+            on_open_settings=self.open_settings,
         )
 
     def _google_auth(self):
@@ -170,6 +193,8 @@ class MainWindow(tk.Tk):
                     w.configure(state=st)
                 except tk.TclError:
                     pass
+        if hasattr(self, "preset_btn"):
+            self.preset_btn.configure(state=st)
 
     # ── Worker thread (GUI-01~06) ──
 

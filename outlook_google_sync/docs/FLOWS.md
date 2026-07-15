@@ -71,6 +71,13 @@ flowchart LR
 
 その後、メインウィンドウが `runtime_state` を `state_data` にマージ（入力方法・詳細度・カレンダー ID 等）。
 
+続けて:
+
+6. **標準期間の適用**: 開始日＝今日−1ヶ月、終了日＝今日＋2ヶ月を DateEntry に設定（前回の `last_D_*` は復元しない）。
+7. **セットアップ・チェックリスト**（遅延表示）: `credentials.json` または `token.json` が無いときだけダイアログを出し、フォルダ開放・Google 認証・設定への導線を提供する。「後で」で閉じられる。
+
+**参照（追記）:** `utils/datetime_utils.py`（`default_sync_range`）、`services/setup_checklist.py`、`gui/setup_checklist.py`
+
 ---
 
 ## 2. 接続テスト（COM / ICS / Google 2 段階）
