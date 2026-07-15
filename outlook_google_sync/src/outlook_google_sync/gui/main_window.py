@@ -72,7 +72,7 @@ class MainWindow(tk.Tk):
         self._progress_win: ProgressWindow | None = None
         self._build()
         self.protocol("WM_DELETE_WINDOW", self._force_quit)
-        self.after(200, self._maybe_show_setup_checklist)
+        self.after(200, self._on_startup)
 
     def _force_quit(self) -> None:
         """タイトルバー × 等でプロセスを即終了（メインスレッド停止中は効かない場合あり）。"""
@@ -131,11 +131,31 @@ class MainWindow(tk.Tk):
         # Log area
         self.log = tk.Text(self, height=22)
         self.log.pack(fill="both", expand=True, padx=8, pady=8)
+        self.log.tag_configure("error", foreground="#c62828")
 
     # ── Helpers ──
 
-    def log_msg(self, m):
+    @staticmethod
+    def _looks_like_error(m: str) -> bool:
+        s = (m or "").lstrip()
+        if s.startswith("ERROR:") or s.startswith("エラー"):
+            return True
+        error_markers = (
+            "接続テスト失敗",
+            "クイック同期エラー",
+            "認証エラー",
+            "部分失敗",
+            "Worker error",
+        )
+        return any(marker in s for marker in error_markers)
+
+    def log_msg(self, m: str, *, error: bool | None = None) -> None:
+        """ログ欄へ追記。error=True またはエラー文言と判定した場合は赤文字。"""
+        use_error = self._looks_like_error(m) if error is None else bool(error)
+        start = self.log.index("end-1c")
         self.log.insert("end", m + "\n")
+        if use_error:
+            self.log.tag_add("error", start, "end-1c")
         self.log.see("end")
 
     def apply_standard_range(self) -> None:
@@ -155,6 +175,14 @@ class MainWindow(tk.Tk):
             on_google_auth=self._google_auth,
             on_list_calendars=list_calendars,
         )
+
+    def _on_startup(self) -> None:
+        """セットアップ未完ならチェックリスト、完了済みなら接続テストを自動実行。"""
+        if is_setup_incomplete(self.state_data):
+            self._maybe_show_setup_checklist()
+            return
+        self.status.set("起動時接続テスト中...")
+        self.worker(self.connection_test)
 
     def _maybe_show_setup_checklist(self) -> None:
         if not is_setup_incomplete(self.state_data):
@@ -219,7 +247,10 @@ class MainWindow(tk.Tk):
             except Exception as e:
                 self.logger.error("Worker error: %s", e, exc_info=True)
                 err_text = str(e)
-                self.after(0, lambda msg=err_text: self.log_msg(f"ERROR: {msg}"))
+                self.after(
+                    0,
+                    lambda msg=err_text: self.log_msg(f"ERROR: {msg}", error=True),
+                )
             finally:
                 if com_inited:
                     try:
@@ -425,15 +456,17 @@ class MainWindow(tk.Tk):
                 failed_count += 1
                 errors.append(f"{gid[:16]}: {exc}")
 
+        qs_line = (
+            f"クイック同期完了: 自動マージ={merged_count} "
+            f"場所不一致スキップ={blocked} 失敗={failed_count}"
+        )
         self.after(
             0,
-            lambda: self.log_msg(
-                f"クイック同期完了: 自動マージ={merged_count} "
-                f"場所不一致スキップ={blocked} 失敗={failed_count}"
-            ),
+            lambda msg=qs_line, err=failed_count > 0: self.log_msg(msg, error=err),
         )
         if errors:
-            self.after(0, lambda: self.log_msg("クイック同期エラー(先頭10件):\n" + "\n".join(errors[:10])))
+            err_block = "クイック同期エラー(先頭10件):\n" + "\n".join(errors[:10])
+            self.after(0, lambda msg=err_block: self.log_msg(msg, error=True))
 
     def _sync_events(self, events, mode, range_start=None, range_end=None):
         eng = SyncEngine(self.logger)
@@ -524,10 +557,14 @@ class MainWindow(tk.Tk):
             "failed": res.failed,
         })
 
-        self.after(0, lambda: self.log_msg(
+        summary_line = (
             f"同期完了 c={res.created} u={res.updated} m={res.merged} "
             f"d={res.deleted} s={res.skipped} f={res.failed}"
-        ))
+        )
+        self.after(
+            0,
+            lambda msg=summary_line, err=bool(res.failed): self.log_msg(msg, error=err),
+        )
 
         # Ch28.3: Summary dialog
         self.after(0, lambda: SummaryDialog(self, res))
@@ -548,7 +585,7 @@ class MainWindow(tk.Tk):
             ed = datetime.combine(self.end.get_date(), datetime.max.time())
             ok, msg = test_outlook_com(sd, ed)
             results.append(msg)
-            self.after(0, lambda: self.log_msg(msg))
+            self.after(0, lambda m=msg, e=not ok: self.log_msg(m, error=e))
             if not ok:
                 return
         else:
@@ -558,13 +595,13 @@ class MainWindow(tk.Tk):
                 range_end=datetime.combine(self.end.get_date(), datetime.max.time()),
             )
             results.append(msg)
-            self.after(0, lambda: self.log_msg(msg))
+            self.after(0, lambda m=msg, e=not ok: self.log_msg(m, error=e))
             if not ok:
                 return
 
         ok, msg = test_google(self.state_data.get("calendar_id") or None)
         results.append(msg)
-        self.after(0, lambda: self.log_msg(msg))
+        self.after(0, lambda m=msg, e=not ok: self.log_msg(m, error=e))
 
     # ── Duplicate repair (Ch27) ──
 
@@ -611,7 +648,10 @@ class MainWindow(tk.Tk):
             except Exception as e:
                 self.logger.error("duplicate_repair: %s", e, exc_info=True)
                 err_text = str(e)
-                self.after(0, lambda msg=err_text: self.log_msg(f"ERROR: {msg}"))
+                self.after(
+                    0,
+                    lambda msg=err_text: self.log_msg(f"ERROR: {msg}", error=True),
+                )
                 self.after(
                     0,
                     lambda msg=err_text: messagebox.showerror("重複修復", msg),
