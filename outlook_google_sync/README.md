@@ -80,17 +80,17 @@ cd D:\workspace\amatsuka_argo_5_obsidan_chatgpt_cursor_genspark\outlook_google_s
 .\scripts\run_gui.bat
 ```
 
-上記は Cursor ターミナル（PowerShell）で `outlook_google_sync/` 配下から実行してください。`.venv` が存在する場合は **その Python で GUI が起動** します。
+上記は Cursor ターミナル（PowerShell）で `outlook_google_sync/` 配下から実行してください。`run_gui.bat` はルートへ移動したうえで **`.venv` の Python だけで GUI を起動** します（未作成ならエラー表示）。起動直後、日付は **標準期間（今日−1ヶ月〜今日＋2ヶ月）** が入ります。未認証時はセットアップ・チェックリストが出ます。
 
 ### 4. 初回 Google 認証
 
-1. 起動後、**設定 → Google タブ** から「Google 認証」をクリック
+1. 起動後のチェックリスト、または **設定 → Google タブ** から「Google 認証」をクリック
 2. ブラウザで Google アカウントにログイン・許可
 3. 認証成功後、「カレンダー一覧を取得」で対象カレンダーを選択
 
 ### 5. 同期の実行
 
-1. メインウィンドウで **開始日・終了日** を選択
+1. メインウィンドウで **開始日・終了日** を確認（必要なら「標準期間」または手動で変更）
 2. **通常プレビュー** で想定アクションを確認
 3. 問題なければ **通常同期** を実行
 

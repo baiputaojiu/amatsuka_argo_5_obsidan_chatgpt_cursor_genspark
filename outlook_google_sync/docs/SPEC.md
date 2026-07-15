@@ -18,13 +18,15 @@
 - **カテゴリ色**: OlCategoryColor色コード→Google colorId 固定マッピング
 - **GUI**: tkinter + tkcalendar。設定は1つの設定ウィンドウに集約（タブ構成）
 - **ワーカースレッド**: 重い処理はメインスレッド外。キャンセル対応あり
+- **起動時の日付既定**: 開始日＝今日−1ヶ月、終了日＝今日＋2ヶ月（`relative_m1_p2`）。メイン画面の「標準期間」で再適用可能。表示形式は `yyyy/mm/dd` 固定
+- **起動時セットアップチェック**: `credentials.json` または `token.json` が無い場合、チェックリストダイアログを表示し配置・Google 認証・設定への導線を提供する（「後で」でスキップ可。同期ボタンは無効化しない）
 
 ## 主要な仕様ポイント
 
 ### 実行場所の統一ルール（運用）
 
 - **初回および環境再構築時**: `scripts/setup_env.bat` で **`outlook_google_sync/.venv/` に仮想環境を作成**し依存をインストールする。`credentials.json` の配置や GUI 利用より **先行** する。
-- **GUI 起動**: `scripts/run_gui.bat` は **`.venv` が存在すればその Python で起動** する（グローバル Python への誤依存を防ぐ）。
+- **GUI 起動**: `scripts/run_gui.bat` はプロジェクトルートへ移動したうえで **`.venv` の Python のみで起動** する（未作成ならエラー表示。グローバル Python へは落とさない）。
 - `scripts/setup_env.bat`、`scripts/run_gui.bat`、`python -m pytest` 等のコマンド実行は、**`outlook_google_sync/` をカレントディレクトリにした Cursor ターミナル（PowerShell）**を正規手順とする。
 - 同等の実行環境として Windows PowerShell（単体）も許容する。
 - エクスプローラから `.bat` を直接実行する方法は補助的手段であり、標準手順ではない。
