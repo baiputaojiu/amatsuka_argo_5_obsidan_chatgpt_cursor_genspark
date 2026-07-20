@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools==83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "analyst-forecast"
+version = "0.1.0"
+description = "アナリスト予想を原文と市場データで検証するローカルCLI"
+readme = "README.md"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+    "alembic==1.18.5",
+    "jsonschema==4.26.0",
+    "pydantic==2.13.4",
+    "PyYAML==6.0.3",
+    "rich==15.0.0",
+    "SQLAlchemy==2.0.51",
+    "typer==0.27.0",
+]
+
+[project.optional-dependencies]
+market = [
+    "fredapi==0.5.2",
+    "yfinance==1.5.1",
+]
+dev = [
+    "mypy==2.3.0",
+    "pytest==9.1.1",
+    "ruff==0.15.22",
+]
+
+[project.scripts]
+analyst-forecast = "analyst_forecast.cli.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+analyst_forecast = [
+    "schemas/*.json",
+    "infrastructure/db/migrations/script.py.mako",
+    "infrastructure/db/migrations/versions/*.py",
+]
+
+[tool.pytest.ini_options]
+addopts = "-ra -m 'not integration'"
+testpaths = ["tests"]
+markers = [
+    "integration: 実ネットワークまたは外部サービスを使用する明示実行テスト",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/analyst_forecast/infrastructure/db/migrations/versions/*.py" = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["analyst_forecast"]
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+module = ["yaml", "jsonschema", "fredapi", "yfinance", "pandas"]
+ignore_missing_imports = true

@@ -66,3 +66,49 @@ ChatGPTとの会話全文を併用する場合は [CHAT_HISTORY_GUIDE.md](refere
 - AIを使う意味判断ではすべて高性能モデルを使用する。
 - 市場データは無料・簡単さを優先し、`yfinance`、FRED、CSV取込みを使用する。
 - ループエンジニアリングによる継続改善は初期版へ含めず、将来課題とする。
+
+## 開発版のセットアップ
+
+Windows 11とPython 3.12系を対象とする。初回実装はPython 3.12.10で検査している。
+
+```powershell
+py install 3.12
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.lock
+python -m pip install -e . --no-deps
+```
+
+`requirements.lock` は開発、テスト、市場providerを含む全依存を固定している。APIキーや実Vaultのパスはコミットせず、`--config` または `ANALYST_FORECAST_CONFIG`、必要時は `FRED_API_KEY` をローカル環境へ設定する。`.env.example` に変数名だけを記載している。
+
+## 代表コマンド
+
+```powershell
+analyst-forecast --help
+analyst-forecast init --vault-root "D:\任意のVault内\30_Permanent\★アナリスト調査" --config ".\config.local.yaml"
+analyst-forecast run create --name "対象者名" --period-start 2026-01-01 --period-end 2026-06-30 --evaluation-as-of 2026-07-20 --media youtube --config ".\config.local.yaml"
+analyst-forecast source import RUN-YYYYMMDD-NNN ".\source.txt" --medium youtube --config ".\config.local.yaml"
+analyst-forecast ai ingest ".\forecast_extraction.json" --config ".\config.local.yaml"
+analyst-forecast market evaluate RUN-YYYYMMDD-NNN FCC-000001 --as-of 2026-07-20 --provider csv --csv-path ".\market.csv" --config ".\config.local.yaml"
+analyst-forecast status RUN-YYYYMMDD-NNN --config ".\config.local.yaml"
+```
+
+raw取込みでは元ファイルをUTF-8のまま別名保存し、SHA-256で同一内容を検出する。AI出力は固定JSON Schema、Pydantic、ID参照、原文引用と文字位置を検証し、成功するまで正式予想テーブルへ登録しない。
+
+## 開発時の検査
+
+```powershell
+ruff format --check .
+ruff check .
+mypy src
+pytest
+```
+
+通常の `pytest` はネットワークを使用しない。明示的な実ネットワーク確認だけを次で実行する。FRED試験にはローカルの `FRED_API_KEY` が必要である。
+
+```powershell
+$env:RUN_NETWORK_TESTS = "1"
+pytest -m integration
+```
+
+実装は `src/analyst_forecast/` の `domain`、`application`、`infrastructure`、`cli`、`schemas` に分離している。実装計画、暫定判断、検査結果は `docs/06_実装/` を参照する。
