@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -8,7 +7,6 @@ from pathlib import Path
 import pytest
 from sqlalchemy import func, select
 
-from analyst_forecast.application.ai_ingestion import ingest_ai_output
 from analyst_forecast.application.evaluation import evaluate_component
 from analyst_forecast.application.settings import AppSettings
 from analyst_forecast.domain.market import (
@@ -25,7 +23,7 @@ from analyst_forecast.infrastructure.db.models import (
 from analyst_forecast.infrastructure.db.session import create_session_factory
 from analyst_forecast.infrastructure.market.csv_provider import CsvMarketDataProvider
 from analyst_forecast.infrastructure.market.fred_provider import FredMarketDataProvider
-from conftest import make_ai_payload
+from helpers_pipeline_v2 import import_locked_component
 
 
 class FixedProvider:
@@ -61,15 +59,13 @@ def imported_component_id(
     *,
     direction: str = "up",
 ) -> str:
-    payload = make_ai_payload(
-        run_id=run_result.run_id,
-        source_id=source_result.source_id,
+    return import_locked_component(
+        settings,
+        run_result,
+        source_result,
+        tmp_path,
         direction=direction,
     )
-    path = tmp_path / "ai-output.json"
-    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    result = ingest_ai_output(settings, path)
-    return result.component_ids[0]
 
 
 def test_upward_direction_and_return_are_evaluated_without_network(
@@ -116,6 +112,49 @@ def test_upward_direction_and_return_are_evaluated_without_network(
     assert result.actual_return == Decimal("0.1")
     assert result.max_favorable_excursion == Decimal("0.12")
     assert result.max_adverse_excursion == Decimal("-0.02")
+    assert result.method_version == "direction-v2.0.0"
+
+
+def test_downward_direction_mfe_mae_are_direction_aware(
+    settings: AppSettings,
+    run_result,
+    source_result,
+    tmp_path: Path,
+) -> None:
+    component_id = imported_component_id(
+        settings, run_result, source_result, tmp_path, direction="down"
+    )
+    provider = FixedProvider(
+        (
+            MarketBar(
+                date=date(2026, 1, 13),
+                open=Decimal("100"),
+                high=Decimal("104"),
+                low=Decimal("98"),
+                close=Decimal("102"),
+                adjusted_open=Decimal("100"),
+                adjusted_close=Decimal("102"),
+            ),
+            MarketBar(
+                date=date(2026, 4, 13),
+                open=Decimal("94"),
+                high=Decimal("104"),
+                low=Decimal("88"),
+                close=Decimal("92"),
+                adjusted_open=Decimal("94"),
+                adjusted_close=Decimal("92"),
+            ),
+        )
+    )
+    result = evaluate_component(
+        settings,
+        component_id=component_id,
+        provider=provider,
+        as_of=date(2026, 4, 13),
+    )
+    assert result.direction_result == "hit"
+    assert result.max_favorable_excursion == Decimal("0.12")
+    assert result.max_adverse_excursion == Decimal("0.04")
 
 
 def test_unavailable_data_is_unevaluable_and_never_guessed(

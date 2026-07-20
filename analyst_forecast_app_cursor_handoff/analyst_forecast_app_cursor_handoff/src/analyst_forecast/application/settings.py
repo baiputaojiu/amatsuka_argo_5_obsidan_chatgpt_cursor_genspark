@@ -5,13 +5,17 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+DEFAULT_WORKSPACE_RELATIVE = "30_Permanent/★アナリスト調査"
 
 
 class AppSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     vault_root: Path
+    obsidian_vault_path: Path | None = None
+    workspace_relative_path: str = DEFAULT_WORKSPACE_RELATIVE
     database_path: Path | None = None
     cursor_model: str | None = None
     chatgpt_model: str | None = None
@@ -19,16 +23,48 @@ class AppSettings(BaseModel):
     default_period_months: int = Field(default=6, ge=1, le=120)
     market_provider_order: list[str] = Field(default_factory=lambda: ["yfinance", "fred", "csv"])
 
-    @field_validator("vault_root", "database_path", mode="before")
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_workspace_root(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        vault_root = data.get("vault_root")
+        obsidian = data.get("obsidian_vault_path")
+        relative = data.get("workspace_relative_path", DEFAULT_WORKSPACE_RELATIVE)
+        if vault_root is None and obsidian is not None:
+            data = dict(data)
+            data["vault_root"] = Path(os.path.expandvars(os.path.expanduser(str(obsidian)))) / str(
+                relative
+            )
+        return data
+
+    @field_validator("vault_root", "obsidian_vault_path", "database_path", mode="before")
     @classmethod
     def expand_path(cls, value: Any) -> Any:
         if value is None:
             return None
         return Path(os.path.expandvars(os.path.expanduser(str(value))))
 
+    @field_validator("workspace_relative_path")
+    @classmethod
+    def validate_relative_workspace(cls, value: str) -> str:
+        normalized = value.replace("\\", "/").strip()
+        if not normalized:
+            raise ValueError("workspace_relative_pathは空にできません")
+        path = Path(normalized)
+        if path.is_absolute() or (len(normalized) >= 2 and normalized[1] == ":"):
+            raise ValueError("workspace_relative_pathに絶対パスは使えません")
+        if ".." in Path(normalized).parts:
+            raise ValueError("workspace_relative_pathに '..' は使えません")
+        return normalized
+
+    @property
+    def workspace_root(self) -> Path:
+        return self.vault_root
+
     @property
     def database_file(self) -> Path:
-        return self.database_path or self.vault_root / "_system" / "database.sqlite"
+        return self.database_path or self.workspace_root / "_system" / "database.sqlite"
 
 
 def default_config_path() -> Path:
@@ -61,6 +97,6 @@ def load_settings(path: Path | None = None) -> AppSettings:
 
 
 def _atomic_write(path: Path, content: str) -> None:
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(content, encoding="utf-8", newline="\n")
-    temporary.replace(path)
+    from analyst_forecast.application.io_utils import atomic_write_text
+
+    atomic_write_text(path, content)

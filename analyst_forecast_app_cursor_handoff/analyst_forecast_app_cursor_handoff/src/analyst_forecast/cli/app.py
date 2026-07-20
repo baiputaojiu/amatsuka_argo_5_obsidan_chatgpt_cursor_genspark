@@ -22,7 +22,12 @@ from analyst_forecast.application.settings import (
     default_config_path,
     load_settings,
 )
-from analyst_forecast.application.workflow import WorkflowState, refresh_workflow
+from analyst_forecast.application.wizard import WizardCancelled, interactive_start
+from analyst_forecast.application.workflow import (
+    WorkflowState,
+    assert_component_belongs_to_run,
+    refresh_workflow,
+)
 from analyst_forecast.domain.market import MarketDataProvider
 from analyst_forecast.domain.models import Medium
 from analyst_forecast.infrastructure.market.csv_provider import CsvMarketDataProvider
@@ -64,31 +69,83 @@ app.add_typer(market_app, name="market")
 @app.command("init", help="作業領域を初期化し、設定とSQLiteを作成します。")
 def init_command(
     vault_root: Annotated[
-        Path,
-        typer.Option("--vault-root", help="★アナリスト調査フォルダとして使う保存先"),
-    ],
+        Path | None,
+        typer.Option(
+            "--vault-root",
+            help="作業領域（Obsidian内の 30_Permanent/★アナリスト調査）",
+        ),
+    ] = None,
+    obsidian_vault: Annotated[
+        Path | None,
+        typer.Option("--obsidian-vault", help="Obsidian Vault本体の絶対パス"),
+    ] = None,
+    workspace_relative: Annotated[
+        str,
+        typer.Option(
+            "--workspace-relative",
+            help="Vault内の相対作業パス",
+        ),
+    ] = "30_Permanent/★アナリスト調査",
     config: Annotated[
         Path,
-        typer.Option(
-            "--config",
-            help="ローカル設定ファイル",
-        ),
+        typer.Option("--config", help="ローカル設定ファイル"),
     ] = DEFAULT_CONFIG_PATH,
+    update_docs: Annotated[
+        bool,
+        typer.Option("--update-docs", help="同梱docs/promptsで上書き更新（backup付き）"),
+    ] = False,
 ) -> None:
     try:
-        settings = AppSettings(
-            vault_root=vault_root,
-            database_path=vault_root / "_system" / "database.sqlite",
-        )
-        initialize_workspace(settings, config_path=config)
+        if vault_root is None and obsidian_vault is None:
+            raise ValueError("--vault-root または --obsidian-vault が必要です")
+        if obsidian_vault is not None:
+            settings = AppSettings(
+                vault_root=obsidian_vault / workspace_relative,
+                obsidian_vault_path=obsidian_vault,
+                workspace_relative_path=workspace_relative,
+                database_path=(obsidian_vault / workspace_relative) / "_system" / "database.sqlite",
+            )
+        else:
+            assert vault_root is not None
+            settings = AppSettings(
+                vault_root=vault_root,
+                database_path=vault_root / "_system" / "database.sqlite",
+            )
+        initialize_workspace(settings, config_path=config, update_docs=update_docs)
     except Exception as error:
         _fail("初期化できませんでした", error)
     console.print(
         Panel.fit(
-            f"初期化しました。\n設定: {config}\nデータ領域: {vault_root}",
+            f"初期化しました。\n設定: {config}\n作業領域: {settings.workspace_root}\n"
+            "docs/promptsは初回seed済み（再実行は既存編集を保持、--update-docsで更新）。",
             title="完了",
         )
     )
+
+
+@app.command("start", help="対話wizardで案件を作成します。")
+def start_command(
+    config: Annotated[
+        Path, typer.Option("--config", help="ローカル設定ファイル")
+    ] = DEFAULT_CONFIG_PATH,
+) -> None:
+    try:
+        settings = load_settings(config)
+        result = interactive_start(settings)
+        state = refresh_workflow(settings, result.run_id)
+    except WizardCancelled as error:
+        console.print(str(error))
+        raise typer.Exit(code=0) from error
+    except Exception as error:
+        _fail("対話作成できませんでした", error)
+    console.print(
+        Panel.fit(
+            f"対象者ID: {result.analyst_id}\n案件ID: {result.run_id}\n"
+            f"案件フォルダ: {result.run_path}",
+            title="案件作成完了",
+        )
+    )
+    _render_workflow(state)
 
 
 @run_app.command("create", help="対象者ID・案件IDを発行して案件を作成します。")
@@ -185,12 +242,32 @@ def ingest_ai_command(
     try:
         settings = load_settings(config)
         result = ingest_ai_output(settings, input_path)
+        run_id = _peek_run_id(input_path)
+        state = refresh_workflow(settings, run_id) if run_id else None
     except Exception as error:
         _fail("AI出力を検証できませんでした", error)
     console.print(f"分類: [bold]{result.status.value}[/bold]\nSHA-256: {result.output_hash}")
+    if result.forecast_issuance_ids:
+        console.print("issuance IDs:")
+        for item in result.forecast_issuance_ids:
+            console.print(f"- {item}")
+    if result.component_ids:
+        table = Table(title="構成予想")
+        table.add_column("component_id")
+        table.add_column("issuance_id")
+        for index, component_id in enumerate(result.component_ids):
+            issuance = (
+                result.forecast_issuance_ids[index]
+                if index < len(result.forecast_issuance_ids)
+                else "-"
+            )
+            table.add_row(component_id, issuance)
+        console.print(table)
     for issue in result.issues:
         console.print(f"- {issue.path}: {issue.message}")
     console.print(result.guidance)
+    if state is not None:
+        _render_workflow(state)
     if result.status.value == "rejected":
         raise typer.Exit(code=2)
 
@@ -210,12 +287,14 @@ def evaluate_market_command(
 ) -> None:
     try:
         settings = load_settings(config)
+        assert_component_belongs_to_run(settings, run_id=run_id, component_id=component_id)
         provider = _provider(provider_name, csv_path)
         result = evaluate_component(
             settings,
             component_id=component_id,
             provider=provider,
             as_of=date.fromisoformat(as_of),
+            run_id=run_id,
         )
         state = refresh_workflow(settings, run_id)
     except Exception as error:
@@ -223,7 +302,8 @@ def evaluate_market_command(
     console.print(
         f"評価ID: {result.evaluation_id}\n状態: {result.evaluation_status}\n"
         f"方向結果: {result.direction_result or '未判定'}\n"
-        f"変化率: {result.actual_return if result.actual_return is not None else '取得不能'}"
+        f"変化率: {result.actual_return if result.actual_return is not None else '取得不能'}\n"
+        f"method: {result.method_version}"
     )
     if result.unevaluable_reason:
         console.print(f"理由: {result.unevaluable_reason}")
@@ -277,6 +357,19 @@ def _render_workflow(state: WorkflowState) -> None:
         console.print("ブロッカー:")
         for blocker in state.blockers:
             console.print(f"- {blocker}")
+
+
+def _peek_run_id(path: Path) -> str | None:
+    try:
+        import json
+
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return None
+    if isinstance(data, dict):
+        value = data.get("run_id")
+        return str(value) if value else None
+    return None
 
 
 def _parse_datetime(value: str | None) -> datetime | None:

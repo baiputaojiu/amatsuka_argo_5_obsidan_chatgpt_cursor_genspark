@@ -1,0 +1,33 @@
+# {{prompt_id}} {{title}} — {{environment}}
+
+## メタデータ
+- template_version: {{template_version}}
+- template_hash: {{template_hash}}
+- run_id: {{run_id}}
+
+## 目的
+{{purpose}}
+
+## 使用タイミング
+`NEXT_ACTIONS.md` がこの処理を指示したとき。P11とP12が不一致の場合だけ実行する。
+
+## 推奨AI環境
+{{environment}}
+
+## 使用モデル
+{{model_text}}
+
+## 入力ファイル
+{{input_instruction}}
+
+## 出力ファイル・Schema
+`03_ai_outputs/inbox/{{output_name}}`。`01_prompts/schemas/{{schema_name}}` に厳密に従う。
+
+## 禁止事項・注意事項
+{{warning}}
+
+## 完了条件
+入力、引用、判断根拠、未解決事項が出力に含まれる。
+
+## コピペ用依頼文
+この案件の{{title}}を実行してください。上記の禁止事項と出力先を厳守してください。

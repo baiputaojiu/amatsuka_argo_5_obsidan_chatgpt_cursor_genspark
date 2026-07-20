@@ -31,12 +31,29 @@ def test_create_run_issues_ids_and_required_tree(
             assert (run_result.run_path / "02_sources" / medium / category).is_dir()
 
     prompt_files = {path.name for path in (run_result.run_path / "01_prompts").glob("*.md")}
-    assert len(prompt_files) == 8
+    assert len(prompt_files) == 10
     assert any(name.startswith("P05") and "cursor" in name for name in prompt_files)
     assert any(name.startswith("P12") and "chatgpt" in name for name in prompt_files)
+    assert any(name.startswith("P13") and "cursor" in name for name in prompt_files)
     assert (
         run_result.run_path / "01_prompts" / "schemas" / "forecast_extraction.schema.json"
     ).is_file()
+    for schema_name in (
+        "p05_speaker_processing.schema.json",
+        "p08_forecast_extraction_v2.schema.json",
+        "p11_target_resolution.schema.json",
+        "p12_target_review.schema.json",
+        "p13_target_adjudication.schema.json",
+    ):
+        assert (run_result.run_path / "01_prompts" / "schemas" / schema_name).is_file()
+
+    p08_prompt = next((run_result.run_path / "01_prompts").glob("P08*cursor.md"))
+    p11_prompt = next((run_result.run_path / "01_prompts").glob("P11*cursor.md"))
+    p12_prompt = next((run_result.run_path / "01_prompts").glob("P12*cursor.md"))
+    assert "p08_forecast_extraction_v2.schema.json" in p08_prompt.read_text(encoding="utf-8")
+    assert "03_ai_outputs/inbox/P08_" in p08_prompt.read_text(encoding="utf-8")
+    assert "市場結果を入力に含めない" in p11_prompt.read_text(encoding="utf-8")
+    assert "p12_target_review.schema.json" in p12_prompt.read_text(encoding="utf-8")
 
     request = yaml.safe_load((run_result.run_path / "request.yaml").read_text(encoding="utf-8"))
     assert request["analyst_id"] == "A0001"

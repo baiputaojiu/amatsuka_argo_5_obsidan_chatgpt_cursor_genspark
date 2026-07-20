@@ -1,4 +1,3 @@
-import json
 import re
 from pathlib import Path
 
@@ -40,6 +39,13 @@ def test_init_command_creates_configured_workspace(tmp_path) -> None:
 
 
 def test_cli_runs_anonymous_vertical_fixture_end_to_end(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from analyst_forecast.application.settings import load_settings
+    from analyst_forecast.infrastructure.db.models import SourceRecord
+    from analyst_forecast.infrastructure.db.session import create_session_factory
+    from helpers_pipeline_v2 import import_locked_component
+
     runner = CliRunner()
     config_path = tmp_path / "config.yaml"
     vault_root = tmp_path / "vault"
@@ -95,21 +101,23 @@ def test_cli_runs_anonymous_vertical_fixture_end_to_end(tmp_path: Path) -> None:
     assert imported_source.exit_code == 0, imported_source.stdout
     assert "SRC-000001" in imported_source.stdout
 
-    payload = json.loads(
-        (FIXTURES / "ai" / "forecast_extraction_anonymous.json").read_text(encoding="utf-8")
+    settings = load_settings(config_path)
+    session_factory = create_session_factory(settings.database_file)
+    with session_factory() as session:
+        source = session.get(SourceRecord, "SRC-000001")
+        assert source is not None
+        source_ns = SimpleNamespace(
+            source_id=source.source_id,
+            raw_hash=source.raw_hash,
+        )
+    run_ns = SimpleNamespace(run_id=run_id)
+    component_id = import_locked_component(
+        settings,
+        run_ns,
+        source_ns,
+        tmp_path,
+        label="cli",
     )
-    payload["run_id"] = run_id
-    ai_path = tmp_path / "ai-output.json"
-    ai_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    imported_ai = runner.invoke(
-        app,
-        ["ai", "ingest", str(ai_path), "--config", str(config_path)],
-    )
-    assert imported_ai.exit_code == 0, imported_ai.stdout
-    assert "accepted" in imported_ai.stdout
 
     evaluated = runner.invoke(
         app,
@@ -117,7 +125,7 @@ def test_cli_runs_anonymous_vertical_fixture_end_to_end(tmp_path: Path) -> None:
             "market",
             "evaluate",
             run_id,
-            "FCC-000001",
+            component_id,
             "--as-of",
             "2026-04-13",
             "--provider",

@@ -1,0 +1,36 @@
+{
+  "schema_version": "1.0.0",
+  "template_version": "1.0.0",
+  "prompts": {
+    "P05": {
+      "title": "YouTube原文整理・話者推定",
+      "purpose": "raw文字起こしを発言単位に整理し、話者候補、確信度、根拠を出力する。",
+      "warning": "予想抽出を同時に行わず、判断不能を許容してください。",
+      "input_path": "02_sources/youtube/raw/<SOURCE_ID>__*.txt"
+    },
+    "P08": {
+      "title": "予想抽出・構造化",
+      "purpose": "P05整理結果から予想表明を抽出し、対象解決前の固定JSON Schemaで出力する。",
+      "warning": "原文にない情報を補完せず、symbolやverified状態を決めないでください。",
+      "input_path": "02_sources/*/processed/P05-<ARTIFACT_ID>.json"
+    },
+    "P11": {
+      "title": "予測対象解決",
+      "purpose": "原文で明示された対象を優先し、不明な場合だけ発言時点情報で候補を提案する。",
+      "warning": "knowledge_cutoffより後の情報や市場結果を入力に含めないでください。",
+      "input_path": "03_ai_outputs/accepted/<P08_OUTPUT>.json"
+    },
+    "P12": {
+      "title": "予測対象解決レビュー",
+      "purpose": "P11とは独立に、原文上の役割、当時の存在、symbol、通貨、後知恵を検証する。",
+      "warning": "一次提案を前提として肯定せず、不一致と評価不能を許容してください。市場結果を入力しないでください。",
+      "input_path": "03_ai_outputs/accepted/<P11_OUTPUT>.json"
+    },
+    "P13": {
+      "title": "予測対象解決の不一致裁定",
+      "purpose": "P11とP12が不一致のときだけ、根拠を比較して最終候補またはunresolvableを裁定する。",
+      "warning": "市場結果を入力せず、P11/P12の出力と原文根拠だけを使ってください。",
+      "input_path": "03_ai_outputs/accepted/<P11_OUTPUT>.json と <P12_OUTPUT>.json"
+    }
+  }
+}

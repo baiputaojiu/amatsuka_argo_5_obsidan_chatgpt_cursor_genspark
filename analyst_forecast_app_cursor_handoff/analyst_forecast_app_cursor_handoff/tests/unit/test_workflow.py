@@ -5,12 +5,11 @@ from pathlib import Path
 
 import yaml
 
-from analyst_forecast.application.ai_ingestion import ingest_ai_output
 from analyst_forecast.application.evaluation import evaluate_component
 from analyst_forecast.application.settings import AppSettings
 from analyst_forecast.application.workflow import refresh_workflow
 from analyst_forecast.domain.market import MarketBar, MarketDataRequest, MarketSeries
-from conftest import make_ai_payload
+from helpers_pipeline_v2 import import_locked_component
 
 
 class WorkflowFixtureProvider:
@@ -39,12 +38,11 @@ def test_workflow_guides_each_vertical_stage(
 ) -> None:
     initial = refresh_workflow(settings, run_result.run_id)
     assert initial.recommended_action.executor == "[AI Cursor]"
-    assert "予想抽出" in initial.recommended_action.title
+    assert "予想抽出" in initial.recommended_action.title or "P05" in (
+        initial.recommended_action.command_or_prompt or ""
+    )
 
-    payload = make_ai_payload(run_id=run_result.run_id, source_id=source_result.source_id)
-    ai_path = tmp_path / "forecast.json"
-    ai_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    imported = ingest_ai_output(settings, ai_path)
+    component_id = import_locked_component(settings, run_result, source_result, tmp_path)
 
     after_ai = refresh_workflow(settings, run_result.run_id)
     assert after_ai.recommended_action.executor == "[PYTHON]"
@@ -52,12 +50,14 @@ def test_workflow_guides_each_vertical_stage(
     assert after_ai.recommended_action.inputs
     assert after_ai.recommended_action.outputs
     assert after_ai.recommended_action.reason
+    assert component_id in (after_ai.recommended_action.command_or_prompt or "")
 
     evaluated = evaluate_component(
         settings,
-        component_id=imported.component_ids[0],
+        component_id=component_id,
         provider=WorkflowFixtureProvider(),
         as_of=date(2026, 4, 13),
+        run_id=run_result.run_id,
     )
     assert evaluated.actual_return == Decimal("0.1")
 

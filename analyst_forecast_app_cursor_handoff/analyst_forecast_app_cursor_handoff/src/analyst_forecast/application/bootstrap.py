@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
@@ -9,10 +10,16 @@ import yaml
 from analyst_forecast import __version__
 from analyst_forecast.application.settings import AppSettings, save_settings
 from analyst_forecast.infrastructure.db.migration import upgrade_database
+from analyst_forecast.resources import iter_resource_files, read_text_resource
 
 
-def initialize_workspace(settings: AppSettings, *, config_path: Path) -> None:
-    root = settings.vault_root
+def initialize_workspace(
+    settings: AppSettings,
+    *,
+    config_path: Path,
+    update_docs: bool = False,
+) -> None:
+    root = settings.workspace_root
     system = root / "_system"
 
     for path in (
@@ -20,6 +27,7 @@ def initialize_workspace(settings: AppSettings, *, config_path: Path) -> None:
         system / "backups" / "database",
         system / "backups" / "configuration",
         system / "backups" / "mappings",
+        system / "raw_artifacts",
         root / "docs",
         root / "prompts",
         root / "analysts",
@@ -33,8 +41,9 @@ def initialize_workspace(settings: AppSettings, *, config_path: Path) -> None:
     save_settings(settings, config_path)
 
     portable_config = {
-        "schema_version": "1.0.0",
+        "schema_version": "1.1.0",
         "app_version": __version__,
+        "workspace_relative_path": settings.workspace_relative_path,
         "vault_root": "..",
         "database_path": "database.sqlite",
         "confidence_review_threshold": settings.confidence_review_threshold,
@@ -74,16 +83,63 @@ def initialize_workspace(settings: AppSettings, *, config_path: Path) -> None:
             ],
         },
     )
-    _write_text_if_missing(
-        root / "README.md",
-        "# アナリスト予想検証\n\n"
-        "この領域はCLIが生成する個人用データ領域です。"
-        "`_system/database.sqlite` が機械処理上の正本です。\n",
-    )
+
+    seed_workspace_docs(root, update=update_docs)
+    seed_workspace_prompts(root, update=update_docs)
 
     upgrade_database(
         settings.database_file,
         backup_dir=system / "backups" / "database",
+    )
+
+
+def seed_workspace_docs(root: Path, *, update: bool = False) -> None:
+    for relative, source in iter_resource_files("docs"):
+        if relative == "README.md":
+            destination = root / "README.md"
+        elif relative == "AI_WORK_GUIDE.md":
+            destination = root / "AI_WORK_GUIDE.md"
+        else:
+            destination = root / "docs" / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists() and not update:
+            continue
+        if destination.exists() and update:
+            backup = (
+                root
+                / "_system"
+                / "backups"
+                / "configuration"
+                / f"docs__{destination.name}__{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%fZ')}"
+            )
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(destination, backup)
+        destination.write_text(source.read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
+
+
+def seed_workspace_prompts(root: Path, *, update: bool = False) -> None:
+    prompts_root = root / "prompts"
+    prompts_root.mkdir(parents=True, exist_ok=True)
+    for relative, source in iter_resource_files("prompts"):
+        destination = prompts_root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists() and not update:
+            continue
+        destination.write_text(source.read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
+    catalog = json.loads(read_text_resource("prompts", "catalog.json"))
+    (prompts_root / "PROMPT_MANIFEST.json").write_text(
+        json.dumps(
+            {
+                "app_version": __version__,
+                "template_version": catalog.get("template_version", "1.0.0"),
+                "seeded_at": datetime.now(UTC).isoformat(),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+        newline="\n",
     )
 
 
@@ -101,8 +157,3 @@ def _write_yaml_if_missing(path: Path, data: object) -> None:
             encoding="utf-8",
             newline="\n",
         )
-
-
-def _write_text_if_missing(path: Path, content: str) -> None:
-    if not path.exists():
-        path.write_text(content, encoding="utf-8", newline="\n")

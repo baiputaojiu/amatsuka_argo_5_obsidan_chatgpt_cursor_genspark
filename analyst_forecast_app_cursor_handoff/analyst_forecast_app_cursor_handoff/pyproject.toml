@@ -38,6 +38,8 @@ where = ["src"]
 [tool.setuptools.package-data]
 analyst_forecast = [
     "schemas/*.json",
+    "resources/docs/**/*.md",
+    "resources/prompts/*",
     "infrastructure/db/migrations/script.py.mako",
     "infrastructure/db/migrations/versions/*.py",
 ]

@@ -1,0 +1,148 @@
+{
+  "$defs": {
+    "P13PromptExecution": {
+      "additionalProperties": false,
+      "properties": {
+        "prompt_id": {
+          "const": "P13",
+          "title": "Prompt Id",
+          "type": "string"
+        },
+        "prompt_version": {
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "title": "Prompt Version",
+          "type": "string"
+        },
+        "environment": {
+          "enum": [
+            "cursor",
+            "chatgpt"
+          ],
+          "title": "Environment",
+          "type": "string"
+        },
+        "model": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "executed_at": {
+          "format": "date-time",
+          "title": "Executed At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "prompt_id",
+        "prompt_version",
+        "environment",
+        "model",
+        "executed_at"
+      ],
+      "title": "P13PromptExecution",
+      "type": "object"
+    }
+  },
+  "$id": "https://local.invalid/schemas/p13-target-adjudication-2.0.0.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "2.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "run_id": {
+      "pattern": "^RUN-\\d{8}-\\d{3}$",
+      "title": "Run Id",
+      "type": "string"
+    },
+    "source_id": {
+      "pattern": "^SRC-\\d{6}$",
+      "title": "Source Id",
+      "type": "string"
+    },
+    "forecast_component_id": {
+      "pattern": "^FCC-\\d{6}$",
+      "title": "Forecast Component Id",
+      "type": "string"
+    },
+    "proposal_artifact_id": {
+      "pattern": "^AIF-\\d{6}$",
+      "title": "Proposal Artifact Id",
+      "type": "string"
+    },
+    "review_artifact_id": {
+      "pattern": "^AIF-\\d{6}$",
+      "title": "Review Artifact Id",
+      "type": "string"
+    },
+    "prompt_execution": {
+      "$ref": "#/$defs/P13PromptExecution"
+    },
+    "input_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Input Hash",
+      "type": "string"
+    },
+    "knowledge_cutoff": {
+      "format": "date-time",
+      "title": "Knowledge Cutoff",
+      "type": "string"
+    },
+    "final_status": {
+      "enum": [
+        "verified",
+        "unresolvable"
+      ],
+      "title": "Final Status",
+      "type": "string"
+    },
+    "selected_candidate_ref": {
+      "anyOf": [
+        {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Selected Candidate Ref"
+    },
+    "rationale": {
+      "minLength": 1,
+      "title": "Rationale",
+      "type": "string"
+    },
+    "unevaluable_reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Unevaluable Reason"
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "source_id",
+    "forecast_component_id",
+    "proposal_artifact_id",
+    "review_artifact_id",
+    "prompt_execution",
+    "input_hash",
+    "knowledge_cutoff",
+    "final_status",
+    "rationale"
+  ],
+  "title": "P13TargetResolutionAdjudicationOutput",
+  "type": "object"
+}

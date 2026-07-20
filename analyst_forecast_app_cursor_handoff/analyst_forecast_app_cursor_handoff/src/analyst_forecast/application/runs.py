@@ -17,6 +17,10 @@ from analyst_forecast.infrastructure.db.ids import next_id
 from analyst_forecast.infrastructure.db.models import AnalystRecord, RunRecord
 from analyst_forecast.infrastructure.db.session import create_session_factory
 from analyst_forecast.schemas.ai_output import schema_path
+from analyst_forecast.schemas.pipeline import (
+    PIPELINE_SCHEMA_FILENAMES,
+    pipeline_schema_path,
+)
 
 
 class CreateRunRequest(BaseModel):
@@ -219,69 +223,70 @@ def _write_prompt_snapshots(
     run_id: str,
     run_path: Path,
 ) -> None:
-    prompt_ids = ["P08", "P11", "P12"]
+    import json
+
+    from analyst_forecast.resources import read_text_resource, resource_sha256
+
+    catalog = json.loads(read_text_resource("prompts", "catalog.json"))
+    template_version = str(catalog.get("template_version", "1.0.0"))
+    prompt_meta = catalog["prompts"]
+    prompt_ids = ["P08", "P11", "P12", "P13"]
     if Medium.YOUTUBE in request.selected_media:
         prompt_ids.insert(0, "P05")
 
-    prompt_specs = {
-        "P05": (
-            "YouTube原文整理・話者推定",
-            "raw文字起こしを発言単位に整理し、話者候補、確信度、根拠を出力する。",
-            "予想抽出を同時に行わず、判断不能を許容してください。",
-        ),
-        "P08": (
-            "予想抽出・構造化",
-            "原文から評価対象となる予想表明を抽出し、固定JSON Schemaで出力する。",
-            "原文にない情報を補完せず、引用と文字offsetを必須にしてください。",
-        ),
-        "P11": (
-            "予測対象解決",
-            "原文で明示された対象を優先し、不明な場合だけ発言時点情報で候補を提案する。",
-            "knowledge_cutoffより後の情報や市場結果を入力・根拠に使用しないでください。",
-        ),
-        "P12": (
-            "予測対象解決レビュー",
-            "P11とは独立に、原文上の役割、当時の存在、symbol、通貨、後知恵を検証する。",
-            "一次提案を前提として肯定せず、不一致と評価不能を許容してください。",
-        ),
+    output_names = {
+        "P05": f"P05_{run_id}_SOURCE_ID.json",
+        "P08": f"P08_{run_id}_SOURCE_ID.json",
+        "P11": f"P11_{run_id}_COMPONENT_ID.json",
+        "P12": f"P12_{run_id}_COMPONENT_ID.json",
+        "P13": f"P13_{run_id}_COMPONENT_ID.json",
     }
     for prompt_id in prompt_ids:
-        title, purpose, warning = prompt_specs[prompt_id]
+        meta = prompt_meta[prompt_id]
+        title = meta["title"]
+        purpose = meta["purpose"]
+        warning = meta["warning"]
+        input_path = meta["input_path"]
+        template = read_text_resource("prompts", f"{prompt_id}.md.j2")
+        template_hash = resource_sha256("prompts", f"{prompt_id}.md.j2")
         for environment in ("cursor", "chatgpt"):
             model = settings.cursor_model if environment == "cursor" else settings.chatgpt_model
             model_text = model or "未設定（実行前に高性能モデルを設定）"
             input_instruction = (
-                "案件内の指定パスを読み込む"
+                f"案件内の `{input_path}` を読み込む"
                 if environment == "cursor"
-                else "案件の入力ファイルを添付する"
+                else f"案件内の `{input_path}` を添付する"
             )
-            output_name = (
-                "forecast_extraction.json"
-                if prompt_id == "P08"
-                else f"{prompt_id.lower()}_output.json"
-            )
+            output_name = output_names[prompt_id]
+            schema_name = PIPELINE_SCHEMA_FILENAMES[prompt_id]
             content = (
-                f"# {prompt_id} {title} — {environment}\n\n"
-                f"## 目的\n{purpose}\n\n"
-                "## 使用タイミング\n`NEXT_ACTIONS.md` がこの処理を指示したとき。\n\n"
-                f"## 推奨AI環境\n{environment}\n\n"
-                "## 必要能力\n長文読解、引用忠実性、時点制約の遵守ができる高性能モデル。\n\n"
-                f"## 使用モデル\n{model_text}\n\n"
-                f"## 入力ファイル\n{input_instruction}。案件IDは `{run_id}`。\n\n"
-                f"## 出力ファイル・Schema\n`03_ai_outputs/inbox/{output_name}`。"
-                + (
-                    "`01_prompts/schemas/forecast_extraction.schema.json` に厳密に従う。\n\n"
-                    if prompt_id == "P08"
-                    else "MarkdownまたはJSONで根拠と不確実性を明示する。\n\n"
-                )
-                + f"## 禁止事項・注意事項\n{warning}\n\n"
-                "## 完了条件\n入力、引用、判断根拠、未解決事項が出力に含まれる。\n\n"
-                "## コピペ用依頼文\n"
-                f"この案件の{title}を実行してください。上記の禁止事項と出力先を厳守してください。\n"
+                template.replace("{{prompt_id}}", prompt_id)
+                .replace("{{title}}", title)
+                .replace("{{environment}}", environment)
+                .replace("{{template_version}}", template_version)
+                .replace("{{template_hash}}", template_hash)
+                .replace("{{run_id}}", run_id)
+                .replace("{{purpose}}", purpose)
+                .replace("{{model_text}}", model_text)
+                .replace("{{input_instruction}}", input_instruction)
+                .replace("{{output_name}}", output_name)
+                .replace("{{schema_name}}", schema_name)
+                .replace("{{warning}}", warning)
             )
             filename = f"{prompt_id}__{_safe_windows_name(title)}__{environment}.md"
             (run_path / "01_prompts" / filename).write_text(
                 content,
+                encoding="utf-8",
+                newline="\n",
+            )
+            manifest = {
+                "prompt_id": prompt_id,
+                "environment": environment,
+                "template_version": template_version,
+                "template_hash": template_hash,
+            }
+            (run_path / "01_prompts" / f"{prompt_id}__{environment}.manifest.json").write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
                 newline="\n",
             )
@@ -290,6 +295,11 @@ def _write_prompt_snapshots(
         schema_path(),
         run_path / "01_prompts" / "schemas" / "forecast_extraction.schema.json",
     )
+    for prompt_id in ("P05", "P08", "P11", "P12", "P13"):
+        shutil.copy2(
+            pipeline_schema_path(prompt_id),
+            run_path / "01_prompts" / "schemas" / PIPELINE_SCHEMA_FILENAMES[prompt_id],
+        )
 
 
 def _safe_windows_name(value: str) -> str:

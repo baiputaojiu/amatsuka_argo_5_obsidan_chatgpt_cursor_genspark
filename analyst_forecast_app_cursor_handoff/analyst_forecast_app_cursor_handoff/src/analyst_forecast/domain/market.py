@@ -10,6 +10,27 @@ class MarketDataUnavailable(RuntimeError):
     """市場データを安全に取得・使用できない場合。"""
 
 
+class ProviderError(MarketDataUnavailable):
+    def __init__(
+        self,
+        *,
+        code: str,
+        message: str,
+        retryable: bool = False,
+        attempt_count: int = 1,
+        guidance: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.retryable = retryable
+        self.attempt_count = attempt_count
+        self.guidance = guidance
+
+    def __str__(self) -> str:
+        return self.message
+
+
 def _decimal(value: Decimal | str | int | float) -> Decimal:
     return value if isinstance(value, Decimal) else Decimal(str(value))
 

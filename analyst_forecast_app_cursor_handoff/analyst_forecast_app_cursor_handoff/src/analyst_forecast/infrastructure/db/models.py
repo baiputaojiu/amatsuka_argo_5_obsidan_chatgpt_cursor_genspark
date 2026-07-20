@@ -74,8 +74,27 @@ class RunRecord(AuditMixin, Base):
     run_path: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
 
 
+class RawArtifactRecord(AuditMixin, Base):
+    __tablename__ = "raw_artifacts"
+
+    raw_artifact_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    canonical_path: Mapped[str] = mapped_column(Text, nullable=False)
+    byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    encoding: Mapped[str] = mapped_column(String(40), default="utf-8")
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class SourceRecord(AuditMixin, Base):
     __tablename__ = "sources"
+    __table_args__ = (
+        Index(
+            "ix_sources_artifact_analyst_medium",
+            "raw_artifact_id",
+            "analyst_id",
+            "medium",
+        ),
+    )
 
     source_id: Mapped[str] = mapped_column(String(20), primary_key=True)
     analyst_id: Mapped[str] = mapped_column(ForeignKey("analysts.analyst_id"), index=True)
@@ -88,8 +107,11 @@ class SourceRecord(AuditMixin, Base):
     recorded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     evidence_level: Mapped[str | None] = mapped_column(String(8))
+    raw_artifact_id: Mapped[str | None] = mapped_column(
+        ForeignKey("raw_artifacts.raw_artifact_id"), index=True
+    )
     raw_file_path: Mapped[str] = mapped_column(Text, nullable=False)
-    raw_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    raw_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     acquisition_status: Mapped[str] = mapped_column(String(40), default="acquired")
     source_relation: Mapped[str] = mapped_column(String(40), default="original")
     original_source_id: Mapped[str | None] = mapped_column(
@@ -106,6 +128,15 @@ class RunSourceRecord(Base):
     observed_medium: Mapped[str] = mapped_column(String(20), nullable=False)
     observed_published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     linked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    processing_status: Mapped[str] = mapped_column(
+        String(40), default="raw_imported", nullable=False, index=True
+    )
+    latest_ai_artifact_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ai_artifacts.ai_artifact_id")
+    )
+    local_input_path: Mapped[str | None] = mapped_column(Text)
+    input_kind: Mapped[str] = mapped_column(String(20), default="copy")
+    artifact_manifest_path: Mapped[str | None] = mapped_column(Text)
 
 
 class AiImportRecord(AuditMixin, Base):
@@ -125,7 +156,9 @@ class PromptExecutionRecord(AuditMixin, Base):
     __tablename__ = "prompt_executions"
 
     prompt_execution_id: Mapped[str] = mapped_column(String(20), primary_key=True)
-    ai_import_id: Mapped[str] = mapped_column(ForeignKey("ai_imports.ai_import_id"), unique=True)
+    ai_import_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ai_imports.ai_import_id"), unique=True
+    )
     run_id: Mapped[str] = mapped_column(ForeignKey("runs.run_id"), index=True)
     prompt_id: Mapped[str] = mapped_column(String(20))
     prompt_version: Mapped[str] = mapped_column(String(20))
@@ -135,6 +168,61 @@ class PromptExecutionRecord(AuditMixin, Base):
     output_file: Mapped[str] = mapped_column(Text)
     executed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     validation_status: Mapped[str] = mapped_column(String(30))
+
+
+class AiArtifactRecord(AuditMixin, Base):
+    __tablename__ = "ai_artifacts"
+
+    ai_artifact_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.run_id"), index=True)
+    source_id: Mapped[str | None] = mapped_column(ForeignKey("sources.source_id"), index=True)
+    prompt_execution_id: Mapped[str] = mapped_column(
+        ForeignKey("prompt_executions.prompt_execution_id"), unique=True
+    )
+    prompt_id: Mapped[str] = mapped_column(String(20), index=True)
+    schema_version: Mapped[str] = mapped_column(String(20))
+    input_hash: Mapped[str] = mapped_column(String(64))
+    output_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    classified_file_path: Mapped[str] = mapped_column(Text)
+    classification: Mapped[str] = mapped_column(String(30), index=True)
+    resolution_status: Mapped[str] = mapped_column(String(40), index=True)
+    confidence: Mapped[float | None] = mapped_column(Float)
+    importance: Mapped[str] = mapped_column(String(20), default="normal")
+    high_importance_reason: Mapped[str | None] = mapped_column(Text)
+    knowledge_cutoff: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    supersedes_artifact_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ai_artifacts.ai_artifact_id")
+    )
+    resolved_by_artifact_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ai_artifacts.ai_artifact_id")
+    )
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class SegmentRecord(AuditMixin, Base):
+    __tablename__ = "segments"
+    __table_args__ = (
+        UniqueConstraint("ai_artifact_id", "local_ref", name="uq_segment_artifact_ref"),
+    )
+
+    segment_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    ai_artifact_id: Mapped[str] = mapped_column(
+        ForeignKey("ai_artifacts.ai_artifact_id"), index=True
+    )
+    source_id: Mapped[str] = mapped_column(ForeignKey("sources.source_id"), index=True)
+    local_ref: Mapped[str] = mapped_column(String(100))
+    sequence_number: Mapped[int] = mapped_column(Integer)
+    raw_start_offset: Mapped[int] = mapped_column(Integer)
+    raw_end_offset: Mapped[int] = mapped_column(Integer)
+    raw_text: Mapped[str] = mapped_column(Text)
+    normalized_text: Mapped[str] = mapped_column(Text)
+    speaker_status: Mapped[str] = mapped_column(String(30))
+    speaker_candidate: Mapped[str | None] = mapped_column(String(200))
+    speaker_confidence: Mapped[float] = mapped_column(Float)
+    attribution_basis: Mapped[str] = mapped_column(Text)
+    review_status: Mapped[str] = mapped_column(String(30))
+    importance: Mapped[str] = mapped_column(String(20), default="normal")
+    high_importance_reason: Mapped[str | None] = mapped_column(Text)
 
 
 class ForecastGroupRecord(AuditMixin, Base):
@@ -155,6 +243,7 @@ class ForecastIssuanceRecord(AuditMixin, Base):
     __tablename__ = "forecast_issuances"
     __table_args__ = (
         UniqueConstraint("ai_import_id", "local_ref", name="uq_issuance_import_ref"),
+        UniqueConstraint("ai_artifact_id", "local_ref", name="uq_issuance_artifact_ref"),
         Index("ix_forecast_issuance_analyst_status", "analyst_id", "current_status"),
     )
 
@@ -163,7 +252,10 @@ class ForecastIssuanceRecord(AuditMixin, Base):
     forecast_group_id: Mapped[str] = mapped_column(
         ForeignKey("forecast_groups.forecast_group_id"), index=True
     )
-    ai_import_id: Mapped[str] = mapped_column(ForeignKey("ai_imports.ai_import_id"))
+    ai_import_id: Mapped[str | None] = mapped_column(ForeignKey("ai_imports.ai_import_id"))
+    ai_artifact_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ai_artifacts.ai_artifact_id"), index=True
+    )
     source_id: Mapped[str] = mapped_column(ForeignKey("sources.source_id"), index=True)
     local_ref: Mapped[str] = mapped_column(String(100))
     made_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -201,10 +293,10 @@ class TargetRecord(AuditMixin, Base):
     raw_label: Mapped[str] = mapped_column(Text)
     canonical_name: Mapped[str] = mapped_column(Text)
     target_type: Mapped[str] = mapped_column(String(40), index=True)
-    ticker: Mapped[str] = mapped_column(String(100), index=True)
+    ticker: Mapped[str | None] = mapped_column(String(100), index=True)
     security_code: Mapped[str | None] = mapped_column(String(100))
     exchange: Mapped[str | None] = mapped_column(String(100))
-    currency: Mapped[str] = mapped_column(String(20))
+    currency: Mapped[str | None] = mapped_column(String(20))
     aliases: Mapped[list[str]] = mapped_column(JSON, default=list)
     valid_from: Mapped[date | None] = mapped_column(Date)
     valid_to: Mapped[date | None] = mapped_column(Date)
@@ -224,9 +316,19 @@ class TargetMappingRecord(AuditMixin, Base):
     proposal_model: Mapped[str | None] = mapped_column(String(200))
     review_result: Mapped[str | None] = mapped_column(Text)
     adjudication_result: Mapped[str | None] = mapped_column(Text)
+    proposal_artifact_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ai_artifacts.ai_artifact_id")
+    )
+    review_artifact_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ai_artifacts.ai_artifact_id")
+    )
+    adjudication_artifact_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ai_artifacts.ai_artifact_id")
+    )
     mapping_status: Mapped[str] = mapped_column(String(40), index=True)
     mapping_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
-    locked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    unevaluable_reason: Mapped[str | None] = mapped_column(Text)
 
 
 class ForecastComponentRecord(AuditMixin, Base):
@@ -255,14 +357,100 @@ class ForecastComponentRecord(AuditMixin, Base):
     magnitude_unit: Mapped[str | None] = mapped_column(String(40))
     magnitude_operator: Mapped[str | None] = mapped_column(String(40))
     scenario_probability: Mapped[float | None] = mapped_column(Float)
-    target_id: Mapped[str] = mapped_column(ForeignKey("targets.target_id"), index=True)
-    target_mapping_id: Mapped[str] = mapped_column(
+    raw_target_label: Mapped[str | None] = mapped_column(Text)
+    target_resolution_status: Mapped[str] = mapped_column(String(40), default="pending", index=True)
+    importance: Mapped[str] = mapped_column(String(20), default="normal")
+    high_importance_reason: Mapped[str | None] = mapped_column(Text)
+    target_id: Mapped[str | None] = mapped_column(ForeignKey("targets.target_id"), index=True)
+    target_mapping_id: Mapped[str | None] = mapped_column(
         ForeignKey("target_mappings.target_mapping_id"), index=True
     )
 
 
+class TargetResolutionCandidateRecord(AuditMixin, Base):
+    __tablename__ = "target_resolution_candidates"
+    __table_args__ = (
+        UniqueConstraint(
+            "proposal_artifact_id",
+            "candidate_ref",
+            name="uq_target_candidate_artifact_ref",
+        ),
+    )
+
+    target_resolution_candidate_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    proposal_artifact_id: Mapped[str] = mapped_column(
+        ForeignKey("ai_artifacts.ai_artifact_id"), index=True
+    )
+    forecast_component_id: Mapped[str] = mapped_column(
+        ForeignKey("forecast_components.forecast_component_id"), index=True
+    )
+    candidate_ref: Mapped[str] = mapped_column(String(100))
+    rank: Mapped[int] = mapped_column(Integer)
+    canonical_name: Mapped[str] = mapped_column(Text)
+    target_type: Mapped[str] = mapped_column(String(40))
+    mapping_method: Mapped[str] = mapped_column(String(40))
+    instruments: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    existed_at: Mapped[date] = mapped_column(Date)
+    knowledge_cutoff: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    source_evidence: Mapped[str] = mapped_column(Text)
+    confidence: Mapped[float] = mapped_column(Float)
+    candidate_status: Mapped[str] = mapped_column(String(30), default="proposed")
+
+
+class TargetResolutionReviewRecord(AuditMixin, Base):
+    __tablename__ = "target_resolution_reviews"
+
+    target_resolution_review_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    review_artifact_id: Mapped[str] = mapped_column(
+        ForeignKey("ai_artifacts.ai_artifact_id"), index=True
+    )
+    proposal_artifact_id: Mapped[str] = mapped_column(
+        ForeignKey("ai_artifacts.ai_artifact_id"), index=True
+    )
+    forecast_component_id: Mapped[str] = mapped_column(
+        ForeignKey("forecast_components.forecast_component_id"), index=True
+    )
+    candidate_ref: Mapped[str | None] = mapped_column(String(100))
+    decision: Mapped[str] = mapped_column(String(30))
+    confidence: Mapped[float] = mapped_column(Float)
+    rationale: Mapped[str] = mapped_column(Text)
+    corrected_candidate: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class TargetResolutionAdjudicationRecord(AuditMixin, Base):
+    __tablename__ = "target_resolution_adjudications"
+
+    target_resolution_adjudication_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    adjudication_artifact_id: Mapped[str] = mapped_column(
+        ForeignKey("ai_artifacts.ai_artifact_id"), index=True
+    )
+    proposal_artifact_id: Mapped[str] = mapped_column(
+        ForeignKey("ai_artifacts.ai_artifact_id"), index=True
+    )
+    review_artifact_id: Mapped[str] = mapped_column(
+        ForeignKey("ai_artifacts.ai_artifact_id"), index=True
+    )
+    forecast_component_id: Mapped[str] = mapped_column(
+        ForeignKey("forecast_components.forecast_component_id"), index=True
+    )
+    final_status: Mapped[str] = mapped_column(String(30))
+    selected_candidate_ref: Mapped[str | None] = mapped_column(String(100))
+    rationale: Mapped[str] = mapped_column(Text)
+
+
 class MarketSeriesRecord(AuditMixin, Base):
     __tablename__ = "market_series"
+    __table_args__ = (
+        Index(
+            "ix_market_series_lookup",
+            "provider",
+            "symbol",
+            "currency",
+            "adjustment_type",
+            "start_date",
+            "end_date",
+        ),
+    )
 
     market_series_id: Mapped[str] = mapped_column(String(20), primary_key=True)
     provider: Mapped[str] = mapped_column(String(40), index=True)
@@ -276,6 +464,11 @@ class MarketSeriesRecord(AuditMixin, Base):
     raw_cache_path: Mapped[str] = mapped_column(Text)
     data_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     quality_status: Mapped[str] = mapped_column(String(30), default="valid")
+    provider_error_code: Mapped[str | None] = mapped_column(String(60))
+    provider_error_message: Mapped[str | None] = mapped_column(Text)
+    retryable: Mapped[str | None] = mapped_column(String(10))
+    attempt_count: Mapped[int | None] = mapped_column(Integer)
+    cache_hit: Mapped[str | None] = mapped_column(String(10))
 
 
 class EvaluationRecord(AuditMixin, Base):
@@ -320,6 +513,47 @@ class EvaluationRecord(AuditMixin, Base):
     unevaluable_reason: Mapped[str | None] = mapped_column(Text)
     max_favorable_excursion: Mapped[Decimal | None] = mapped_column(Numeric(24, 10))
     max_adverse_excursion: Mapped[Decimal | None] = mapped_column(Numeric(24, 10))
+    provider_error_code: Mapped[str | None] = mapped_column(String(60))
+    provider_error_message: Mapped[str | None] = mapped_column(Text)
+    retryable: Mapped[str | None] = mapped_column(String(10))
+    attempt_count: Mapped[int | None] = mapped_column(Integer)
+    cache_hit: Mapped[str | None] = mapped_column(String(10))
+
+
+class WorkflowTaskRecord(AuditMixin, Base):
+    __tablename__ = "workflow_tasks"
+    __table_args__ = (
+        UniqueConstraint("run_id", "task_key", name="uq_workflow_task_run_key"),
+        Index("ix_workflow_tasks_run_status", "run_id", "status"),
+    )
+
+    workflow_task_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.run_id"), index=True)
+    task_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    executor: Mapped[str] = mapped_column(String(40), nullable=False)
+    depends_on: Mapped[list[str]] = mapped_column(JSON, default=list)
+    related_artifact_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ai_artifacts.ai_artifact_id")
+    )
+    related_source_id: Mapped[str | None] = mapped_column(ForeignKey("sources.source_id"))
+    related_component_id: Mapped[str | None] = mapped_column(
+        ForeignKey("forecast_components.forecast_component_id")
+    )
+    supersedes_task_id: Mapped[str | None] = mapped_column(
+        ForeignKey("workflow_tasks.workflow_task_id")
+    )
+    resolved_by_task_id: Mapped[str | None] = mapped_column(
+        ForeignKey("workflow_tasks.workflow_task_id")
+    )
+    retryable: Mapped[str] = mapped_column(String(10), default="yes")
+    last_error: Mapped[str | None] = mapped_column(Text)
+    recommended_rank: Mapped[int | None] = mapped_column(Integer)
+    command_or_prompt: Mapped[str | None] = mapped_column(Text)
+    inputs: Mapped[list[str]] = mapped_column(JSON, default=list)
+    outputs: Mapped[list[str]] = mapped_column(JSON, default=list)
+    details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
 
 class EvaluationSnapshotRecord(AuditMixin, Base):

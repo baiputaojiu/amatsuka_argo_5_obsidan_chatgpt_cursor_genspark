@@ -10,7 +10,12 @@ from alembic.config import Config
 from analyst_forecast.infrastructure.db.session import create_sqlite_engine
 
 
-def upgrade_database(database_path: Path, backup_dir: Path | None = None) -> Path | None:
+def upgrade_database(
+    database_path: Path,
+    backup_dir: Path | None = None,
+    *,
+    revision: str = "head",
+) -> Path | None:
     backup_path: Path | None = None
     if database_path.is_file() and database_path.stat().st_size > 0 and backup_dir is not None:
         backup_dir.mkdir(parents=True, exist_ok=True)
@@ -24,6 +29,6 @@ def upgrade_database(database_path: Path, backup_dir: Path | None = None) -> Pat
     engine = create_sqlite_engine(database_path)
     with engine.begin() as connection:
         config.attributes["connection"] = connection
-        command.upgrade(config, "head")
+        command.upgrade(config, revision)
     engine.dispose()
     return backup_path

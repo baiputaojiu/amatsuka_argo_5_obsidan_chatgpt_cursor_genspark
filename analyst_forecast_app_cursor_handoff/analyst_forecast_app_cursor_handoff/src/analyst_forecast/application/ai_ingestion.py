@@ -59,6 +59,7 @@ class AiIngestResult:
     guidance: str = ""
     forecast_issuance_ids: tuple[str, ...] = ()
     component_ids: tuple[str, ...] = ()
+    artifact_ids: tuple[str, ...] = ()
 
 
 def ingest_ai_output(settings: AppSettings, input_path: Path) -> AiIngestResult:
@@ -69,6 +70,20 @@ def ingest_ai_output(settings: AppSettings, input_path: Path) -> AiIngestResult:
         )
     raw_bytes = input_path.read_bytes()
     output_hash = hashlib.sha256(raw_bytes).hexdigest()
+    try:
+        dispatch_payload = json.loads(raw_bytes.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        dispatch_payload = None
+    if isinstance(dispatch_payload, dict) and dispatch_payload.get("schema_version") == "2.0.0":
+        from analyst_forecast.application.ai_pipeline import ingest_pipeline_output
+
+        return ingest_pipeline_output(
+            settings,
+            input_path=input_path,
+            raw_bytes=raw_bytes,
+            untyped_payload=dispatch_payload,
+            output_hash=output_hash,
+        )
     issues: list[ValidationIssue] = []
     untyped_payload: dict[str, Any] | None = None
 
@@ -288,8 +303,10 @@ def _validate_references_and_quotes(
                     "$['source_id']",
                 )
             )
-        raw_path = settings.vault_root / Path(source.raw_file_path)
-        if not raw_path.is_file():
+        from analyst_forecast.application.raw_sources import resolve_source_raw_path
+
+        raw_path = resolve_source_raw_path(settings, session, run_id=payload.run_id, source=source)
+        if raw_path is None:
             issues.append(
                 ValidationIssue(
                     "raw_missing",
@@ -565,6 +582,11 @@ def _insert_payload(
                 )
                 component_id = local_component_ids[component.component_ref]
                 component_ids.append(component_id)
+                resolution_status = (
+                    "review_pending"
+                    if mapping.mapping_status == "legacy_inline_review"
+                    else "pending"
+                )
                 session.add(
                     ForecastComponentRecord(
                         forecast_component_id=component_id,
@@ -589,6 +611,8 @@ def _insert_payload(
                         scenario_probability=component.scenario_probability,
                         target_id=target.target_id,
                         target_mapping_id=mapping.target_mapping_id,
+                        raw_target_label=component.target.raw_label,
+                        target_resolution_status=resolution_status,
                     )
                 )
     return issuance_ids, component_ids
@@ -626,19 +650,36 @@ def _get_or_create_target_mapping(
         select(TargetMappingRecord).where(TargetMappingRecord.mapping_hash == mapping_hash)
     )
     if mapping is None:
+        # Schema 1.0.0 の inline review_result は独立P12ではない。
+        # verified/corrected を自動昇格せず、監査用に legacy_inline_review として残す。
+        claimed = target_output.mapping_status.value
+        review_text: str | None
+        if claimed in {"verified", "corrected"}:
+            stored_status = "legacy_inline_review"
+            review_text = (
+                f"[legacy_inline_review claimed={claimed}] "
+                f"{target_output.review_result or ''}"
+            ).strip()
+            locked_at = None
+        else:
+            stored_status = claimed
+            review_text = target_output.review_result
+            locked_at = None
         mapping = TargetMappingRecord(
             target_mapping_id=next_id(session, "MAP-", width=6, sequence_key="TARGET_MAPPING"),
             target_id=target.target_id,
             mapping_method=target_output.mapping_method,
-            evaluation_instruments=[target_output.symbol],
-            weights=[1.0],
+            evaluation_instruments=(
+                [target_output.symbol] if target_output.symbol is not None else []
+            ),
+            weights=[1.0] if target_output.symbol is not None else None,
             knowledge_cutoff=target_output.knowledge_cutoff,
             source_evidence=target_output.source_evidence,
             proposal_model=target_output.proposal_model,
-            review_result=target_output.review_result,
-            mapping_status=target_output.mapping_status.value,
+            review_result=review_text,
+            mapping_status=stored_status,
             mapping_hash=mapping_hash,
-            locked_at=datetime.now(UTC),
+            locked_at=locked_at,
         )
         session.add(mapping)
         session.flush()

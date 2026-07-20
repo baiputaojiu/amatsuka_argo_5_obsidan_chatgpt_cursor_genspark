@@ -187,6 +187,31 @@ def test_verified_target_mapping_requires_independent_ai_review(
     assert any("別AI" in issue.message for issue in result.issues)
 
 
+def test_schema_1_0_0_inline_review_does_not_lock_mapping(
+    settings: AppSettings,
+    run_result,
+    source_result,
+    tmp_path: Path,
+) -> None:
+    from analyst_forecast.infrastructure.db.models import TargetMappingRecord
+
+    payload = make_ai_payload(run_id=run_result.run_id, source_id=source_result.source_id)
+    result = ingest_ai_output(settings, write_payload(tmp_path, payload))
+
+    assert result.status is AiIngestStatus.ACCEPTED
+    session_factory = create_session_factory(settings.database_file)
+    with session_factory() as session:
+        mapping = session.scalar(select(TargetMappingRecord))
+        assert mapping is not None
+        assert mapping.mapping_status == "legacy_inline_review"
+        assert mapping.locked_at is None
+        assert mapping.review_result is not None
+        assert "[legacy_inline_review" in mapping.review_result
+        component = session.get(ForecastComponentRecord, result.component_ids[0])
+        assert component is not None
+        assert component.target_resolution_status == "review_pending"
+
+
 def test_restatements_are_separate_issuances_in_one_group(
     settings: AppSettings,
     run_result,
