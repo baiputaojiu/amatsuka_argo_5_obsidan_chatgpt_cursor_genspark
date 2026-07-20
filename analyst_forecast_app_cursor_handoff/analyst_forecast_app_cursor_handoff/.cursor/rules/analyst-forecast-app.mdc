@@ -1,0 +1,61 @@
+---
+description: アナリスト予想検証アプリの実装で常に守る仕様・品質ルール
+alwaysApply: true
+---
+
+# Project rules
+
+- User-facing text, CLI guidance, and operational documents are Japanese.
+- Treat `docs/` as the product specification. Treat `reference/chat_history.md` as background only.
+- Resolve conflicts using `00_Cursor引継ぎ/02_SPEC_AUTHORITY.md`.
+- Do not silently change product or evaluation methodology. Record assumptions and propose material changes.
+- Implement the smallest vertical MVP before broader collection, scoring, or visualization features.
+
+# Data integrity
+
+- Raw source files are immutable. Never normalize, merge, rename destructively, or overwrite raw evidence in place.
+- Preserve traceability from evaluation to forecast, statement, source segment, raw source, prompt/model, and market-data snapshot.
+- Use content hashes and idempotent imports. Re-running a command must not duplicate records.
+- Validate AI JSON, references, enum values, and source quotations before database ingestion.
+- Never invent unavailable prices, dates, speakers, tickers, or source evidence. Unknown and unevaluable are valid states.
+- Use transactions for database imports and create backups before migrations or risky updates.
+
+# AI and deterministic code boundary
+
+- AI handles semantic interpretation: speaker inference, forecast extraction, qualitative conditions, theme proxy proposals, reviews, and narrative reports.
+- Python handles IDs, files, hashes, schemas, database state, market-data retrieval, arithmetic, aggregation, charts, and workflow state.
+- Do not replace an unresolved semantic decision with fragile keyword rules merely to avoid an AI step.
+- All semantic production prompts target high-performance models. Additional review is prioritized for low-confidence or high-importance cases.
+
+# No hindsight leakage
+
+- Target/proxy resolution uses evidence available no later than the statement date.
+- Do not provide subsequent market outcomes to target-mapping prompts.
+- Freeze and audit target mappings before outcome retrieval; do not rewrite them to improve results.
+
+# Forecast identity
+
+- A later genuine restatement is a separate forecast issuance evaluated from its own date.
+- Also link related issuances in a forecast/thesis group for dependence and evolution analysis.
+- Reposts, links, clips, and third-party quotations are not new issuances.
+- Compound forecast components may be evaluated separately but count as one parent issuance.
+- Current consensus uses at most one current view per analyst for the same target/direction/horizon.
+
+# Evaluation
+
+- Keep accuracy, timing, magnitude, specificity, evidence coverage, and sample size distinct.
+- Do not use one overall score as the sole conclusion.
+- Keep explicit, inferred, and system-default horizons separate.
+- A false trigger condition is not a forecast miss.
+- Early realization is stored separately from the final outcome when the forecast semantics require timing near a point.
+- Use one unified forecast collection; derive historical/completed/current views from status at an evaluation timestamp.
+
+# Engineering
+
+- Prefer typed domain models, small application use cases, provider interfaces, and deterministic tests.
+- Keep network-dependent tests separate from unit tests and provide local fixtures.
+- Never commit API keys, personal absolute paths, databases, caches, or generated analyst data.
+- Preserve unrelated user changes. Avoid destructive Git and filesystem operations.
+- After each coherent unit: run relevant tests, update `docs/06_実装/IMPLEMENTATION_STATUS.md`, and state the next recommended action.
+- Do not add loop-engineering infrastructure to the initial MVP; normal tests and review remain required.
+
