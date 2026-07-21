@@ -1,10 +1,10 @@
 {
   "$defs": {
-    "P13PromptExecution": {
+    "P06PromptExecution": {
       "additionalProperties": false,
       "properties": {
         "prompt_id": {
-          "const": "P13",
+          "const": "P06",
           "title": "Prompt Id",
           "type": "string"
         },
@@ -40,13 +40,51 @@
         "model",
         "executed_at"
       ],
-      "title": "P13PromptExecution",
+      "title": "P06PromptExecution",
+      "type": "object"
+    },
+    "ReviewFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "finding_ref": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
+          "title": "Finding Ref",
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "warning",
+            "error"
+          ],
+          "title": "Severity",
+          "type": "string"
+        },
+        "message": {
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "evidence": {
+          "minLength": 1,
+          "title": "Evidence",
+          "type": "string"
+        }
+      },
+      "required": [
+        "finding_ref",
+        "severity",
+        "message",
+        "evidence"
+      ],
+      "title": "ReviewFinding",
       "type": "object"
     }
   },
-  "$id": "https://local.invalid/schemas/p13-target-adjudication-2.0.0.json",
+  "$id": "https://local.invalid/schemas/p06-speaker-review-2.0.0.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "description": "話者・著者帰属レビュー（P05/P07共通）。",
   "properties": {
     "schema_version": {
       "const": "2.0.0",
@@ -63,102 +101,65 @@
       "title": "Source Id",
       "type": "string"
     },
-    "forecast_component_id": {
-      "pattern": "^FCC-\\d{6}$",
-      "title": "Forecast Component Id",
-      "type": "string"
-    },
-    "proposal_artifact_id": {
+    "reviewed_artifact_id": {
       "pattern": "^AIF-\\d{6}$",
-      "title": "Proposal Artifact Id",
-      "type": "string"
-    },
-    "review_artifact_id": {
-      "pattern": "^AIF-\\d{6}$",
-      "title": "Review Artifact Id",
+      "title": "Reviewed Artifact Id",
       "type": "string"
     },
     "prompt_execution": {
-      "$ref": "#/$defs/P13PromptExecution"
+      "$ref": "#/$defs/P06PromptExecution"
     },
     "input_hash": {
       "pattern": "^[0-9a-f]{64}$",
       "title": "Input Hash",
       "type": "string"
     },
+    "decision": {
+      "enum": [
+        "accept",
+        "correct",
+        "reject",
+        "unresolved"
+      ],
+      "title": "Decision",
+      "type": "string"
+    },
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/ReviewFinding"
+      },
+      "title": "Findings",
+      "type": "array"
+    },
+    "corrected_payload": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Corrected Payload"
+    },
     "knowledge_cutoff": {
       "format": "date-time",
       "title": "Knowledge Cutoff",
       "type": "string"
-    },
-    "final_status": {
-      "enum": [
-        "verified",
-        "unresolvable"
-      ],
-      "title": "Final Status",
-      "type": "string"
-    },
-    "selected_candidate_ref": {
-      "anyOf": [
-        {
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Selected Candidate Ref"
-    },
-    "selected_candidate_origin": {
-      "anyOf": [
-        {
-          "enum": [
-            "p11_proposal",
-            "p12_correction"
-          ],
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Selected Candidate Origin"
-    },
-    "rationale": {
-      "minLength": 1,
-      "title": "Rationale",
-      "type": "string"
-    },
-    "unevaluable_reason": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Unevaluable Reason"
     }
   },
   "required": [
     "schema_version",
     "run_id",
     "source_id",
-    "forecast_component_id",
-    "proposal_artifact_id",
-    "review_artifact_id",
+    "reviewed_artifact_id",
     "prompt_execution",
     "input_hash",
-    "knowledge_cutoff",
-    "final_status",
-    "rationale"
+    "decision",
+    "knowledge_cutoff"
   ],
-  "title": "P13TargetResolutionAdjudicationOutput",
+  "title": "P06SpeakerAttributionReviewOutput",
   "type": "object"
 }

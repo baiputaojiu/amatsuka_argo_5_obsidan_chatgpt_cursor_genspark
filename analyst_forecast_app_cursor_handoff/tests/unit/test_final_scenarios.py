@@ -136,9 +136,7 @@ def test_scenario_g_direction_mfe(tmp_path: Path) -> None:
         ),
     )
     run_ns = SimpleNamespace(run_id=run.run_id, run_path=run.run_path)
-    component_id = import_locked_component(
-        settings, run_ns, source, tmp_path, direction="down"
-    )
+    component_id = import_locked_component(settings, run_ns, source, tmp_path, direction="down")
     result = evaluate_component(
         settings,
         component_id=component_id,

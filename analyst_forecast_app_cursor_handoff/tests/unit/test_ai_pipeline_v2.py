@@ -303,7 +303,10 @@ def _ingest_p05_p08(
     return p05, p08
 
 
-@pytest.mark.parametrize("prompt_id", ["P05", "P08", "P11", "P12", "P13"])
+@pytest.mark.parametrize(
+    "prompt_id",
+    ["P05", "P06", "P07", "P08", "P09", "P11", "P12", "P13"],
+)
 def test_pipeline_fixed_schema_matches_pydantic_model(prompt_id: str) -> None:
     fixed = json.loads(pipeline_schema_path(prompt_id).read_text(encoding="utf-8"))
     assert fixed == PIPELINE_MODELS[prompt_id].model_json_schema()
@@ -401,7 +404,7 @@ def test_p11_alone_never_verifies_mapping_and_saves_three_candidates(
         component = session.get(ForecastComponentRecord, p08.component_ids[0])
         assert component is not None
         assert component.target_mapping_id is None
-        assert component.target_resolution_status == "proposed"
+        assert component.target_resolution_status == "awaiting_review"
         saved = list(session.scalars(select(TargetResolutionCandidateRecord)))
         assert len(saved) == 3
         assert len(saved[0].instruments) == 2

@@ -297,6 +297,22 @@
       "default": null,
       "title": "Recommended Candidate Ref"
     },
+    "recommended_candidate_origin": {
+      "anyOf": [
+        {
+          "enum": [
+            "p11_proposal",
+            "p12_correction"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Recommended Candidate Origin"
+    },
     "unevaluable_reason": {
       "anyOf": [
         {

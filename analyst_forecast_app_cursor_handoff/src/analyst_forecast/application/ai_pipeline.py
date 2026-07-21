@@ -42,11 +42,15 @@ from analyst_forecast.schemas.pipeline import (
     PIPELINE_MODELS,
     CandidateReview,
     P05Output,
+    P06Output,
+    P07Output,
     P08Output,
+    P09Output,
     P11Output,
     P12Output,
     P13Output,
     PipelineOutput,
+    TargetResolutionCandidate,
     pipeline_schema_path,
 )
 
@@ -257,8 +261,16 @@ def _validate_references(
 
         if isinstance(payload, P05Output):
             issues.extend(_validate_p05(settings, session, source, payload))
+        elif isinstance(payload, P07Output):
+            issues.extend(_validate_p07(settings, session, source, payload))
+        elif isinstance(payload, P06Output):
+            issues.extend(
+                _validate_review_artifact(session, payload, allowed_prompts=("P05", "P07"))
+            )
         elif isinstance(payload, P08Output):
             issues.extend(_validate_p08(settings, session, source, payload))
+        elif isinstance(payload, P09Output):
+            issues.extend(_validate_review_artifact(session, payload, allowed_prompts=("P08",)))
         elif isinstance(payload, P11Output):
             issues.extend(_validate_p11(session, run, payload))
         elif isinstance(payload, P12Output):
@@ -268,39 +280,144 @@ def _validate_references(
     return issues
 
 
+def _validate_text_preprocess(
+    settings: AppSettings,
+    session: Session,
+    source: SourceRecord,
+    *,
+    run_id: str,
+    source_id: str,
+    input_hash: str,
+    segments: list[Any],
+    prompt_label: str,
+) -> list[ValidationIssue]:
+    from analyst_forecast.application.raw_sources import resolve_source_raw_path
+
+    raw_path = resolve_source_raw_path(settings, session, run_id=run_id, source=source)
+    if raw_path is None:
+        return [ValidationIssue("raw_missing", "登録済みraw原文がありません。")]
+    raw_bytes = raw_path.read_bytes()
+    raw_hash = hashlib.sha256(raw_bytes).hexdigest()
+    if raw_hash != source.raw_hash or input_hash != source.raw_hash:
+        return [
+            ValidationIssue(
+                "input_hash_mismatch",
+                f"{prompt_label} input_hashまたはraw SHA-256が登録値と一致しません。",
+                "$['input_hash']",
+            )
+        ]
+    raw_text = raw_bytes.decode("utf-8-sig")
+    issues: list[ValidationIssue] = []
+    for index, segment in enumerate(segments):
+        if raw_text[segment.raw_start_offset : segment.raw_end_offset] != segment.raw_text:
+            issues.append(
+                ValidationIssue(
+                    "segment_offset_mismatch",
+                    f"{prompt_label} segmentのraw offsetとraw_textが一致しません。",
+                    f"$['segments'][{index}]",
+                )
+            )
+    return issues
+
+
 def _validate_p05(
     settings: AppSettings,
     session: Session,
     source: SourceRecord,
     payload: P05Output,
 ) -> list[ValidationIssue]:
-    from analyst_forecast.application.raw_sources import resolve_source_raw_path
+    if source.medium != "youtube":
+        return [
+            ValidationIssue(
+                "medium_mismatch",
+                "P05はYouTube媒体専用です。blog/X/webはP07を使ってください。",
+            )
+        ]
+    issues = _validate_text_preprocess(
+        settings,
+        session,
+        source,
+        run_id=payload.run_id,
+        source_id=payload.source_id,
+        input_hash=payload.input_hash,
+        segments=list(payload.segments),
+        prompt_label="P05",
+    )
+    return issues
 
-    raw_path = resolve_source_raw_path(settings, session, run_id=payload.run_id, source=source)
-    if raw_path is None:
-        return [ValidationIssue("raw_missing", "登録済みraw原文がありません。")]
-    raw_bytes = raw_path.read_bytes()
-    raw_hash = hashlib.sha256(raw_bytes).hexdigest()
-    if raw_hash != source.raw_hash or payload.input_hash != source.raw_hash:
+
+def _validate_p07(
+    settings: AppSettings,
+    session: Session,
+    source: SourceRecord,
+    payload: P07Output,
+) -> list[ValidationIssue]:
+    if source.medium == "youtube":
+        return [
+            ValidationIssue(
+                "medium_mismatch",
+                "P07は非YouTube媒体専用です。YouTubeはP05を使ってください。",
+            )
+        ]
+    return _validate_text_preprocess(
+        settings,
+        session,
+        source,
+        run_id=payload.run_id,
+        source_id=payload.source_id,
+        input_hash=payload.input_hash,
+        segments=list(payload.segments),
+        prompt_label="P07",
+    )
+
+
+def _validate_review_artifact(
+    session: Session,
+    payload: P06Output | P09Output,
+    *,
+    allowed_prompts: tuple[str, ...],
+) -> list[ValidationIssue]:
+    reviewed = session.get(AiArtifactRecord, payload.reviewed_artifact_id)
+    if (
+        reviewed is None
+        or reviewed.prompt_id not in allowed_prompts
+        or reviewed.run_id != payload.run_id
+        or reviewed.source_id != payload.source_id
+    ):
+        return [
+            ValidationIssue(
+                "invalid_reviewed_artifact",
+                "レビュー対象artifactが存在しないか、案件・SOURCE・promptが一致しません。",
+                "$['reviewed_artifact_id']",
+            )
+        ]
+    if payload.input_hash != reviewed.output_hash:
         return [
             ValidationIssue(
                 "input_hash_mismatch",
-                "P05 input_hashまたはraw SHA-256が登録値と一致しません。",
+                "レビューinput_hashが対象artifactのoutput hashと一致しません。",
                 "$['input_hash']",
             )
         ]
-    raw_text = raw_bytes.decode("utf-8-sig")
-    issues: list[ValidationIssue] = []
-    for index, segment in enumerate(payload.segments):
-        if raw_text[segment.raw_start_offset : segment.raw_end_offset] != segment.raw_text:
-            issues.append(
-                ValidationIssue(
-                    "segment_offset_mismatch",
-                    "P05 segmentのraw offsetとraw_textが一致しません。",
-                    f"$['segments'][{index}]",
-                )
+    if reviewed.classification not in {"needs_review", "accepted"}:
+        return [
+            ValidationIssue(
+                "reviewed_not_reviewable",
+                "レビュー対象のclassificationが不正です。",
+                "$['reviewed_artifact_id']",
             )
-    return issues
+        ]
+    if payload.decision == "correct" and payload.corrected_payload is not None:
+        model_class = PIPELINE_MODELS.get(reviewed.prompt_id)
+        if model_class is None:
+            return [
+                ValidationIssue("unsupported_corrected_prompt", "修正payloadのpromptが未対応です。")
+            ]
+        try:
+            model_class.model_validate(payload.corrected_payload)
+        except ValidationError as error:
+            return _pydantic_issues(error)
+    return []
 
 
 def _validate_p08(
@@ -309,33 +426,71 @@ def _validate_p08(
     source: SourceRecord,
     payload: P08Output,
 ) -> list[ValidationIssue]:
-    p05_artifact = session.get(AiArtifactRecord, payload.p05_artifact_id)
+    upstream_id = payload.upstream_artifact_id or payload.p05_artifact_id
+    upstream_prompt = payload.upstream_prompt_id or ("P05" if payload.p05_artifact_id else None)
+    if upstream_id is None or upstream_prompt is None:
+        return [
+            ValidationIssue(
+                "missing_upstream",
+                "P08にはupstream_artifact_id（または互換のp05_artifact_id）が必要です。",
+            )
+        ]
+    upstream = session.get(AiArtifactRecord, upstream_id)
+    link = session.get(
+        RunSourceRecord,
+        {"run_id": payload.run_id, "source_id": payload.source_id},
+    )
+    run_ok = False
+    if upstream is not None and (
+        upstream.run_id == payload.run_id
+        or (
+            link is not None
+            and link.latest_ai_artifact_id == upstream.ai_artifact_id
+            and upstream.source_id == payload.source_id
+        )
+    ):
+        run_ok = True
     if (
-        p05_artifact is None
-        or p05_artifact.prompt_id != "P05"
-        or p05_artifact.run_id != payload.run_id
-        or p05_artifact.source_id != payload.source_id
+        upstream is None
+        or upstream.prompt_id != upstream_prompt
+        or upstream.prompt_id not in {"P05", "P07"}
+        or not run_ok
+        or upstream.source_id != payload.source_id
     ):
         return [
             ValidationIssue(
-                "invalid_p05_reference",
-                "P08が参照するP05成果物が存在しないか、案件・SOURCEが一致しません。",
-                "$['p05_artifact_id']",
+                "invalid_upstream_reference",
+                "P08が参照する上流成果物が存在しないか、案件・SOURCE・promptが一致しません。",
+                "$['upstream_artifact_id']",
             )
         ]
-    if p05_artifact.classification != "accepted":
+    if source.medium == "youtube" and upstream.prompt_id != "P05":
         return [
             ValidationIssue(
-                "p05_not_accepted",
-                "P05成果物のAIレビューが未解決です。",
-                "$['p05_artifact_id']",
+                "medium_upstream_mismatch",
+                "YouTube媒体のP08は受理済みP05だけを上流にできます。",
             )
         ]
-    if payload.input_hash != p05_artifact.output_hash:
+    if source.medium != "youtube" and upstream.prompt_id != "P07":
+        return [
+            ValidationIssue(
+                "medium_upstream_mismatch",
+                "非YouTube媒体のP08は受理済みP07だけを上流にできます。",
+            )
+        ]
+    if upstream.classification != "accepted":
+        return [
+            ValidationIssue(
+                "upstream_not_accepted",
+                "上流成果物のAIレビューが未解決です。",
+                "$['upstream_artifact_id']",
+            )
+        ]
+    if payload.input_hash != upstream.output_hash:
         return [
             ValidationIssue(
                 "input_hash_mismatch",
-                "P08 input_hashがP05 output hashと一致しません。",
+                "P08 input_hashが上流artifactのoutput hashと一致しません。",
                 "$['input_hash']",
             )
         ]
@@ -348,8 +503,49 @@ def _validate_p08(
     if hashlib.sha256(raw_bytes).hexdigest() != source.raw_hash:
         return [ValidationIssue("raw_hash_mismatch", "raw原文が変更されています。")]
     raw_text = raw_bytes.decode("utf-8-sig")
+    segments = list(
+        session.scalars(
+            select(SegmentRecord).where(SegmentRecord.ai_artifact_id == upstream.ai_artifact_id)
+        )
+    )
+    segment_by_ref = {item.local_ref: item for item in segments}
     issues: list[ValidationIssue] = []
     for forecast_index, forecast in enumerate(payload.forecasts):
+        if forecast.made_at > forecast.publicly_available_at:
+            issues.append(
+                ValidationIssue(
+                    "made_at_after_public",
+                    "made_atはpublicly_available_at以前にしてください。",
+                    f"$['forecasts'][{forecast_index}]",
+                )
+            )
+        if forecast.upstream_segment_refs:
+            for ref in forecast.upstream_segment_refs:
+                segment = segment_by_ref.get(ref)
+                if segment is None:
+                    issues.append(
+                        ValidationIssue(
+                            "unknown_segment_ref",
+                            f"上流segment参照が存在しません: {ref}",
+                            f"$['forecasts'][{forecast_index}]['upstream_segment_refs']",
+                        )
+                    )
+                    continue
+                for evidence_index, evidence in enumerate(forecast.evidence):
+                    issue_path = f"$['forecasts'][{forecast_index}]['evidence'][{evidence_index}]"
+                    if not (
+                        segment.raw_start_offset
+                        <= evidence.start_offset
+                        < evidence.end_offset
+                        <= segment.raw_end_offset
+                    ):
+                        issues.append(
+                            ValidationIssue(
+                                "evidence_outside_segment",
+                                "引用offsetが申告segmentの範囲外です。",
+                                issue_path,
+                            )
+                        )
         for evidence_index, evidence in enumerate(forecast.evidence):
             issue_path = f"$['forecasts'][{forecast_index}]['evidence'][{evidence_index}]"
             if evidence.source_id != payload.source_id:
@@ -474,6 +670,30 @@ def _validate_p12(
         return [ValidationIssue("unknown_component", "P12の構成予想IDが存在しません。")]
     _, issuance, _ = context
     issues: list[ValidationIssue] = []
+    proposal_component_ids = set(
+        session.scalars(
+            select(TargetResolutionCandidateRecord.forecast_component_id).where(
+                TargetResolutionCandidateRecord.proposal_artifact_id == proposal.ai_artifact_id
+            )
+        )
+    )
+    if proposal.payload.get("forecast_component_id") not in {
+        None,
+        payload.forecast_component_id,
+    }:
+        issues.append(
+            ValidationIssue(
+                "component_mismatch",
+                "P12が参照するP11は同じforecast_component_idでなければなりません。",
+            )
+        )
+    if proposal_component_ids and payload.forecast_component_id not in proposal_component_ids:
+        issues.append(
+            ValidationIssue(
+                "component_mismatch",
+                "P12が別componentのP11を参照しています。",
+            )
+        )
     if issuance.analyst_id != run.analyst_id or issuance.source_id != payload.source_id:
         issues.append(
             ValidationIssue(
@@ -529,6 +749,28 @@ def _validate_p13(
     if context is None:
         return [ValidationIssue("unknown_component", "P13の構成予想IDが存在しません。")]
     _, issuance, _ = context
+    review_payload = review.payload or {}
+    if review_payload.get("proposal_artifact_id") not in {None, payload.proposal_artifact_id}:
+        return [
+            ValidationIssue(
+                "p11_p12_pair_mismatch",
+                "P13が参照するP12のproposal IDがP13のproposal IDと一致しません。",
+            )
+        ]
+    if review_payload.get("forecast_component_id") not in {None, payload.forecast_component_id}:
+        return [
+            ValidationIssue(
+                "component_mismatch",
+                "P13のP12参照が別componentです。",
+            )
+        ]
+    if proposal.payload.get("forecast_component_id") not in {None, payload.forecast_component_id}:
+        return [
+            ValidationIssue(
+                "component_mismatch",
+                "P13のP11参照が別componentです。",
+            )
+        ]
     if issuance.analyst_id != run.analyst_id:
         return [ValidationIssue("component_context_mismatch", "P13の案件参照が不正です。")]
     if _as_utc(payload.knowledge_cutoff) > _as_utc(issuance.made_at):
@@ -583,6 +825,28 @@ def _review_issues(
                         f"$['segments'][{index}]",
                     )
                 )
+    elif isinstance(payload, P07Output):
+        for index, text_segment in enumerate(payload.segments):
+            if (
+                text_segment.author_status == "unknown"
+                or text_segment.author_confidence < settings.confidence_review_threshold
+                or text_segment.review_status == "needs_review"
+            ):
+                issues.append(
+                    ValidationIssue(
+                        "author_review_required",
+                        "著者がunknownまたは低確信度のため別AIレビューが必要です。",
+                        f"$['segments'][{index}]",
+                    )
+                )
+            if text_segment.importance == "high":
+                issues.append(
+                    ValidationIssue(
+                        "high_importance",
+                        f"高重要度の理由: {text_segment.high_importance_reason}",
+                        f"$['segments'][{index}]",
+                    )
+                )
     elif isinstance(payload, P08Output):
         for index, forecast in enumerate(payload.forecasts):
             if forecast.extraction_confidence < settings.confidence_review_threshold:
@@ -598,6 +862,14 @@ def _review_issues(
                     ValidationIssue(
                         "high_importance",
                         f"高重要度の理由: {forecast.high_importance_reason}",
+                        f"$['forecasts'][{index}]",
+                    )
+                )
+            if forecast.speaker_attribution_status == "uncertain":
+                issues.append(
+                    ValidationIssue(
+                        "attribution_uncertain",
+                        "話者帰属がuncertainのため別AIレビューが必要です。",
                         f"$['forecasts'][{index}]",
                     )
                 )
@@ -662,6 +934,16 @@ def _insert_pipeline_payload(
 
         if isinstance(payload, P05Output):
             _insert_p05(session, settings, payload, artifact)
+        elif isinstance(payload, P07Output):
+            _insert_p07(session, settings, payload, artifact)
+        elif isinstance(payload, P06Output | P09Output):
+            issuance_ids, component_ids = _apply_review_decision(
+                session,
+                settings,
+                payload=payload,
+                review_artifact=artifact,
+                classification=classification,
+            )
         elif isinstance(payload, P08Output):
             if classification is AiIngestStatus.ACCEPTED:
                 issuance_ids, component_ids = _insert_p08(session, payload, artifact)
@@ -707,6 +989,47 @@ def _insert_p05(
                 high_importance_reason=segment.high_importance_reason,
             )
         )
+    _update_preprocess_link(session, settings, payload, artifact, prompt_label="P05")
+
+
+def _insert_p07(
+    session: Session,
+    settings: AppSettings,
+    payload: P07Output,
+    artifact: AiArtifactRecord,
+) -> None:
+    for segment in payload.segments:
+        session.add(
+            SegmentRecord(
+                segment_id=next_id(session, "SEG-", width=6, sequence_key="SEGMENT"),
+                ai_artifact_id=artifact.ai_artifact_id,
+                source_id=payload.source_id,
+                local_ref=segment.segment_ref,
+                sequence_number=segment.sequence_number,
+                raw_start_offset=segment.raw_start_offset,
+                raw_end_offset=segment.raw_end_offset,
+                raw_text=segment.raw_text,
+                normalized_text=segment.normalized_text,
+                speaker_status=segment.author_status,
+                speaker_candidate=segment.author_candidate,
+                speaker_confidence=segment.author_confidence,
+                attribution_basis=f"{segment.statement_kind}: {segment.attribution_basis}",
+                review_status=segment.review_status,
+                importance=segment.importance,
+                high_importance_reason=segment.high_importance_reason,
+            )
+        )
+    _update_preprocess_link(session, settings, payload, artifact, prompt_label="P07")
+
+
+def _update_preprocess_link(
+    session: Session,
+    settings: AppSettings,
+    payload: P05Output | P07Output,
+    artifact: AiArtifactRecord,
+    *,
+    prompt_label: str,
+) -> None:
     link = session.get(
         RunSourceRecord,
         {"run_id": payload.run_id, "source_id": payload.source_id},
@@ -723,7 +1046,7 @@ def _insert_p05(
             / "02_sources"
             / source.medium
             / "processed"
-            / f"P05-{artifact.ai_artifact_id}.json"
+            / f"{prompt_label}-{artifact.ai_artifact_id}.json"
         )
         _atomic_json(processed, artifact.payload)
 
@@ -736,12 +1059,13 @@ def _insert_p08(
     run = session.get(RunRecord, payload.run_id)
     if run is None:
         raise ValueError("P08取込み中に案件が消失しました")
+    formal_forecasts = [forecast for forecast in payload.forecasts if _is_formal_forecast(forecast)]
     issuance_ids: list[str] = []
     component_ids: list[str] = []
     groups: dict[str, ForecastGroupRecord] = {}
-    for group_ref in dict.fromkeys(forecast.forecast_group_ref for forecast in payload.forecasts):
+    for group_ref in dict.fromkeys(forecast.forecast_group_ref for forecast in formal_forecasts):
         members = [
-            forecast for forecast in payload.forecasts if forecast.forecast_group_ref == group_ref
+            forecast for forecast in formal_forecasts if forecast.forecast_group_ref == group_ref
         ]
         first = min(members, key=lambda item: item.made_at)
         latest = max(members, key=lambda item: item.made_at)
@@ -775,7 +1099,7 @@ def _insert_p08(
         groups[group_ref] = group
     session.flush()
 
-    for forecast in payload.forecasts:
+    for forecast in formal_forecasts:
         issuance_id = next_id(session, "FCI-", width=6, sequence_key="FORECAST_ISSUANCE")
         issuance_ids.append(issuance_id)
         issuance = ForecastIssuanceRecord(
@@ -860,6 +1184,158 @@ def _insert_p08(
     return issuance_ids, component_ids
 
 
+def _is_formal_forecast(forecast: Any) -> bool:
+    if forecast.statement_kind == "third_party_summary":
+        return False
+    return forecast.speaker_attribution_status not in {"not_target", "uncertain"}
+
+
+def _apply_review_decision(
+    session: Session,
+    settings: AppSettings,
+    *,
+    payload: P06Output | P09Output,
+    review_artifact: AiArtifactRecord,
+    classification: AiIngestStatus,
+) -> tuple[list[str], list[str]]:
+    del classification  # review自身は通常accepted分類
+    reviewed = session.get(AiArtifactRecord, payload.reviewed_artifact_id)
+    if reviewed is None:
+        raise ValueError("レビュー対象artifactが消失しました")
+    # 冪等: 既に同じreviewで解決済みなら二重materializeしない
+    if reviewed.resolved_by_artifact_id == review_artifact.ai_artifact_id:
+        existing = list(
+            session.scalars(
+                select(ForecastIssuanceRecord).where(
+                    ForecastIssuanceRecord.ai_artifact_id == reviewed.ai_artifact_id
+                )
+            )
+        )
+        if not existing and reviewed.supersedes_artifact_id:
+            existing = list(
+                session.scalars(
+                    select(ForecastIssuanceRecord).where(
+                        ForecastIssuanceRecord.ai_artifact_id == reviewed.supersedes_artifact_id
+                    )
+                )
+            )
+        resolved_component_ids = [
+            component.forecast_component_id
+            for issuance in existing
+            for component in session.scalars(
+                select(ForecastComponentRecord).where(
+                    ForecastComponentRecord.forecast_issuance_id == issuance.forecast_issuance_id
+                )
+            )
+        ]
+        return [item.forecast_issuance_id for item in existing], resolved_component_ids
+
+    issuance_ids: list[str] = []
+    component_ids: list[str] = []
+    if payload.decision == "accept":
+        reviewed.resolution_status = "resolved"
+        reviewed.resolved_by_artifact_id = review_artifact.ai_artifact_id
+        reviewed.classification = "accepted"
+        review_artifact.resolution_status = "resolved"
+        if reviewed.prompt_id == "P08":
+            p08 = P08Output.model_validate(reviewed.payload)
+            issuance_ids, component_ids = _insert_p08(session, p08, reviewed)
+            _update_run_source_after_p08(session, p08, reviewed, AiIngestStatus.ACCEPTED)
+        else:
+            link = session.get(
+                RunSourceRecord,
+                {"run_id": payload.run_id, "source_id": payload.source_id},
+            )
+            if link is not None:
+                link.processing_status = "accepted"
+                link.latest_ai_artifact_id = reviewed.ai_artifact_id
+    elif payload.decision == "correct":
+        assert payload.corrected_payload is not None
+        corrected_hash = hashlib.sha256(
+            json.dumps(payload.corrected_payload, ensure_ascii=False, sort_keys=True).encode(
+                "utf-8"
+            )
+        ).hexdigest()
+        existing_corrected = session.scalar(
+            select(AiArtifactRecord).where(AiArtifactRecord.output_hash == corrected_hash)
+        )
+        if existing_corrected is not None:
+            corrected = existing_corrected
+        else:
+            corrected_id = next_id(session, "AIF-", width=6, sequence_key="AI_ARTIFACT")
+            execution_id = next_id(session, "PEX-", width=6, sequence_key="PROMPT_EXECUTION")
+            session.add(
+                PromptExecutionRecord(
+                    prompt_execution_id=execution_id,
+                    ai_import_id=None,
+                    run_id=payload.run_id,
+                    prompt_id=reviewed.prompt_id,
+                    prompt_version=payload.prompt_execution.prompt_version,
+                    environment=payload.prompt_execution.environment,
+                    model=payload.prompt_execution.model,
+                    input_files=[payload.source_id, corrected_hash],
+                    output_file=review_artifact.classified_file_path,
+                    executed_at=payload.prompt_execution.executed_at,
+                    validation_status="accepted",
+                )
+            )
+            session.flush()
+            corrected = AiArtifactRecord(
+                ai_artifact_id=corrected_id,
+                run_id=payload.run_id,
+                source_id=payload.source_id,
+                prompt_execution_id=execution_id,
+                prompt_id=reviewed.prompt_id,
+                schema_version=str(payload.corrected_payload.get("schema_version", "2.0.0")),
+                input_hash=str(payload.corrected_payload.get("input_hash", reviewed.input_hash)),
+                output_hash=corrected_hash,
+                classified_file_path=review_artifact.classified_file_path,
+                classification="accepted",
+                resolution_status="accepted",
+                confidence=None,
+                importance="normal",
+                knowledge_cutoff=payload.knowledge_cutoff,
+                supersedes_artifact_id=reviewed.ai_artifact_id,
+                resolved_by_artifact_id=review_artifact.ai_artifact_id,
+                payload=dict(payload.corrected_payload),
+            )
+            session.add(corrected)
+            session.flush()
+            model_class = PIPELINE_MODELS[reviewed.prompt_id]
+            corrected_model = model_class.model_validate(payload.corrected_payload)
+            if isinstance(corrected_model, P05Output):
+                _insert_p05(session, settings, corrected_model, corrected)
+            elif isinstance(corrected_model, P07Output):
+                _insert_p07(session, settings, corrected_model, corrected)
+            elif isinstance(corrected_model, P08Output):
+                issuance_ids, component_ids = _insert_p08(session, corrected_model, corrected)
+                _update_run_source_after_p08(
+                    session, corrected_model, corrected, AiIngestStatus.ACCEPTED
+                )
+        reviewed.classification = "superseded"
+        reviewed.resolution_status = "superseded"
+        reviewed.resolved_by_artifact_id = review_artifact.ai_artifact_id
+        reviewed.supersedes_artifact_id = None
+        review_artifact.resolution_status = "resolved"
+        link = session.get(
+            RunSourceRecord,
+            {"run_id": payload.run_id, "source_id": payload.source_id},
+        )
+        if link is not None and reviewed.prompt_id in {"P05", "P07"}:
+            link.processing_status = "accepted"
+            link.latest_ai_artifact_id = corrected.ai_artifact_id
+    elif payload.decision == "reject":
+        reviewed.classification = "rejected"
+        reviewed.resolution_status = "rejected"
+        reviewed.resolved_by_artifact_id = review_artifact.ai_artifact_id
+        review_artifact.resolution_status = "resolved"
+    else:
+        reviewed.resolution_status = "unresolved"
+        reviewed.resolved_by_artifact_id = review_artifact.ai_artifact_id
+        review_artifact.resolution_status = "unresolved"
+    return issuance_ids, component_ids
+
+
 def _update_run_source_after_p08(
     session: Session,
     payload: P08Output,
@@ -912,7 +1388,8 @@ def _insert_p11(
         )
     component = session.get(ForecastComponentRecord, payload.forecast_component_id)
     if component is not None:
-        component.target_resolution_status = "proposed"
+        # P11受理後は独立P12待ち。proposedのままにするとworkflowがP11を繰り返す。
+        component.target_resolution_status = "awaiting_review"
 
 
 def _insert_p12(
@@ -956,6 +1433,7 @@ def _insert_p12(
         raise ValueError("P12のcomponentが消失しました")
     if payload.resolution_status == "agreed":
         assert payload.recommended_candidate_ref is not None
+        origin = payload.recommended_candidate_origin or "p11_proposal"
         candidate = session.scalar(
             select(TargetResolutionCandidateRecord).where(
                 TargetResolutionCandidateRecord.proposal_artifact_id
@@ -965,6 +1443,21 @@ def _insert_p12(
         )
         if candidate is None:
             raise ValueError("P12推奨candidateが消失しました")
+        corrected: TargetResolutionCandidate | None = None
+        if origin == "p12_correction":
+            matched_review = next(
+                (
+                    item
+                    for item in payload.reviews
+                    if item.candidate_ref == payload.recommended_candidate_ref
+                    and item.decision == "correct"
+                    and item.corrected_candidate is not None
+                ),
+                None,
+            )
+            if matched_review is None or matched_review.corrected_candidate is None:
+                raise ValueError("P12修正候補が見つかりません")
+            corrected = matched_review.corrected_candidate
         _lock_candidate_mapping(
             session,
             component=component,
@@ -973,6 +1466,8 @@ def _insert_p12(
             review_artifact_id=artifact.ai_artifact_id,
             adjudication_artifact_id=None,
             review_result=_review_summary(payload.reviews),
+            candidate_origin=origin,
+            corrected_candidate=corrected,
         )
         artifact.resolution_status = "resolved"
     elif payload.resolution_status == "unresolved":
@@ -1018,6 +1513,7 @@ def _insert_p13(
         raise ValueError("P13のcomponentが消失しました")
     if payload.final_status == "verified":
         assert payload.selected_candidate_ref is not None
+        origin = payload.selected_candidate_origin or "p11_proposal"
         candidate = session.scalar(
             select(TargetResolutionCandidateRecord).where(
                 TargetResolutionCandidateRecord.proposal_artifact_id
@@ -1027,6 +1523,18 @@ def _insert_p13(
         )
         if candidate is None:
             raise ValueError("P13選択candidateが消失しました")
+        corrected: TargetResolutionCandidate | None = None
+        if origin == "p12_correction":
+            review_row = session.scalar(
+                select(TargetResolutionReviewRecord).where(
+                    TargetResolutionReviewRecord.review_artifact_id == payload.review_artifact_id,
+                    TargetResolutionReviewRecord.candidate_ref == payload.selected_candidate_ref,
+                    TargetResolutionReviewRecord.decision == "correct",
+                )
+            )
+            if review_row is None or not review_row.corrected_candidate:
+                raise ValueError("P13が参照するP12修正候補がありません")
+            corrected = TargetResolutionCandidate.model_validate(review_row.corrected_candidate)
         _lock_candidate_mapping(
             session,
             component=component,
@@ -1035,6 +1543,8 @@ def _insert_p13(
             review_artifact_id=payload.review_artifact_id,
             adjudication_artifact_id=artifact.ai_artifact_id,
             review_result=payload.rationale,
+            candidate_origin=origin,
+            corrected_candidate=corrected,
         )
     else:
         _lock_unresolvable_mapping(
@@ -1066,11 +1576,31 @@ def _lock_candidate_mapping(
     review_artifact_id: str,
     adjudication_artifact_id: str | None,
     review_result: str,
+    candidate_origin: str = "p11_proposal",
+    corrected_candidate: TargetResolutionCandidate | None = None,
 ) -> None:
-    primary = candidate.instruments[0]
+    if corrected_candidate is not None:
+        instruments = [
+            instrument.model_dump(mode="json") for instrument in corrected_candidate.instruments
+        ]
+        canonical_name = corrected_candidate.canonical_name
+        target_type: str = corrected_candidate.target_type
+        mapping_method: str = corrected_candidate.mapping_method
+        knowledge_cutoff = corrected_candidate.knowledge_cutoff
+        source_evidence = corrected_candidate.source_evidence
+        mapping_status = "corrected"
+    else:
+        instruments = list(candidate.instruments)
+        canonical_name = candidate.canonical_name
+        target_type = candidate.target_type
+        mapping_method = candidate.mapping_method
+        knowledge_cutoff = candidate.knowledge_cutoff
+        source_evidence = candidate.source_evidence
+        mapping_status = "verified"
+    primary = instruments[0]
     target = session.scalar(
         select(TargetRecord).where(
-            TargetRecord.canonical_name == candidate.canonical_name,
+            TargetRecord.canonical_name == canonical_name,
             TargetRecord.ticker == primary["symbol"],
             TargetRecord.currency == primary["currency"],
         )
@@ -1078,9 +1608,9 @@ def _lock_candidate_mapping(
     if target is None:
         target = TargetRecord(
             target_id=next_id(session, "TGT-", width=6, sequence_key="TARGET"),
-            raw_label=component.raw_target_label or candidate.canonical_name,
-            canonical_name=candidate.canonical_name,
-            target_type=candidate.target_type,
+            raw_label=component.raw_target_label or canonical_name,
+            canonical_name=canonical_name,
+            target_type=target_type,
             ticker=primary["symbol"],
             exchange=primary.get("exchange"),
             currency=primary["currency"],
@@ -1089,8 +1619,10 @@ def _lock_candidate_mapping(
         session.flush()
     mapping_data = {
         "candidate_id": candidate.target_resolution_candidate_id,
-        "instruments": candidate.instruments,
-        "knowledge_cutoff": candidate.knowledge_cutoff.isoformat(),
+        "candidate_origin": candidate_origin,
+        "instruments": instruments,
+        "original_instruments": candidate.instruments,
+        "knowledge_cutoff": knowledge_cutoff.isoformat(),
         "proposal_artifact_id": proposal_artifact_id,
         "review_artifact_id": review_artifact_id,
         "adjudication_artifact_id": adjudication_artifact_id,
@@ -1101,23 +1633,23 @@ def _lock_candidate_mapping(
     mapping = TargetMappingRecord(
         target_mapping_id=next_id(session, "MAP-", width=6, sequence_key="TARGET_MAPPING"),
         target_id=target.target_id,
-        mapping_method=candidate.mapping_method,
-        evaluation_instruments=[str(instrument["symbol"]) for instrument in candidate.instruments],
-        weights=[float(instrument["weight"]) for instrument in candidate.instruments],
-        knowledge_cutoff=candidate.knowledge_cutoff,
-        source_evidence=candidate.source_evidence,
+        mapping_method=mapping_method,
+        evaluation_instruments=instruments,
+        weights=[float(instrument["weight"]) for instrument in instruments],
+        knowledge_cutoff=knowledge_cutoff,
+        source_evidence=source_evidence,
         proposal_model=_artifact_model(session, proposal_artifact_id),
         review_result=review_result,
         proposal_artifact_id=proposal_artifact_id,
         review_artifact_id=review_artifact_id,
         adjudication_artifact_id=adjudication_artifact_id,
-        mapping_status="verified",
+        mapping_status=mapping_status,
         mapping_hash=mapping_hash,
         locked_at=datetime.now(UTC),
     )
     session.add(mapping)
     session.flush()
-    candidate.candidate_status = "verified"
+    candidate.candidate_status = mapping_status
     component.target_id = target.target_id
     component.target_mapping_id = mapping.target_mapping_id
     component.target_resolution_status = "locked"
@@ -1222,6 +1754,8 @@ def _initial_resolution_status(
 ) -> str:
     if classification is AiIngestStatus.NEEDS_REVIEW:
         return "needs_review"
+    if isinstance(payload, (P06Output, P09Output)):
+        return payload.decision if payload.decision != "accept" else "resolved"
     if isinstance(payload, P11Output):
         return "awaiting_review"
     if isinstance(payload, P12Output) and payload.resolution_status == "disagreed":
@@ -1232,8 +1766,12 @@ def _initial_resolution_status(
 def _payload_confidence(payload: PipelineOutput) -> float | None:
     if isinstance(payload, P05Output):
         return min(segment.speaker_confidence for segment in payload.segments)
+    if isinstance(payload, P07Output):
+        return min(segment.author_confidence for segment in payload.segments)
     if isinstance(payload, P08Output) and payload.forecasts:
         return min(forecast.extraction_confidence for forecast in payload.forecasts)
+    if isinstance(payload, (P06Output, P09Output)) and payload.findings:
+        return None
     if isinstance(payload, P11Output) and payload.candidates:
         return max(candidate.confidence for candidate in payload.candidates)
     if isinstance(payload, P12Output) and payload.reviews:
@@ -1243,7 +1781,7 @@ def _payload_confidence(payload: PipelineOutput) -> float | None:
 
 def _payload_importance(payload: PipelineOutput) -> str:
     items: list[Any]
-    if isinstance(payload, P05Output):
+    if isinstance(payload, (P05Output, P07Output)):
         items = list(payload.segments)
     elif isinstance(payload, P08Output):
         items = list(payload.forecasts)
@@ -1254,7 +1792,7 @@ def _payload_importance(payload: PipelineOutput) -> str:
 
 def _payload_importance_reason(payload: PipelineOutput) -> str | None:
     items: list[Any]
-    if isinstance(payload, P05Output):
+    if isinstance(payload, (P05Output, P07Output)):
         items = list(payload.segments)
     elif isinstance(payload, P08Output):
         items = list(payload.forecasts)

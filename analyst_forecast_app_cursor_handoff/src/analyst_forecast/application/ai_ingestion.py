@@ -74,7 +74,9 @@ def ingest_ai_output(settings: AppSettings, input_path: Path) -> AiIngestResult:
         dispatch_payload = json.loads(raw_bytes.decode("utf-8-sig"))
     except (UnicodeDecodeError, json.JSONDecodeError):
         dispatch_payload = None
-    if isinstance(dispatch_payload, dict) and dispatch_payload.get("schema_version") == "2.0.0":
+    if isinstance(dispatch_payload, dict) and str(
+        dispatch_payload.get("schema_version", "")
+    ).startswith("2."):
         from analyst_forecast.application.ai_pipeline import ingest_pipeline_output
 
         return ingest_pipeline_output(
@@ -657,8 +659,7 @@ def _get_or_create_target_mapping(
         if claimed in {"verified", "corrected"}:
             stored_status = "legacy_inline_review"
             review_text = (
-                f"[legacy_inline_review claimed={claimed}] "
-                f"{target_output.review_result or ''}"
+                f"[legacy_inline_review claimed={claimed}] {target_output.review_result or ''}"
             ).strip()
             locked_at = None
         else:

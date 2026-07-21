@@ -10,14 +10,13 @@
 {{purpose}}
 
 ## 使用タイミング
-`NEXT_ACTIONS.md` がこの処理を指示したとき。実SOURCE IDは `analyst-forecast status {{run_id}}` で確認し、`<SOURCE_ID>` を推測しないこと。
+needs_review の P08 があるとき。
 
 ## 推奨AI環境
 {{environment}}
 
 ## 使用モデル
 {{model_text}}
-（廉価モデルへの自動切替は禁止。未設定なら設定コマンドを先に実行すること。）
 
 ## 入力ファイル
 {{input_instruction}}
@@ -26,16 +25,15 @@
 `03_ai_outputs/inbox/{{output_name}}`。`01_prompts/schemas/{{schema_name}}` に厳密に従う。
 
 ## 判定基準（必須）
-- 話者交代、司会者の質問、相づち、他出演者を混同しない。
-- 調査対象者の過去発言や動画メタデータは根拠として記録し、後発情報は使わない。
-- knowledge_cutoff は発言時点以前に制限する。
-- 判断不能は unknown / needs_review とし、無理に確定しない。
+- 否定誤読、条件欠落、本命誤認、時期・程度の捏造を重点確認。
+- accept / correct / reject / unresolved。
+- correct 時は P08 Schema の完全な corrected_payload。
 
 ## 禁止事項・注意事項
 {{warning}}
 
 ## 完了条件
-入力、引用、判断根拠、未解決事項が出力に含まれる。
+decision と findings、必要なら corrected_payload が揃う。
 
 ## コピペ用依頼文
 この案件の{{title}}を実行してください。上記の禁止事項と出力先を厳守してください。

@@ -10,14 +10,13 @@
 {{purpose}}
 
 ## 使用タイミング
-`NEXT_ACTIONS.md` がこの処理を指示したとき。実SOURCE IDは `analyst-forecast status {{run_id}}` で確認し、`<SOURCE_ID>` を推測しないこと。
+blog / X / web の raw が登録され、NEXT_ACTIONS が前処理を指示したとき。
 
 ## 推奨AI環境
 {{environment}}
 
 ## 使用モデル
 {{model_text}}
-（廉価モデルへの自動切替は禁止。未設定なら設定コマンドを先に実行すること。）
 
 ## 入力ファイル
 {{input_instruction}}
@@ -26,16 +25,16 @@
 `03_ai_outputs/inbox/{{output_name}}`。`01_prompts/schemas/{{schema_name}}` に厳密に従う。
 
 ## 判定基準（必須）
-- 話者交代、司会者の質問、相づち、他出演者を混同しない。
-- 調査対象者の過去発言や動画メタデータは根拠として記録し、後発情報は使わない。
-- knowledge_cutoff は発言時点以前に制限する。
-- 判断不能は unknown / needs_review とし、無理に確定しない。
+- statement_kind を区別: author_own / direct_quote / third_party_summary / repost / reply。
+- 本人執筆・直接引用だけを正式予想候補の上流とし、記者要約・第三者要約は区別して保持する。
+- 引用投稿・返信・転載の関係を根拠に残す。
+- knowledge_cutoff は公開・発言時点を越えない。
 
 ## 禁止事項・注意事項
 {{warning}}
 
 ## 完了条件
-入力、引用、判断根拠、未解決事項が出力に含まれる。
+segmentごとの著者候補、statement_kind、根拠が揃う。
 
 ## コピペ用依頼文
 この案件の{{title}}を実行してください。上記の禁止事項と出力先を厳守してください。

@@ -268,6 +268,17 @@
           "title": "Publicly Available At",
           "type": "string"
         },
+        "made_at_source": {
+          "default": "unknown",
+          "enum": [
+            "explicit",
+            "source_metadata",
+            "context_inferred",
+            "unknown"
+          ],
+          "title": "Made At Source",
+          "type": "string"
+        },
         "forecast_type": {
           "enum": [
             "directional",
@@ -363,6 +374,75 @@
           "minItems": 1,
           "title": "Components",
           "type": "array"
+        },
+        "upstream_segment_refs": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
+            "type": "string"
+          },
+          "title": "Upstream Segment Refs",
+          "type": "array"
+        },
+        "speaker_candidate": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Speaker Candidate"
+        },
+        "speaker_attribution_status": {
+          "default": "legacy_unknown",
+          "enum": [
+            "target_confirmed",
+            "uncertain",
+            "not_target",
+            "legacy_unknown"
+          ],
+          "title": "Speaker Attribution Status",
+          "type": "string"
+        },
+        "attribution_confidence": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attribution Confidence"
+        },
+        "attribution_basis": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attribution Basis"
+        },
+        "statement_kind": {
+          "default": "legacy_unknown",
+          "enum": [
+            "direct_statement",
+            "direct_quote",
+            "third_party_summary",
+            "legacy_unknown"
+          ],
+          "title": "Statement Kind",
+          "type": "string"
         }
       },
       "required": [
@@ -436,12 +516,16 @@
       "type": "string"
     }
   },
-  "$id": "https://local.invalid/schemas/p08-forecast-extraction-2.0.0.json",
+  "$id": "https://local.invalid/schemas/p08-forecast-extraction-2.1.0.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "const": "2.0.0",
+      "default": "2.1.0",
+      "enum": [
+        "2.0.0",
+        "2.1.0"
+      ],
       "title": "Schema Version",
       "type": "string"
     },
@@ -456,9 +540,46 @@
       "type": "string"
     },
     "p05_artifact_id": {
-      "pattern": "^AIF-\\d{6}$",
-      "title": "P05 Artifact Id",
-      "type": "string"
+      "anyOf": [
+        {
+          "pattern": "^AIF-\\d{6}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "P05 Artifact Id"
+    },
+    "upstream_artifact_id": {
+      "anyOf": [
+        {
+          "pattern": "^AIF-\\d{6}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Upstream Artifact Id"
+    },
+    "upstream_prompt_id": {
+      "anyOf": [
+        {
+          "enum": [
+            "P05",
+            "P07"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Upstream Prompt Id"
     },
     "prompt_execution": {
       "$ref": "#/$defs/P08PromptExecution"
@@ -485,10 +606,8 @@
     }
   },
   "required": [
-    "schema_version",
     "run_id",
     "source_id",
-    "p05_artifact_id",
     "prompt_execution",
     "input_hash",
     "processing_status",

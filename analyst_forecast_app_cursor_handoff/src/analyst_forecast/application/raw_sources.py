@@ -180,6 +180,20 @@ def import_raw_source(
                 if not occurrence_reused:
                     occurrence.raw_file_path = local_relative
 
+                link = session.get(
+                    RunSourceRecord,
+                    {"run_id": request.run_id, "source_id": occurrence.source_id},
+                )
+                _try_reuse_preprocess_artifact(
+                    session,
+                    settings,
+                    run=run,
+                    link=link,
+                    source=occurrence,
+                    content_hash=raw_hash,
+                    medium=request.medium.value,
+                )
+
                 result = RawImportResult(
                     source_id=occurrence.source_id,
                     raw_hash=raw_hash,
@@ -236,13 +250,88 @@ def can_reuse_processed_artifact(
             return artifact
         payload = artifact.payload or {}
         speakers = {
-            str(item.get("speaker_candidate"))
+            str(item.get("speaker_candidate") or item.get("author_candidate"))
             for item in payload.get("segments", [])
             if isinstance(item, dict)
         }
         if speaker_candidate in speakers:
             return artifact
     return None
+
+
+def _try_reuse_preprocess_artifact(
+    session: Session,
+    settings: AppSettings,
+    *,
+    run: RunRecord,
+    link: RunSourceRecord | None,
+    source: SourceRecord,
+    content_hash: str,
+    medium: str,
+) -> AiArtifactRecord | None:
+    """同一raw・同一analyst・同一処理条件ならP05/P07を別runへ関連付ける。"""
+    if link is None:
+        return None
+    if link.latest_ai_artifact_id:
+        existing = session.get(AiArtifactRecord, link.latest_ai_artifact_id)
+        if existing is not None and existing.classification == "accepted":
+            return existing
+    model = settings.cursor_model or settings.chatgpt_model
+    if not model:
+        return None
+    prompt_id = "P05" if medium == "youtube" else "P07"
+    reused = can_reuse_processed_artifact(
+        session,
+        content_hash=content_hash,
+        prompt_id=prompt_id,
+        prompt_version="2.0.0",
+        model=model,
+        analyst_id=source.analyst_id,
+    )
+    if reused is None:
+        return None
+    # 別analystや別source混線防止: source_id一致または同一raw_hash occurrence
+    if reused.source_id != source.source_id:
+        reused_source = session.get(SourceRecord, reused.source_id)
+        if reused_source is None or reused_source.raw_hash != source.raw_hash:
+            return None
+        if reused_source.analyst_id != source.analyst_id:
+            return None
+        if reused_source.medium != source.medium:
+            return None
+    elif source.medium != medium:
+        return None
+    if reused.prompt_id != prompt_id:
+        return None
+    link.latest_ai_artifact_id = reused.ai_artifact_id
+    link.processing_status = "accepted"
+    run_path = settings.vault_root / Path(run.run_path)
+    processed = (
+        run_path / "02_sources" / medium / "processed" / f"{prompt_id}-{reused.ai_artifact_id}.json"
+    )
+    processed.parent.mkdir(parents=True, exist_ok=True)
+    if not processed.exists():
+        processed.write_text(
+            json.dumps(reused.payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+    manifest = {
+        "schema_version": "1.0.0",
+        "reuse": True,
+        "ai_artifact_id": reused.ai_artifact_id,
+        "origin_run_id": reused.run_id,
+        "prompt_id": prompt_id,
+        "input_hash": reused.input_hash,
+        "output_hash": reused.output_hash,
+    }
+    manifest_path = processed.with_suffix(".reuse.json")
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    return reused
 
 
 def resolve_source_raw_path(

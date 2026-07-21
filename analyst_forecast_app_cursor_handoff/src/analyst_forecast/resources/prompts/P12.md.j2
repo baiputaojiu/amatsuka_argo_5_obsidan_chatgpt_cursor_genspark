@@ -4,12 +4,13 @@
 - template_version: {{template_version}}
 - template_hash: {{template_hash}}
 - run_id: {{run_id}}
+- schema: {{schema_name}}
 
 ## 目的
 {{purpose}}
 
 ## 使用タイミング
-`NEXT_ACTIONS.md` がこの処理を指示したとき。
+P11受理後。proposal_artifact_id と input_hash を実値で埋める。
 
 ## 推奨AI環境
 {{environment}}
@@ -23,11 +24,16 @@
 ## 出力ファイル・Schema
 `03_ai_outputs/inbox/{{output_name}}`。`01_prompts/schemas/{{schema_name}}` に厳密に従う。
 
+## 判定基準（必須）
+- 同じ run/source/component の P11 だけをレビューする。
+- 修正候補がある場合は corrected_candidate と recommended_candidate_origin=p12_correction。
+- 後知恵禁止。市場結果を入力しない。unresolvable を許容。
+
 ## 禁止事項・注意事項
 {{warning}}
 
 ## 完了条件
-入力、引用、判断根拠、未解決事項が出力に含まれる。
+agreed / disagreed / unresolved のいずれかと根拠が揃う。
 
 ## コピペ用依頼文
 この案件の{{title}}を実行してください。上記の禁止事項と出力先を厳守してください。

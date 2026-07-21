@@ -107,9 +107,7 @@ class SourceRecord(AuditMixin, Base):
     recorded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     evidence_level: Mapped[str | None] = mapped_column(String(8))
-    raw_artifact_id: Mapped[str | None] = mapped_column(
-        ForeignKey("raw_artifacts.raw_artifact_id"), index=True
-    )
+    raw_artifact_id: Mapped[str | None] = mapped_column(String(20), index=True)
     raw_file_path: Mapped[str] = mapped_column(Text, nullable=False)
     raw_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     acquisition_status: Mapped[str] = mapped_column(String(40), default="acquired")
@@ -308,7 +306,7 @@ class TargetMappingRecord(AuditMixin, Base):
     target_mapping_id: Mapped[str] = mapped_column(String(20), primary_key=True)
     target_id: Mapped[str] = mapped_column(ForeignKey("targets.target_id"), index=True)
     mapping_method: Mapped[str] = mapped_column(String(40))
-    evaluation_instruments: Mapped[list[str]] = mapped_column(JSON, default=list)
+    evaluation_instruments: Mapped[list[Any]] = mapped_column(JSON, default=list)
     weights: Mapped[list[float] | None] = mapped_column(JSON)
     benchmark: Mapped[str | None] = mapped_column(String(100))
     knowledge_cutoff: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -480,6 +478,12 @@ class EvaluationRecord(AuditMixin, Base):
             "evaluation_method_version",
             "evaluation_as_of",
             name="uq_evaluation_identity",
+        ),
+        Index(
+            "ix_evaluations_component_as_of_method",
+            "forecast_component_id",
+            "evaluation_as_of",
+            "evaluation_method_version",
         ),
     )
 

@@ -105,6 +105,15 @@ def evaluate_component(
         issuance = session.get(ForecastIssuanceRecord, component.forecast_issuance_id)
         if mapping is None or target is None or issuance is None:
             raise RuntimeError("予想、対象、マッピングのDB参照が破損しています")
+        if (
+            component.target_resolution_status
+            in {"pending", "awaiting_review", "awaiting_adjudication", "proposed", "review_pending"}
+            or mapping.locked_at is None
+        ) and mapping.mapping_status != "unresolvable":
+            raise ValueError(
+                "予測対象の独立レビューとmapping固定が完了していません。"
+                "次の操作: P11とP12、必要時P13を先に取り込んでください。"
+            )
         mapping_id = mapping.target_mapping_id
         normalized_start = component.normalized_start
         normalized_end = component.normalized_end
@@ -113,6 +122,8 @@ def evaluate_component(
         mapping_reason = mapping.unevaluable_reason
         ticker = target.ticker
         currency = target.currency
+        raw_instruments = list(mapping.evaluation_instruments or [])
+        raw_weights = list(mapping.weights or []) if mapping.weights is not None else []
 
     if mapping_status not in {"verified", "corrected"}:
         return _store_without_values(
@@ -125,7 +136,13 @@ def evaluate_component(
             run_id=resolved_run_id,
             method_version=method_version,
         )
-    if ticker is None or currency is None:
+    instruments = _normalize_instruments(
+        raw_instruments,
+        raw_weights,
+        ticker=ticker,
+        currency=currency,
+    )
+    if not instruments:
         return _store_without_values(
             settings,
             component_id=component_id,
@@ -133,6 +150,41 @@ def evaluate_component(
             as_of=as_of,
             status="unevaluable",
             reason="mappingに市場symbolまたは通貨がありません",
+            run_id=resolved_run_id,
+            method_version=method_version,
+        )
+    currencies = {item["currency"] for item in instruments}
+    if len(currencies) > 1:
+        return _store_without_values(
+            settings,
+            component_id=component_id,
+            mapping_id=mapping_id,
+            as_of=as_of,
+            status="unevaluable",
+            reason="unevaluable_mixed_currency",
+            run_id=resolved_run_id,
+            method_version=method_version,
+        )
+    weight_total = sum(float(str(item["weight"])) for item in instruments)
+    if abs(weight_total - 1.0) > 0.000001:
+        return _store_without_values(
+            settings,
+            component_id=component_id,
+            mapping_id=mapping_id,
+            as_of=as_of,
+            status="unevaluable",
+            reason="instrument weight合計が1ではありません",
+            run_id=resolved_run_id,
+            method_version=method_version,
+        )
+    if any(float(str(item["weight"])) < 0 for item in instruments):
+        return _store_without_values(
+            settings,
+            component_id=component_id,
+            mapping_id=mapping_id,
+            as_of=as_of,
+            status="unevaluable",
+            reason="負のweightは初期版では禁止です",
             run_id=resolved_run_id,
             method_version=method_version,
         )
@@ -160,32 +212,65 @@ def evaluate_component(
         )
 
     effective_end = min(as_of, normalized_end)
-    request = MarketDataRequest(
-        symbol=ticker,
-        currency=currency,
-        start=normalized_start,
-        end=effective_end,
-    )
     cache_hit = False
     attempt_count = 1
     provider_error_code: str | None = None
     provider_error_message: str | None = None
     retryable: str | None = None
     try:
-        cached = _load_cached_series(settings, request, provider_name=provider.name)
-        if cached is not None:
-            series = cached
-            cache_hit = True
+        if len(instruments) == 1:
+            instrument = instruments[0]
+            request = MarketDataRequest(
+                symbol=str(instrument["symbol"]),
+                currency=str(instrument["currency"]),
+                start=normalized_start,
+                end=effective_end,
+            )
+            cached = _load_cached_series(settings, request, provider_name=provider.name)
+            if cached is not None:
+                series = cached
+                cache_hit = True
+            else:
+                series = provider.fetch(request)
+            bars = tuple(
+                bar for bar in series.bars if normalized_start <= bar.date <= effective_end
+            )
+            if not bars:
+                raise MarketDataUnavailable("評価期間内の市場データが0件です")
+            _validate_bars(bars)
+            start_price = bars[0].adjusted_open
+            end_price = bars[-1].adjusted_close
+            if start_price <= 0:
+                raise MarketDataUnavailable("開始値が0以下のため変化率を計算できません")
         else:
-            series = provider.fetch(request)
-        bars = tuple(bar for bar in series.bars if normalized_start <= bar.date <= effective_end)
-        if not bars:
-            raise MarketDataUnavailable("評価期間内の市場データが0件です")
-        _validate_bars(bars)
-        start_price = bars[0].adjusted_open
-        end_price = bars[-1].adjusted_close
-        if start_price <= 0:
-            raise MarketDataUnavailable("開始値が0以下のため変化率を計算できません")
+            series_by_symbol: dict[str, MarketSeries] = {}
+            for instrument in instruments:
+                request = MarketDataRequest(
+                    symbol=str(instrument["symbol"]),
+                    currency=str(instrument["currency"]),
+                    start=normalized_start,
+                    end=effective_end,
+                )
+                cached = _load_cached_series(settings, request, provider_name=provider.name)
+                if cached is not None:
+                    series_by_symbol[str(instrument["symbol"])] = cached
+                    cache_hit = True
+                else:
+                    series_by_symbol[str(instrument["symbol"])] = provider.fetch(request)
+            common_dates = _common_bar_dates(series_by_symbol, normalized_start, effective_end)
+            if len(common_dates) < 1:
+                raise MarketDataUnavailable(
+                    "共通取引日が不足しているためバスケットを評価できません"
+                )
+            bars = _build_basket_bars(series_by_symbol, instruments, common_dates)
+            if not bars:
+                raise MarketDataUnavailable("評価期間内の市場データが0件です")
+            _validate_bars(bars)
+            start_price = bars[0].adjusted_open
+            end_price = bars[-1].adjusted_close
+            if start_price <= 0:
+                raise MarketDataUnavailable("開始値が0以下のため変化率を計算できません")
+            series = next(iter(series_by_symbol.values()))
     except ProviderError as error:
         return _store_without_values(
             settings,
@@ -322,6 +407,108 @@ def evaluate_component(
 
     refresh_workflow(settings, resolved_run_id)
     return result
+
+
+def _normalize_instruments(
+    evaluation_instruments: list[object] | None,
+    weights: list[float] | None,
+    *,
+    ticker: str | None,
+    currency: str | None,
+) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    if evaluation_instruments:
+        for index, raw in enumerate(evaluation_instruments):
+            if isinstance(raw, dict):
+                symbol = str(raw.get("symbol") or "")
+                item_currency = str(raw.get("currency") or currency or "")
+                weight = float(raw.get("weight") or (weights[index] if weights else 0))
+                exchange = raw.get("exchange")
+            else:
+                symbol = str(raw)
+                item_currency = str(currency or "")
+                weight = float(weights[index]) if weights and index < len(weights) else 0.0
+                exchange = None
+            if not symbol or not item_currency:
+                continue
+            items.append(
+                {
+                    "symbol": symbol,
+                    "currency": item_currency,
+                    "weight": weight,
+                    "exchange": exchange,
+                }
+            )
+    elif ticker and currency:
+        items.append({"symbol": ticker, "currency": currency, "weight": 1.0, "exchange": None})
+    return items
+
+
+def _common_bar_dates(
+    series_by_symbol: dict[str, MarketSeries],
+    start: date,
+    end: date,
+) -> list[date]:
+    date_sets: list[set[date]] = []
+    for series in series_by_symbol.values():
+        date_sets.append({bar.date for bar in series.bars if start <= bar.date <= end})
+    if not date_sets:
+        return []
+    common = set.intersection(*date_sets)
+    return sorted(common)
+
+
+def _build_basket_bars(
+    series_by_symbol: dict[str, MarketSeries],
+    instruments: list[dict[str, object]],
+    common_dates: list[date],
+) -> tuple[MarketBar, ...]:
+    bars_by_symbol: dict[str, dict[date, MarketBar]] = {}
+    for symbol, series in series_by_symbol.items():
+        bars_by_symbol[symbol] = {bar.date: bar for bar in series.bars}
+    # 基準値1のweight付き指数
+    index_level = Decimal("1")
+    previous_closes: dict[str, Decimal] = {}
+    for instrument in instruments:
+        symbol = str(instrument["symbol"])
+        first = bars_by_symbol[symbol][common_dates[0]]
+        previous_closes[symbol] = first.adjusted_open
+    built: list[MarketBar] = []
+    for day in common_dates:
+        day_return = Decimal("0")
+        day_high_ret = Decimal("0")
+        day_low_ret = Decimal("0")
+        for instrument in instruments:
+            symbol = str(instrument["symbol"])
+            weight = Decimal(str(instrument["weight"]))
+            bar = bars_by_symbol[symbol][day]
+            prev = previous_closes[symbol]
+            if prev <= 0:
+                raise MarketDataUnavailable("バスケット構成銘柄の基準値が不正です")
+            close_ret = (bar.adjusted_close - prev) / prev
+            high_ret = (bar.high - prev) / prev
+            low_ret = (bar.low - prev) / prev
+            day_return += weight * close_ret
+            day_high_ret += weight * high_ret
+            day_low_ret += weight * low_ret
+            previous_closes[symbol] = bar.adjusted_close
+        index_open = index_level
+        index_close = index_level * (Decimal("1") + day_return)
+        index_high = index_level * (Decimal("1") + day_high_ret)
+        index_low = index_level * (Decimal("1") + day_low_ret)
+        built.append(
+            MarketBar(
+                date=day,
+                open=index_open,
+                high=max(index_open, index_high, index_close, index_low),
+                low=min(index_open, index_high, index_close, index_low),
+                close=index_close,
+                adjusted_open=index_open,
+                adjusted_close=index_close,
+            )
+        )
+        index_level = index_close
+    return tuple(built)
 
 
 def _direction_excursions(

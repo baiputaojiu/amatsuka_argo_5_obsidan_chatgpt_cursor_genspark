@@ -4,12 +4,13 @@
 - template_version: {{template_version}}
 - template_hash: {{template_hash}}
 - run_id: {{run_id}}
+- schema: {{schema_name}}
 
 ## 目的
 {{purpose}}
 
 ## 使用タイミング
-`NEXT_ACTIONS.md` がこの処理を指示したとき。
+受理済み P05（YouTube）または P07（blog/X/web）があるとき。upstream_artifact_id と input_hash を実値で埋める。
 
 ## 推奨AI環境
 {{environment}}
@@ -23,11 +24,24 @@
 ## 出力ファイル・Schema
 `03_ai_outputs/inbox/{{output_name}}`。`01_prompts/schemas/{{schema_name}}` に厳密に従う。
 
+## 認定基準（必須）
+- 明示的予想と方向性予想は正式候補。
+- 投資推奨は正式候補とし、forecast_type=recommendation として分離。
+- 条件付き予想は条件と本命度を保存。
+- 上昇・下落の複数シナリオを列挙しただけなら除外。本人が本命・確率・優先順位を示した場合だけ正式候補。
+- 現状分析、過去説明、単なる可能性、選好、第三者の見解は除外または非予想分類。
+- 同じ主張の後日表明は新しいissuance。同時転載・リンク共有・切り抜きだけなら新issuanceにしない。
+- 上昇後下落等はcomponent分割するが件数水増ししない。
+- 発言者明示の期間、AI推定、system default を混同しない。期間不明を1年予想へ変換しない。
+- 原文にない symbol・日付・数値・確率を補わない。
+- 上流segmentへ関連付け、speaker_attribution_status は target_confirmed / uncertain / not_target。
+- 第三者要約だけは正式予想にしない。
+
 ## 禁止事項・注意事項
 {{warning}}
 
 ## 完了条件
-入力、引用、判断根拠、未解決事項が出力に含まれる。
+予想0件でも processed_no_forecast として保存できる。引用offsetとsegment範囲が一致する。
 
 ## コピペ用依頼文
 この案件の{{title}}を実行してください。上記の禁止事項と出力先を厳守してください。

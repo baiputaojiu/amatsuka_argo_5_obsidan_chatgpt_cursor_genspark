@@ -230,13 +230,25 @@ def _write_prompt_snapshots(
     catalog = json.loads(read_text_resource("prompts", "catalog.json"))
     template_version = str(catalog.get("template_version", "1.0.0"))
     prompt_meta = catalog["prompts"]
-    prompt_ids = ["P08", "P11", "P12", "P13"]
+    prompt_ids = ["P08", "P09", "P11", "P12", "P13"]
     if Medium.YOUTUBE in request.selected_media:
         prompt_ids.insert(0, "P05")
+        prompt_ids.insert(1, "P06")
+    if any(medium != Medium.YOUTUBE for medium in request.selected_media):
+        if "P07" not in prompt_ids:
+            insert_at = 1 if prompt_ids and prompt_ids[0] == "P05" else 0
+            if "P06" in prompt_ids:
+                insert_at = prompt_ids.index("P06") + 1
+            prompt_ids.insert(insert_at, "P07")
+        if "P06" not in prompt_ids:
+            prompt_ids.insert(0 if "P07" not in prompt_ids else prompt_ids.index("P07"), "P06")
 
     output_names = {
         "P05": f"P05_{run_id}_SOURCE_ID.json",
+        "P06": f"P06_{run_id}_SOURCE_ID.json",
+        "P07": f"P07_{run_id}_SOURCE_ID.json",
         "P08": f"P08_{run_id}_SOURCE_ID.json",
+        "P09": f"P09_{run_id}_SOURCE_ID.json",
         "P11": f"P11_{run_id}_COMPONENT_ID.json",
         "P12": f"P12_{run_id}_COMPONENT_ID.json",
         "P13": f"P13_{run_id}_COMPONENT_ID.json",
@@ -251,7 +263,11 @@ def _write_prompt_snapshots(
         template_hash = resource_sha256("prompts", f"{prompt_id}.md.j2")
         for environment in ("cursor", "chatgpt"):
             model = settings.cursor_model if environment == "cursor" else settings.chatgpt_model
-            model_text = model or "未設定（実行前に高性能モデルを設定）"
+            model_text = (
+                model
+                or '未設定。設定例: analyst-forecast config set-model --cursor "モデル名" '
+                '--chatgpt "モデル名"'
+            )
             input_instruction = (
                 f"案件内の `{input_path}` を読み込む"
                 if environment == "cursor"
@@ -295,7 +311,7 @@ def _write_prompt_snapshots(
         schema_path(),
         run_path / "01_prompts" / "schemas" / "forecast_extraction.schema.json",
     )
-    for prompt_id in ("P05", "P08", "P11", "P12", "P13"):
+    for prompt_id in PIPELINE_SCHEMA_FILENAMES:
         shutil.copy2(
             pipeline_schema_path(prompt_id),
             run_path / "01_prompts" / "schemas" / PIPELINE_SCHEMA_FILENAMES[prompt_id],

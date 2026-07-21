@@ -144,9 +144,7 @@ def test_unevaluated_component_not_hidden_by_multi_as_of(
     source_result,
     tmp_path: Path,
 ) -> None:
-    component_a = import_locked_component(
-        settings, run_result, source_result, tmp_path, label="a"
-    )
+    component_a = import_locked_component(settings, run_result, source_result, tmp_path, label="a")
 
     second_raw = tmp_path / "second.txt"
     second_raw.write_text(RAW_TEXT + "追加", encoding="utf-8")

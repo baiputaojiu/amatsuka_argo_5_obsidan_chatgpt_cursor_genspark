@@ -21,6 +21,7 @@ from analyst_forecast.application.settings import (
     AppSettings,
     default_config_path,
     load_settings,
+    save_settings,
 )
 from analyst_forecast.application.wizard import WizardCancelled, interactive_start
 from analyst_forecast.application.workflow import (
@@ -65,6 +66,36 @@ app.add_typer(source_app, name="source")
 app.add_typer(ai_app, name="ai")
 app.add_typer(market_app, name="market")
 
+config_app = typer.Typer(help="ローカル設定")
+app.add_typer(config_app, name="config")
+
+
+@config_app.command("set-model", help="高性能モデル名をローカル設定へ保存します。")
+def set_model_command(
+    cursor: Annotated[str | None, typer.Option("--cursor", help="Cursor用モデル名")] = None,
+    chatgpt: Annotated[str | None, typer.Option("--chatgpt", help="ChatGPT用モデル名")] = None,
+    config: Annotated[
+        Path, typer.Option("--config", help="ローカル設定ファイル")
+    ] = DEFAULT_CONFIG_PATH,
+) -> None:
+    if not cursor and not chatgpt:
+        raise typer.BadParameter("--cursor または --chatgpt が必要です")
+    try:
+        settings = load_settings(config)
+        if cursor:
+            settings.cursor_model = cursor
+        if chatgpt:
+            settings.chatgpt_model = chatgpt
+        save_settings(settings, config)
+        typer.echo(
+            "モデル設定を保存しました。\n"
+            f"cursor={settings.cursor_model or '未設定'}\n"
+            f"chatgpt={settings.chatgpt_model or '未設定'}\n"
+            f"設定: {config}"
+        )
+    except Exception as error:
+        _fail("モデル設定に失敗しました", error)
+
 
 @app.command("init", help="作業領域を初期化し、設定とSQLiteを作成します。")
 def init_command(
@@ -94,6 +125,14 @@ def init_command(
         bool,
         typer.Option("--update-docs", help="同梱docs/promptsで上書き更新（backup付き）"),
     ] = False,
+    cursor_model: Annotated[
+        str | None,
+        typer.Option("--cursor-model", help="Cursor用の高性能モデル名"),
+    ] = None,
+    chatgpt_model: Annotated[
+        str | None,
+        typer.Option("--chatgpt-model", help="ChatGPT用の高性能モデル名"),
+    ] = None,
 ) -> None:
     try:
         if vault_root is None and obsidian_vault is None:
@@ -104,12 +143,16 @@ def init_command(
                 obsidian_vault_path=obsidian_vault,
                 workspace_relative_path=workspace_relative,
                 database_path=(obsidian_vault / workspace_relative) / "_system" / "database.sqlite",
+                cursor_model=cursor_model,
+                chatgpt_model=chatgpt_model,
             )
         else:
             assert vault_root is not None
             settings = AppSettings(
                 vault_root=vault_root,
                 database_path=vault_root / "_system" / "database.sqlite",
+                cursor_model=cursor_model,
+                chatgpt_model=chatgpt_model,
             )
         initialize_workspace(settings, config_path=config, update_docs=update_docs)
     except Exception as error:

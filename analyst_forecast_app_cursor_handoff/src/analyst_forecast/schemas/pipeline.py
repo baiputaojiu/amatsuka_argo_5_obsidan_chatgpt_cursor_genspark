@@ -50,8 +50,20 @@ class P05PromptExecution(PromptExecutionBase):
     prompt_id: Literal["P05"]
 
 
+class P06PromptExecution(PromptExecutionBase):
+    prompt_id: Literal["P06"]
+
+
+class P07PromptExecution(PromptExecutionBase):
+    prompt_id: Literal["P07"]
+
+
 class P08PromptExecution(PromptExecutionBase):
     prompt_id: Literal["P08"]
+
+
+class P09PromptExecution(PromptExecutionBase):
+    prompt_id: Literal["P09"]
 
 
 class P11PromptExecution(PromptExecutionBase):
@@ -118,6 +130,148 @@ class P05Output(PipelineModel):
         return _require_timezone(value)
 
 
+class TextSegmentOutput(PipelineModel):
+    """ブログ・X・Web向けの原文整理segment。"""
+
+    segment_ref: LocalRef
+    sequence_number: int = Field(ge=1)
+    raw_start_offset: int = Field(ge=0)
+    raw_end_offset: int = Field(gt=0)
+    raw_text: str = Field(min_length=1)
+    normalized_text: str = Field(min_length=1)
+    author_status: Literal["identified", "unknown"]
+    author_candidate: str | None = Field(default=None, max_length=200)
+    author_confidence: float = Field(ge=0.0, le=1.0)
+    statement_kind: Literal[
+        "author_own",
+        "direct_quote",
+        "third_party_summary",
+        "repost",
+        "reply",
+    ]
+    attribution_basis: str = Field(min_length=1)
+    review_status: Literal["accepted", "needs_review", "reviewed"]
+    importance: Literal["normal", "high"] = "normal"
+    high_importance_reason: str | None = None
+
+    @model_validator(mode="after")
+    def validate_segment(self) -> TextSegmentOutput:
+        if self.raw_end_offset <= self.raw_start_offset:
+            raise ValueError("raw_end_offsetはraw_start_offsetより後にしてください")
+        if self.author_status == "unknown" and self.author_candidate is not None:
+            raise ValueError("unknown authorにauthor_candidateを設定できません")
+        if self.author_status == "identified" and not self.author_candidate:
+            raise ValueError("identified authorにはauthor_candidateが必要です")
+        if self.importance == "high" and not self.high_importance_reason:
+            raise ValueError("高重要度には理由が必要です")
+        return self
+
+
+class P07Output(PipelineModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        title="P07TextSourceProcessingOutput",
+        json_schema_extra={
+            "$id": "https://local.invalid/schemas/p07-text-source-processing-2.0.0.json",
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+        },
+    )
+
+    schema_version: Literal["2.0.0"]
+    run_id: RunId
+    source_id: SourceId
+    prompt_execution: P07PromptExecution
+    input_hash: HashValue
+    knowledge_cutoff: datetime
+    segments: list[TextSegmentOutput] = Field(min_length=1)
+
+    @field_validator("knowledge_cutoff")
+    @classmethod
+    def validate_cutoff(cls, value: datetime) -> datetime:
+        return _require_timezone(value)
+
+
+class ReviewFinding(PipelineModel):
+    finding_ref: LocalRef
+    severity: Literal["info", "warning", "error"]
+    message: str = Field(min_length=1)
+    evidence: str = Field(min_length=1)
+
+
+class P06Output(PipelineModel):
+    """話者・著者帰属レビュー（P05/P07共通）。"""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        title="P06SpeakerAttributionReviewOutput",
+        json_schema_extra={
+            "$id": "https://local.invalid/schemas/p06-speaker-review-2.0.0.json",
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+        },
+    )
+
+    schema_version: Literal["2.0.0"]
+    run_id: RunId
+    source_id: SourceId
+    reviewed_artifact_id: ArtifactId
+    prompt_execution: P06PromptExecution
+    input_hash: HashValue
+    decision: Literal["accept", "correct", "reject", "unresolved"]
+    findings: list[ReviewFinding] = Field(default_factory=list)
+    corrected_payload: dict[str, object] | None = None
+    knowledge_cutoff: datetime
+
+    @field_validator("knowledge_cutoff")
+    @classmethod
+    def validate_cutoff(cls, value: datetime) -> datetime:
+        return _require_timezone(value)
+
+    @model_validator(mode="after")
+    def validate_decision(self) -> P06Output:
+        if self.decision == "correct" and self.corrected_payload is None:
+            raise ValueError("correctにはcorrected_payloadが必要です")
+        if self.decision != "correct" and self.corrected_payload is not None:
+            raise ValueError("correct以外にcorrected_payloadは設定できません")
+        return self
+
+
+class P09Output(PipelineModel):
+    """予想抽出レビュー。"""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        title="P09ForecastExtractionReviewOutput",
+        json_schema_extra={
+            "$id": "https://local.invalid/schemas/p09-forecast-review-2.0.0.json",
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+        },
+    )
+
+    schema_version: Literal["2.0.0"]
+    run_id: RunId
+    source_id: SourceId
+    reviewed_artifact_id: ArtifactId
+    prompt_execution: P09PromptExecution
+    input_hash: HashValue
+    decision: Literal["accept", "correct", "reject", "unresolved"]
+    findings: list[ReviewFinding] = Field(default_factory=list)
+    corrected_payload: dict[str, object] | None = None
+    knowledge_cutoff: datetime
+
+    @field_validator("knowledge_cutoff")
+    @classmethod
+    def validate_cutoff(cls, value: datetime) -> datetime:
+        return _require_timezone(value)
+
+    @model_validator(mode="after")
+    def validate_decision(self) -> P09Output:
+        if self.decision == "correct" and self.corrected_payload is None:
+            raise ValueError("correctにはcorrected_payloadが必要です")
+        if self.decision != "correct" and self.corrected_payload is not None:
+            raise ValueError("correct以外にcorrected_payloadは設定できません")
+        return self
+
+
 class ForecastComponentV2(PipelineModel):
     component_ref: LocalRef
     parent_component_ref: LocalRef | None = None
@@ -172,6 +326,12 @@ class ForecastIssuanceV2(PipelineModel):
     existing_forecast_group_id: str | None = Field(default=None, pattern=r"^FCG-\d{6}$")
     made_at: datetime
     publicly_available_at: datetime
+    made_at_source: Literal[
+        "explicit",
+        "source_metadata",
+        "context_inferred",
+        "unknown",
+    ] = "unknown"
     forecast_type: Literal[
         "directional",
         "numeric",
@@ -198,6 +358,22 @@ class ForecastIssuanceV2(PipelineModel):
     ]
     evidence: list[EvidenceQuote] = Field(min_length=1)
     components: list[ForecastComponentV2] = Field(min_length=1)
+    upstream_segment_refs: list[LocalRef] = Field(default_factory=list)
+    speaker_candidate: str | None = Field(default=None, max_length=200)
+    speaker_attribution_status: Literal[
+        "target_confirmed",
+        "uncertain",
+        "not_target",
+        "legacy_unknown",
+    ] = "legacy_unknown"
+    attribution_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    attribution_basis: str | None = None
+    statement_kind: Literal[
+        "direct_statement",
+        "direct_quote",
+        "third_party_summary",
+        "legacy_unknown",
+    ] = "legacy_unknown"
 
     @field_validator("made_at", "publicly_available_at")
     @classmethod
@@ -217,6 +393,8 @@ class ForecastIssuanceV2(PipelineModel):
             raise ValueError("parent_component_refが同じ表明内に存在しません")
         if self.importance == "high" and not self.high_importance_reason:
             raise ValueError("高重要度には理由が必要です")
+        if self.made_at > self.publicly_available_at:
+            raise ValueError("made_atはpublicly_available_at以前にしてください")
         return self
 
 
@@ -225,15 +403,17 @@ class P08Output(PipelineModel):
         extra="forbid",
         title="P08ForecastExtractionOutput",
         json_schema_extra={
-            "$id": "https://local.invalid/schemas/p08-forecast-extraction-2.0.0.json",
+            "$id": "https://local.invalid/schemas/p08-forecast-extraction-2.1.0.json",
             "$schema": "https://json-schema.org/draft/2020-12/schema",
         },
     )
 
-    schema_version: Literal["2.0.0"]
+    schema_version: Literal["2.0.0", "2.1.0"] = "2.1.0"
     run_id: RunId
     source_id: SourceId
-    p05_artifact_id: ArtifactId
+    p05_artifact_id: ArtifactId | None = None
+    upstream_artifact_id: ArtifactId | None = None
+    upstream_prompt_id: Literal["P05", "P07"] | None = None
     prompt_execution: P08PromptExecution
     input_hash: HashValue
     processing_status: Literal["processed_with_forecasts", "processed_no_forecast"]
@@ -241,6 +421,19 @@ class P08Output(PipelineModel):
 
     @model_validator(mode="after")
     def validate_processing_status(self) -> P08Output:
+        upstream_id = self.upstream_artifact_id or self.p05_artifact_id
+        upstream_prompt = self.upstream_prompt_id
+        if upstream_id is None:
+            raise ValueError("upstream_artifact_idまたはp05_artifact_idが必要です")
+        if upstream_prompt is None:
+            if self.p05_artifact_id is not None and self.upstream_artifact_id is None:
+                upstream_prompt = "P05"
+            else:
+                raise ValueError("upstream_prompt_idが必要です")
+        object.__setattr__(self, "upstream_artifact_id", upstream_id)
+        object.__setattr__(self, "upstream_prompt_id", upstream_prompt)
+        if self.p05_artifact_id is None and upstream_prompt == "P05":
+            object.__setattr__(self, "p05_artifact_id", upstream_id)
         if self.processing_status == "processed_no_forecast" and self.forecasts:
             raise ValueError("processed_no_forecastではforecastsを空にしてください")
         if self.processing_status == "processed_with_forecasts" and not self.forecasts:
@@ -374,6 +567,7 @@ class P12Output(PipelineModel):
     resolution_status: Literal["agreed", "disagreed", "unresolved"]
     reviews: list[CandidateReview]
     recommended_candidate_ref: LocalRef | None = None
+    recommended_candidate_origin: Literal["p11_proposal", "p12_correction"] | None = None
     unevaluable_reason: str | None = None
 
     @field_validator("knowledge_cutoff")
@@ -386,12 +580,22 @@ class P12Output(PipelineModel):
         if self.resolution_status == "agreed":
             if not self.recommended_candidate_ref:
                 raise ValueError("agreedにはrecommended_candidate_refが必要です")
-            if not any(
+            origin = self.recommended_candidate_origin or "p11_proposal"
+            object.__setattr__(self, "recommended_candidate_origin", origin)
+            if origin == "p11_proposal":
+                if not any(
+                    review.candidate_ref == self.recommended_candidate_ref
+                    and review.decision == "accept"
+                    for review in self.reviews
+                ):
+                    raise ValueError("推奨candidateにaccept reviewが必要です")
+            elif not any(
                 review.candidate_ref == self.recommended_candidate_ref
-                and review.decision == "accept"
+                and review.decision == "correct"
+                and review.corrected_candidate is not None
                 for review in self.reviews
             ):
-                raise ValueError("推奨candidateにaccept reviewが必要です")
+                raise ValueError("p12_correctionにはcorrect reviewが必要です")
         elif self.resolution_status == "disagreed":
             if not self.reviews:
                 raise ValueError("disagreedにはreviewが必要です")
@@ -426,6 +630,7 @@ class P13Output(PipelineModel):
     knowledge_cutoff: datetime
     final_status: Literal["verified", "unresolvable"]
     selected_candidate_ref: LocalRef | None = None
+    selected_candidate_origin: Literal["p11_proposal", "p12_correction"] | None = None
     rationale: str = Field(min_length=1)
     unevaluable_reason: str | None = None
 
@@ -438,6 +643,8 @@ class P13Output(PipelineModel):
     def validate_final_status(self) -> P13Output:
         if self.final_status == "verified" and not self.selected_candidate_ref:
             raise ValueError("verifiedにはselected_candidate_refが必要です")
+        if self.final_status == "verified" and self.selected_candidate_origin is None:
+            object.__setattr__(self, "selected_candidate_origin", "p11_proposal")
         if self.final_status == "unresolvable":
             if self.selected_candidate_ref is not None:
                 raise ValueError("unresolvableではcandidateを選択できません")
@@ -446,11 +653,16 @@ class P13Output(PipelineModel):
         return self
 
 
-PipelineOutput = P05Output | P08Output | P11Output | P12Output | P13Output
+PipelineOutput = (
+    P05Output | P06Output | P07Output | P08Output | P09Output | P11Output | P12Output | P13Output
+)
 
 PIPELINE_MODELS: dict[str, type[PipelineModel]] = {
     "P05": P05Output,
+    "P06": P06Output,
+    "P07": P07Output,
     "P08": P08Output,
+    "P09": P09Output,
     "P11": P11Output,
     "P12": P12Output,
     "P13": P13Output,
@@ -458,7 +670,10 @@ PIPELINE_MODELS: dict[str, type[PipelineModel]] = {
 
 PIPELINE_SCHEMA_FILENAMES = {
     "P05": "p05_speaker_processing.schema.json",
+    "P06": "p06_speaker_review.schema.json",
+    "P07": "p07_text_source_processing.schema.json",
     "P08": "p08_forecast_extraction_v2.schema.json",
+    "P09": "p09_forecast_review.schema.json",
     "P11": "p11_target_resolution.schema.json",
     "P12": "p12_target_review.schema.json",
     "P13": "p13_target_adjudication.schema.json",

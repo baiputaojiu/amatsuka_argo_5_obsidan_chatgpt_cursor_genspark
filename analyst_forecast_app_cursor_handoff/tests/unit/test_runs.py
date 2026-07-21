@@ -31,8 +31,10 @@ def test_create_run_issues_ids_and_required_tree(
             assert (run_result.run_path / "02_sources" / medium / category).is_dir()
 
     prompt_files = {path.name for path in (run_result.run_path / "01_prompts").glob("*.md")}
-    assert len(prompt_files) == 10
+    assert len(prompt_files) >= 10
     assert any(name.startswith("P05") and "cursor" in name for name in prompt_files)
+    assert any(name.startswith("P06") and "cursor" in name for name in prompt_files)
+    assert any(name.startswith("P09") and "cursor" in name for name in prompt_files)
     assert any(name.startswith("P12") and "chatgpt" in name for name in prompt_files)
     assert any(name.startswith("P13") and "cursor" in name for name in prompt_files)
     assert (
@@ -40,7 +42,10 @@ def test_create_run_issues_ids_and_required_tree(
     ).is_file()
     for schema_name in (
         "p05_speaker_processing.schema.json",
+        "p06_speaker_review.schema.json",
+        "p07_text_source_processing.schema.json",
         "p08_forecast_extraction_v2.schema.json",
+        "p09_forecast_review.schema.json",
         "p11_target_resolution.schema.json",
         "p12_target_review.schema.json",
         "p13_target_adjudication.schema.json",

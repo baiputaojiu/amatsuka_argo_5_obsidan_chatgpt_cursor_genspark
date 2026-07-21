@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 from analyst_forecast import __version__
 from analyst_forecast.application.results import generate_run_results
 from analyst_forecast.application.settings import AppSettings
+from analyst_forecast.domain.models import ComponentResolutionStage
+from analyst_forecast.domain.resolution import classify_component_resolution_stage
 from analyst_forecast.infrastructure.db.ids import next_id
 from analyst_forecast.infrastructure.db.models import (
     AiArtifactRecord,
@@ -24,6 +26,8 @@ from analyst_forecast.infrastructure.db.models import (
     SourceRecord,
     TargetMappingRecord,
     TargetRecord,
+    TargetResolutionCandidateRecord,
+    TargetResolutionReviewRecord,
     WorkflowTaskRecord,
 )
 from analyst_forecast.infrastructure.db.session import create_session_factory
@@ -117,11 +121,22 @@ class _RunContext:
         self.needs_review_unresolved: int = 0
         self.processed_no_forecast: int = 0
         self.pending_p05: list[str] = []
+        self.pending_p07: list[str] = []
         self.pending_p08: list[str] = []
+        self.pending_p06: list[str] = []
+        self.pending_p09: list[str] = []
         self.pending_p11: list[str] = []
         self.pending_p12: list[str] = []
+        self.pending_p13: list[str] = []
+        self.unresolvable_components: list[str] = []
         self.component_summaries: list[dict[str, str | None]] = []
         self.evaluation_as_of: date | None = None
+        # 次処理に必要な artifact ID（component_id → ids）
+        self.resolution_refs: dict[str, dict[str, str | None]] = {}
+
+
+def _preprocess_prompt_for_medium(medium: str) -> str:
+    return "P05" if medium == "youtube" else "P07"
 
 
 def _load_run_context(
@@ -148,10 +163,16 @@ def _load_run_context(
         if link.processing_status == "processed_no_forecast":
             context.processed_no_forecast += 1
         if (
-            link.processing_status in {"raw_imported", "p05_pending", "needs_review"}
+            link.processing_status in {"raw_imported", "p05_pending", "p07_pending", "needs_review"}
             and link.local_input_path
         ):
-            context.pending_p05.append(str(settings.vault_root / Path(link.local_input_path)))
+            source = session.get(SourceRecord, link.source_id)
+            medium = source.medium if source is not None else link.observed_medium
+            pending_path = str(settings.vault_root / Path(link.local_input_path))
+            if _preprocess_prompt_for_medium(medium) == "P05":
+                context.pending_p05.append(pending_path)
+            else:
+                context.pending_p07.append(pending_path)
 
     artifacts = list(
         session.scalars(select(AiArtifactRecord).where(AiArtifactRecord.run_id == run.run_id))
@@ -162,6 +183,11 @@ def _load_run_context(
         if item.classification == "needs_review"
         and item.resolution_status not in {"resolved", "superseded", "accepted", "rejected"}
     ]
+    for item in unresolved_review:
+        if item.prompt_id in {"P05", "P07"}:
+            context.pending_p06.append(item.ai_artifact_id)
+        elif item.prompt_id == "P08":
+            context.pending_p09.append(item.ai_artifact_id)
     legacy_imports = list(
         session.scalars(select(AiImportRecord).where(AiImportRecord.run_id == run.run_id))
     )
@@ -225,46 +251,69 @@ def _load_run_context(
         )
         target = session.get(TargetRecord, component.target_id) if component.target_id else None
         latest = _latest_evaluation(context.evaluations, component.forecast_component_id)
-        if latest is None:
-            context.unevaluated_components.append(component)
-        elif latest.evaluation_status == "unevaluable":
-            context.unevaluable_open += 1
-        if component.target_resolution_status in {
-            "pending",
-            "proposed",
-        } and (mapping is None or mapping.mapping_status not in {"verified", "corrected"}):
-            context.pending_p11.append(component.forecast_component_id)
-        if component.target_resolution_status in {
-            "review_pending",
-            "needs_adjudication",
-        } and (mapping is None or mapping.mapping_status not in {"verified", "corrected"}):
-            context.pending_p12.append(component.forecast_component_id)
+        stage = classify_component_resolution_stage(component, mapping)
+        cid = component.forecast_component_id
+
+        if stage is ComponentResolutionStage.NEED_P11:
+            context.pending_p11.append(cid)
+        elif stage is ComponentResolutionStage.NEED_P12:
+            context.pending_p12.append(cid)
+            context.resolution_refs[cid] = _resolution_refs_for_component(session, cid)
+        elif stage is ComponentResolutionStage.NEED_P13:
+            context.pending_p13.append(cid)
+            context.resolution_refs[cid] = _resolution_refs_for_component(session, cid)
+        elif stage is ComponentResolutionStage.UNRESOLVABLE:
+            context.unresolvable_components.append(cid)
+        elif stage is ComponentResolutionStage.READY_FOR_EVALUATION:
+            if latest is None:
+                context.unevaluated_components.append(component)
+            elif latest.evaluation_status == "unevaluable":
+                context.unevaluable_open += 1
+
         context.component_summaries.append(
             {
-                "forecast_component_id": component.forecast_component_id,
+                "forecast_component_id": cid,
                 "forecast_issuance_id": component.forecast_issuance_id,
                 "raw_target_label": component.raw_target_label,
                 "symbol": target.ticker if target else None,
                 "direction": component.direction,
                 "mapping_status": mapping.mapping_status if mapping else None,
+                "target_resolution_status": component.target_resolution_status,
+                "resolution_stage": stage.value,
                 "latest_evaluation_status": latest.evaluation_status if latest else None,
             }
         )
 
-    accepted_p05_sources = {
+    accepted_preprocess_sources = {
         item.source_id
         for item in artifacts
-        if item.prompt_id == "P05" and item.classification == "accepted" and item.source_id
+        if item.prompt_id in {"P05", "P07"} and item.classification == "accepted" and item.source_id
     }
+    # 他runから再利用された上流artifactも受理扱い
     for link in context.source_links:
+        if link.latest_ai_artifact_id:
+            reused = session.get(AiArtifactRecord, link.latest_ai_artifact_id)
+            if (
+                reused is not None
+                and reused.prompt_id in {"P05", "P07"}
+                and reused.classification == "accepted"
+            ):
+                accepted_preprocess_sources.add(link.source_id)
+    for link in context.source_links:
+        source = session.get(SourceRecord, link.source_id)
+        medium = source.medium if source is not None else link.observed_medium
+        preprocess_prompt = _preprocess_prompt_for_medium(medium)
         if (
-            link.source_id not in accepted_p05_sources
+            link.source_id not in accepted_preprocess_sources
             and link.processing_status not in {"processed_no_forecast", "accepted"}
             and link.local_input_path
         ):
             pending_path = str(settings.vault_root / Path(link.local_input_path))
-            if pending_path not in context.pending_p05:
-                context.pending_p05.append(pending_path)
+            if preprocess_prompt == "P05":
+                if pending_path not in context.pending_p05:
+                    context.pending_p05.append(pending_path)
+            elif pending_path not in context.pending_p07:
+                context.pending_p07.append(pending_path)
         has_p08 = any(
             item.prompt_id == "P08"
             and item.source_id == link.source_id
@@ -273,7 +322,7 @@ def _load_run_context(
             for item in artifacts
         )
         if (
-            link.source_id in accepted_p05_sources
+            link.source_id in accepted_preprocess_sources
             and not has_p08
             and link.processing_status != "processed_no_forecast"
             and link.local_input_path
@@ -292,6 +341,8 @@ def _load_run_context(
         "rejected": rejected,
         "unevaluable": context.unevaluable_open,
         "processed_no_forecast": context.processed_no_forecast,
+        "pending_p05": len(context.pending_p05),
+        "pending_p07": len(context.pending_p07),
     }
     return context
 
@@ -308,6 +359,26 @@ def _latest_evaluation(
         key=lambda item: (item.evaluation_as_of, item.created_at),
         reverse=True,
     )[0]
+
+
+def _resolution_refs_for_component(
+    session: Session,
+    component_id: str,
+) -> dict[str, str | None]:
+    candidate = session.scalar(
+        select(TargetResolutionCandidateRecord)
+        .where(TargetResolutionCandidateRecord.forecast_component_id == component_id)
+        .order_by(TargetResolutionCandidateRecord.created_at.desc())
+    )
+    review = session.scalar(
+        select(TargetResolutionReviewRecord)
+        .where(TargetResolutionReviewRecord.forecast_component_id == component_id)
+        .order_by(TargetResolutionReviewRecord.created_at.desc())
+    )
+    return {
+        "proposal_artifact_id": candidate.proposal_artifact_id if candidate is not None else None,
+        "review_artifact_id": review.review_artifact_id if review is not None else None,
+    }
 
 
 def _choose_action(
@@ -341,6 +412,7 @@ def _choose_action(
         )
 
     if context.needs_review_unresolved > 0:
+        review_prompt = "P06" if context.pending_p06 else "P09"
         return (
             "awaiting_ai_review",
             WorkflowAction(
@@ -348,12 +420,42 @@ def _choose_action(
                 title="低確信度のAI出力をレビューする",
                 reason=(
                     f"未解決のneeds_reviewが{context.needs_review_unresolved}件あります。"
-                    "修正版または別AIレビューを取り込んでください。"
+                    f"{review_prompt}の別AIレビューを取り込んでください。"
                 ),
                 executor="[AI Cursor]",
                 inputs=["03_ai_outputs/needs_review/", *context.existing_inputs[:3]],
                 outputs=["修正版JSONまたは問題点"],
-                command_or_prompt="低確信度箇所だけを原文引用に基づいて再検証してください。",
+                command_or_prompt=(
+                    f"{run_path / '01_prompts'} の{review_prompt}を実行し、"
+                    "analyst-forecast ai ingest <出力JSON> で取り込んでください。"
+                ),
+            ),
+            [],
+        )
+
+    if context.pending_p05 or context.pending_p07:
+        if context.pending_p05 and not context.pending_p07:
+            prompt_id = "P05"
+            inputs = context.pending_p05[:5]
+        elif context.pending_p07 and not context.pending_p05:
+            prompt_id = "P07"
+            inputs = context.pending_p07[:5]
+        else:
+            prompt_id = "P05/P07"
+            inputs = (context.pending_p05 + context.pending_p07)[:5]
+        return (
+            "awaiting_source_preprocess",
+            WorkflowAction(
+                action_id="RUN_PREPROCESS",
+                title="媒体別の原文前処理を実行する",
+                reason=f"{prompt_id}の前処理が未完了のSOURCEがあります。",
+                executor="[AI Cursor]",
+                inputs=inputs or context.existing_inputs[:5],
+                outputs=["02_sources/*/processed/"],
+                command_or_prompt=(
+                    f"{run_path / '01_prompts'} の{prompt_id}を実行し、"
+                    "analyst-forecast ai ingest <出力JSON> で取り込んでください。"
+                ),
             ),
             [],
         )
@@ -364,7 +466,7 @@ def _choose_action(
             WorkflowAction(
                 action_id="EXTRACT_FORECASTS",
                 title="AIで予想抽出を実行する",
-                reason="P05受理済みですが、予想抽出（P08）が未完了です。",
+                reason="前処理受理済みですが、予想抽出（P08）が未完了です。",
                 executor="[AI Cursor]",
                 inputs=context.pending_p08[:5] or context.existing_inputs[:5],
                 outputs=["03_ai_outputs/inbox/forecast_extraction.json"],
@@ -434,31 +536,80 @@ def _choose_action(
         )
 
     if context.pending_p11:
+        component_id = context.pending_p11[0]
         return (
             "awaiting_target_resolution",
             WorkflowAction(
                 action_id="RUN_P11",
                 title="P11対象解決提案を実行する",
-                reason="構成予想の対象解決が未完了です。",
+                reason=f"構成予想 {component_id} の対象解決が未完了です。",
                 executor="[AI Cursor]",
-                inputs=[*context.pending_p11[:3], *context.existing_inputs[:2]],
+                inputs=[
+                    f"run_id={run.run_id}",
+                    f"component_id={component_id}",
+                    *context.existing_inputs[:2],
+                ],
                 outputs=["03_ai_outputs/inbox/p11_*.json"],
-                command_or_prompt="P11を実行し analyst-forecast ai ingest で取り込んでください。",
+                command_or_prompt=(
+                    f"P11を component {component_id} に対して実行し、"
+                    "analyst-forecast ai ingest で取り込んでください。"
+                ),
             ),
             [],
         )
 
     if context.pending_p12:
+        component_id = context.pending_p12[0]
+        refs = context.resolution_refs.get(component_id, {})
+        proposal_id = refs.get("proposal_artifact_id") or "（P11成果物IDをstatusで確認）"
         return (
             "awaiting_target_review",
             WorkflowAction(
                 action_id="RUN_P12",
                 title="P12対象レビューを実行する",
-                reason="対象解決の独立レビューが未完了です。",
+                reason=f"構成予想 {component_id} の独立レビューが未完了です。",
                 executor="[AI Cursor]",
-                inputs=context.pending_p12[:3],
+                inputs=[
+                    f"run_id={run.run_id}",
+                    f"component_id={component_id}",
+                    f"proposal_artifact_id={proposal_id}",
+                ],
                 outputs=["03_ai_outputs/inbox/p12_*.json"],
-                command_or_prompt="P11とは別実行でP12を行い、ai ingestしてください。",
+                command_or_prompt=(
+                    f"P11とは別実行でP12を component {component_id} "
+                    f"(proposal={proposal_id}) に行い、ai ingestしてください。"
+                ),
+            ),
+            [],
+        )
+
+    if context.pending_p13:
+        component_id = context.pending_p13[0]
+        refs = context.resolution_refs.get(component_id, {})
+        proposal_id = refs.get("proposal_artifact_id") or "（P11成果物IDをstatusで確認）"
+        review_id = refs.get("review_artifact_id") or "（P12成果物IDをstatusで確認）"
+        return (
+            "awaiting_target_adjudication",
+            WorkflowAction(
+                action_id="RUN_P13",
+                title="P13対象解決の裁定を実行する",
+                reason=(
+                    f"構成予想 {component_id} でP11とP12が不一致のため、"
+                    "市場評価の前にP13裁定が必要です。"
+                ),
+                executor="[AI Cursor]",
+                inputs=[
+                    f"run_id={run.run_id}",
+                    f"component_id={component_id}",
+                    f"proposal_artifact_id={proposal_id}",
+                    f"review_artifact_id={review_id}",
+                ],
+                outputs=["03_ai_outputs/inbox/p13_*.json"],
+                command_or_prompt=(
+                    f"P13を component {component_id} "
+                    f"(proposal={proposal_id}, review={review_id}) に実行し、"
+                    "ai ingestしてください。市場評価はまだ行わないでください。"
+                ),
             ),
             [],
         )
@@ -500,6 +651,24 @@ def _choose_action(
                     ),
                 )
             ],
+        )
+
+    if context.unresolvable_components and not context.unevaluated_components:
+        return (
+            "target_unresolvable",
+            WorkflowAction(
+                action_id="REVIEW_UNRESOLVABLE",
+                title="対象解決不能の結果を確認する",
+                reason=(
+                    "対象がunresolvableとして確定したため、推測値での市場取得は行いません。"
+                    f"対象component: {', '.join(context.unresolvable_components[:5])}"
+                ),
+                executor="[USER]",
+                inputs=context.unresolvable_components[:5],
+                outputs=["評価不能としての確認", "04_results/"],
+                command_or_prompt="同じP11/P12を無限反復せず、結果確認または別原文追加へ進んでください。",
+            ),
+            [],
         )
 
     if context.unevaluable_open > 0:
