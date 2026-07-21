@@ -13,6 +13,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from analyst_forecast.application.ai_ingestion import ingest_ai_output
+from analyst_forecast.application.analysts import add_analyst_alias, list_analyst_aliases
 from analyst_forecast.application.bootstrap import initialize_workspace
 from analyst_forecast.application.evaluation import evaluate_component
 from analyst_forecast.application.raw_sources import RawSourceRequest, import_raw_source
@@ -69,6 +70,9 @@ app.add_typer(market_app, name="market")
 config_app = typer.Typer(help="ローカル設定")
 app.add_typer(config_app, name="config")
 
+analyst_app = typer.Typer(help="分析対象者の alias などを管理します。")
+app.add_typer(analyst_app, name="analyst")
+
 
 @config_app.command("set-model", help="高性能モデル名をローカル設定へ保存します。")
 def set_model_command(
@@ -95,6 +99,54 @@ def set_model_command(
         )
     except Exception as error:
         _fail("モデル設定に失敗しました", error)
+
+
+@analyst_app.command("add-alias", help="分析対象者へ alias を登録します（NFKC exact照合用）。")
+def analyst_add_alias_command(
+    alias: Annotated[str, typer.Argument(help="追加する別名")],
+    analyst_id: Annotated[str | None, typer.Option("--analyst-id", help="分析対象者ID")] = None,
+    canonical_name: Annotated[
+        str | None, typer.Option("--name", help="canonical_nameで検索")
+    ] = None,
+    config: Annotated[
+        Path, typer.Option("--config", help="ローカル設定ファイル")
+    ] = DEFAULT_CONFIG_PATH,
+) -> None:
+    try:
+        settings = load_settings(config)
+        result = add_analyst_alias(
+            settings,
+            analyst_id=analyst_id,
+            canonical_name=canonical_name,
+            alias=alias,
+        )
+    except Exception as error:
+        _fail("alias登録に失敗しました", error)
+    typer.echo(
+        f"aliasを更新しました。\n"
+        f"analyst_id={result.analyst_id}\n"
+        f"canonical_name={result.canonical_name}\n"
+        f"aliases={list(result.aliases)}"
+    )
+
+
+@analyst_app.command("list-aliases", help="分析対象者の alias 一覧を表示します。")
+def analyst_list_aliases_command(
+    analyst_id: Annotated[str, typer.Argument(help="分析対象者ID")],
+    config: Annotated[
+        Path, typer.Option("--config", help="ローカル設定ファイル")
+    ] = DEFAULT_CONFIG_PATH,
+) -> None:
+    try:
+        settings = load_settings(config)
+        result = list_analyst_aliases(settings, analyst_id=analyst_id)
+    except Exception as error:
+        _fail("alias一覧の取得に失敗しました", error)
+    typer.echo(
+        f"analyst_id={result.analyst_id}\n"
+        f"canonical_name={result.canonical_name}\n"
+        f"aliases={list(result.aliases)}"
+    )
 
 
 @app.command("init", help="作業領域を初期化し、設定とSQLiteを作成します。")

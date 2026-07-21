@@ -41,10 +41,13 @@ class CsvMarketDataProvider:
                     raise MarketDataUnavailable(
                         "市場CSVの必須列が不足しています: " + ", ".join(sorted(missing))
                     )
-                bars = tuple(
-                    self._parse_row(row, line_number)
-                    for line_number, row in enumerate(reader, start=2)
-                    if self._in_range(row.get("date"), request)
+                has_symbol = "symbol" in columns
+                has_currency = "currency" in columns
+                bars = self._read_bars(
+                    reader,
+                    request=request,
+                    has_symbol=has_symbol,
+                    has_currency=has_currency,
                 )
         except UnicodeDecodeError as error:
             raise MarketDataUnavailable("市場CSVをUTF-8として読めません") from error
@@ -59,11 +62,63 @@ class CsvMarketDataProvider:
             bars=bars,
         )
 
+    def _read_bars(
+        self,
+        reader: csv.DictReader[str],
+        *,
+        request: MarketDataRequest,
+        has_symbol: bool,
+        has_currency: bool,
+    ) -> tuple[MarketBar, ...]:
+        symbol_matched = False
+        seen_keys: set[tuple[str, date] | date] = set()
+        bars: list[MarketBar] = []
+        for line_number, row in enumerate(reader, start=2):
+            if has_symbol:
+                row_symbol = (row.get("symbol") or "").strip()
+                if not row_symbol:
+                    raise MarketDataUnavailable(f"市場CSVの{line_number}行目のsymbolが空です")
+                if row_symbol != request.symbol:
+                    continue
+                symbol_matched = True
+                if has_currency:
+                    row_currency = (row.get("currency") or "").strip()
+                    if not row_currency:
+                        raise MarketDataUnavailable(f"市場CSVの{line_number}行目のcurrencyが空です")
+                    if row_currency != request.currency:
+                        raise MarketDataUnavailable(
+                            f"市場CSVのcurrencyがrequestと不一致です: "
+                            f"{row_currency} != {request.currency}"
+                        )
+
+            raw_date = row.get("date")
+            if not self._in_range(raw_date, request):
+                continue
+
+            day = date.fromisoformat(_required(row, "date"))
+            dup_key: tuple[str, date] | date
+            if has_symbol:
+                dup_key = (request.symbol, day)
+                dup_message = (
+                    f"市場CSVに同一symbol+dateの重複があります: {request.symbol} {day.isoformat()}"
+                )
+            else:
+                dup_key = day
+                dup_message = f"市場CSVに同一dateの重複があります: {day.isoformat()}"
+            if dup_key in seen_keys:
+                raise MarketDataUnavailable(dup_message)
+            seen_keys.add(dup_key)
+            bars.append(self._parse_row(row, line_number))
+
+        if has_symbol and not symbol_matched:
+            raise MarketDataUnavailable(f"市場CSVにsymbolがありません: {request.symbol}")
+        return tuple(bars)
+
     def _in_range(self, raw_date: str | None, request: MarketDataRequest) -> bool:
         if raw_date is None:
             raise MarketDataUnavailable("市場CSVの日付が空です")
         try:
-            day = date.fromisoformat(raw_date)
+            day = date.fromisoformat(raw_date.strip())
         except ValueError as error:
             raise MarketDataUnavailable(f"市場CSVの日付形式が不正です: {raw_date}") from error
         return request.start <= day <= request.end

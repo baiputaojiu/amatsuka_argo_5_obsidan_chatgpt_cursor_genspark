@@ -26,9 +26,10 @@ blog / X / web の raw が登録され、NEXT_ACTIONS が前処理を指示し�
 
 ## 判定基準（必須）
 - statement_kind を区別: author_own / direct_quote / third_party_summary / repost / reply。
+- content_author（記事著者）と statement_speaker（直接引用の発言者）を分離する。direct_quote では両方を出力する。
 - 本人執筆・直接引用だけを正式予想候補の上流とし、記者要約・第三者要約は区別して保持する。
 - 引用投稿・返信・転載の関係を根拠に残す。
-- knowledge_cutoff は公開・発言時点を越えない。
+- knowledge_cutoff は published_at 等の公開・発言時点を越えない。市場結果を渡さない。
 
 ## 禁止事項・注意事項
 {{warning}}

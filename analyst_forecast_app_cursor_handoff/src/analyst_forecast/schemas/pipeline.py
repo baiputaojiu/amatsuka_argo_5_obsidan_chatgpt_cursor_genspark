@@ -142,6 +142,9 @@ class TextSegmentOutput(PipelineModel):
     author_status: Literal["identified", "unknown"]
     author_candidate: str | None = Field(default=None, max_length=200)
     author_confidence: float = Field(ge=0.0, le=1.0)
+    # 記事著者と引用発言者を分離（direct_quote時）
+    content_author: str | None = Field(default=None, max_length=200)
+    statement_speaker: str | None = Field(default=None, max_length=200)
     statement_kind: Literal[
         "author_own",
         "direct_quote",
@@ -162,6 +165,8 @@ class TextSegmentOutput(PipelineModel):
             raise ValueError("unknown authorにauthor_candidateを設定できません")
         if self.author_status == "identified" and not self.author_candidate:
             raise ValueError("identified authorにはauthor_candidateが必要です")
+        if self.statement_kind == "direct_quote" and not self.statement_speaker:
+            raise ValueError("direct_quoteにはstatement_speakerが必要です")
         if self.importance == "high" and not self.high_importance_reason:
             raise ValueError("高重要度には理由が必要です")
         return self

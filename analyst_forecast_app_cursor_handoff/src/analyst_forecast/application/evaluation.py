@@ -6,11 +6,11 @@ import io
 import json
 import re
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from analyst_forecast.application.settings import AppSettings
@@ -153,38 +153,15 @@ def evaluate_component(
             run_id=resolved_run_id,
             method_version=method_version,
         )
-    currencies = {item["currency"] for item in instruments}
-    if len(currencies) > 1:
+    instrument_error = _validate_instruments(instruments)
+    if instrument_error is not None:
         return _store_without_values(
             settings,
             component_id=component_id,
             mapping_id=mapping_id,
             as_of=as_of,
             status="unevaluable",
-            reason="unevaluable_mixed_currency",
-            run_id=resolved_run_id,
-            method_version=method_version,
-        )
-    weight_total = sum(float(str(item["weight"])) for item in instruments)
-    if abs(weight_total - 1.0) > 0.000001:
-        return _store_without_values(
-            settings,
-            component_id=component_id,
-            mapping_id=mapping_id,
-            as_of=as_of,
-            status="unevaluable",
-            reason="instrument weight合計が1ではありません",
-            run_id=resolved_run_id,
-            method_version=method_version,
-        )
-    if any(float(str(item["weight"])) < 0 for item in instruments):
-        return _store_without_values(
-            settings,
-            component_id=component_id,
-            mapping_id=mapping_id,
-            as_of=as_of,
-            status="unevaluable",
-            reason="負のweightは初期版では禁止です",
+            reason=instrument_error,
             run_id=resolved_run_id,
             method_version=method_version,
         )
@@ -217,6 +194,19 @@ def evaluate_component(
     provider_error_code: str | None = None
     provider_error_message: str | None = None
     retryable: str | None = None
+    series_kind = "raw"
+    series_identity: str | None = None
+    mapping_hash: str | None = None
+    input_series_hashes: list[str] | None = None
+    basket_weights: list[float] | None = None
+    common_date_rule: str | None = None
+    store_provider: str
+    store_symbol: str
+    store_currency: str
+    store_adjustment_type: str
+    store_frequency: str
+    store_retrieved_at: datetime
+    raw_series_payloads: list[dict[str, object]] = []
     try:
         if len(instruments) == 1:
             instrument = instruments[0]
@@ -232,6 +222,7 @@ def evaluate_component(
                 cache_hit = True
             else:
                 series = provider.fetch(request)
+                _validate_provider_series(series, request)
             bars = tuple(
                 bar for bar in series.bars if normalized_start <= bar.date <= effective_end
             )
@@ -242,8 +233,22 @@ def evaluate_component(
             end_price = bars[-1].adjusted_close
             if start_price <= 0:
                 raise MarketDataUnavailable("開始値が0以下のため変化率を計算できません")
+            series_kind = "raw"
+            series_identity = request.symbol
+            store_provider = series.provider
+            store_symbol = request.symbol
+            store_currency = series.currency
+            store_adjustment_type = series.adjustment_type
+            store_frequency = series.frequency
+            store_retrieved_at = series.retrieved_at
         else:
+            mapping_hash = _basket_mapping_hash(instruments)
+            series_identity = f"BASKET:{mapping_hash}"
+            series_kind = "basket"
+            common_date_rule = "intersection_all_instruments_v1"
+            basket_weights = [float(str(item["weight"])) for item in instruments]
             series_by_symbol: dict[str, MarketSeries] = {}
+            raw_cache_hits: dict[str, bool] = {}
             for instrument in instruments:
                 request = MarketDataRequest(
                     symbol=str(instrument["symbol"]),
@@ -254,9 +259,13 @@ def evaluate_component(
                 cached = _load_cached_series(settings, request, provider_name=provider.name)
                 if cached is not None:
                     series_by_symbol[str(instrument["symbol"])] = cached
+                    raw_cache_hits[str(instrument["symbol"])] = True
                     cache_hit = True
                 else:
-                    series_by_symbol[str(instrument["symbol"])] = provider.fetch(request)
+                    fetched = provider.fetch(request)
+                    _validate_provider_series(fetched, request)
+                    series_by_symbol[str(instrument["symbol"])] = fetched
+                    raw_cache_hits[str(instrument["symbol"])] = False
             common_dates = _common_bar_dates(series_by_symbol, normalized_start, effective_end)
             if len(common_dates) < 1:
                 raise MarketDataUnavailable(
@@ -270,7 +279,50 @@ def evaluate_component(
             end_price = bars[-1].adjusted_close
             if start_price <= 0:
                 raise MarketDataUnavailable("開始値が0以下のため変化率を計算できません")
-            series = next(iter(series_by_symbol.values()))
+            first_series = series_by_symbol[str(instruments[0]["symbol"])]
+            store_provider = provider.name
+            store_symbol = series_identity
+            store_currency = str(instruments[0]["currency"])
+            store_adjustment_type = first_series.adjustment_type
+            store_frequency = first_series.frequency
+            store_retrieved_at = datetime.now(UTC)
+            input_series_hashes = []
+            for instrument in instruments:
+                symbol = str(instrument["symbol"])
+                raw_series = series_by_symbol[symbol]
+                raw_bars = tuple(
+                    bar for bar in raw_series.bars if normalized_start <= bar.date <= effective_end
+                )
+                raw_hash, raw_csv = _serialize_bars(
+                    provider=raw_series.provider,
+                    symbol=symbol,
+                    currency=str(instrument["currency"]),
+                    adjustment_type=raw_series.adjustment_type,
+                    bars=raw_bars,
+                )
+                input_series_hashes.append(raw_hash)
+                raw_series_payloads.append(
+                    {
+                        "provider": raw_series.provider,
+                        "symbol": symbol,
+                        "currency": str(instrument["currency"]),
+                        "adjustment_type": raw_series.adjustment_type,
+                        "frequency": raw_series.frequency,
+                        "retrieved_at": raw_series.retrieved_at,
+                        "start_date": raw_bars[0].date if raw_bars else bars[0].date,
+                        "end_date": raw_bars[-1].date if raw_bars else bars[-1].date,
+                        "data_hash": raw_hash,
+                        "csv_content": raw_csv,
+                        "series_kind": "raw",
+                        "series_identity": symbol,
+                        "mapping_hash": None,
+                        "input_series_hashes": None,
+                        "basket_weights": None,
+                        "common_date_rule": None,
+                        "cache_hit": "yes" if raw_cache_hits.get(symbol) else "no",
+                        "attempt_count": attempt_count,
+                    }
+                )
     except ProviderError as error:
         return _store_without_values(
             settings,
@@ -325,43 +377,37 @@ def evaluate_component(
     )
 
     data_hash, csv_content = _serialize_bars(
-        provider=series.provider,
-        symbol=series.symbol,
-        currency=series.currency,
-        adjustment_type=series.adjustment_type,
+        provider=store_provider,
+        symbol=store_symbol,
+        currency=store_currency,
+        adjustment_type=store_adjustment_type,
         bars=bars,
     )
-    cache_path = _cache_market_series(
-        settings,
-        provider=series.provider,
-        symbol=series.symbol,
-        data_hash=data_hash,
-        content=csv_content,
-    )
+    evaluation_payload = {
+        "provider": store_provider,
+        "symbol": store_symbol,
+        "currency": store_currency,
+        "adjustment_type": store_adjustment_type,
+        "frequency": store_frequency,
+        "retrieved_at": store_retrieved_at,
+        "start_date": bars[0].date,
+        "end_date": bars[-1].date,
+        "data_hash": data_hash,
+        "csv_content": csv_content,
+        "series_kind": series_kind,
+        "series_identity": series_identity,
+        "mapping_hash": mapping_hash,
+        "input_series_hashes": input_series_hashes,
+        "basket_weights": basket_weights,
+        "common_date_rule": common_date_rule,
+        "cache_hit": "yes" if cache_hit else "no",
+        "attempt_count": attempt_count,
+    }
 
     with session_factory.begin() as session:
-        existing_series = session.scalar(
-            select(MarketSeriesRecord).where(MarketSeriesRecord.data_hash == data_hash)
-        )
-        if existing_series is None:
-            existing_series = MarketSeriesRecord(
-                market_series_id=next_id(session, "MKS-", width=6, sequence_key="MARKET_SERIES"),
-                provider=series.provider,
-                symbol=series.symbol,
-                currency=series.currency,
-                adjustment_type=series.adjustment_type,
-                frequency=series.frequency,
-                start_date=bars[0].date,
-                end_date=bars[-1].date,
-                retrieved_at=series.retrieved_at,
-                raw_cache_path=cache_path.relative_to(settings.vault_root).as_posix(),
-                data_hash=data_hash,
-                quality_status="valid",
-                cache_hit="yes" if cache_hit else "no",
-                attempt_count=attempt_count,
-            )
-            session.add(existing_series)
-            session.flush()
+        for payload in raw_series_payloads:
+            _upsert_market_series(session, settings, payload)
+        existing_series = _upsert_market_series(session, settings, evaluation_payload)
         evaluation = EvaluationRecord(
             evaluation_id=next_id(session, "EVAL-", width=6, sequence_key="EVALUATION"),
             forecast_component_id=component_id,
@@ -407,6 +453,52 @@ def evaluate_component(
 
     refresh_workflow(settings, resolved_run_id)
     return result
+
+
+def _validate_instruments(instruments: list[dict[str, object]]) -> str | None:
+    symbols = [str(item["symbol"]) for item in instruments]
+    if len(symbols) != len(set(symbols)):
+        return "同一symbolの重複instrumentは禁止です"
+    currencies = {str(item["currency"]) for item in instruments}
+    if len(currencies) > 1:
+        return "unevaluable_mixed_currency"
+    weights = [float(str(item["weight"])) for item in instruments]
+    if any(weight <= 0 for weight in weights):
+        return "weightは正の値である必要があります"
+    weight_total = sum(weights)
+    if abs(weight_total - 1.0) > 1e-6:
+        return "instrument weight合計が1ではありません"
+    return None
+
+
+def _basket_mapping_hash(instruments: list[dict[str, object]]) -> str:
+    payload = {
+        "instruments": sorted(
+            [
+                {
+                    "symbol": str(item["symbol"]),
+                    "currency": str(item["currency"]),
+                    "weight": float(str(item["weight"])),
+                }
+                for item in instruments
+            ],
+            key=lambda item: (item["symbol"], item["currency"]),
+        ),
+        "common_date_rule": "intersection_all_instruments_v1",
+        "method": "weighted_adjusted_return_index_v1",
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def _validate_provider_series(series: MarketSeries, request: MarketDataRequest) -> None:
+    if series.symbol != request.symbol:
+        raise MarketDataUnavailable(
+            f"providerのsymbolがrequestと不一致です: {series.symbol} != {request.symbol}"
+        )
+    if series.currency != request.currency:
+        raise MarketDataUnavailable(
+            f"providerのcurrencyがrequestと不一致です: {series.currency} != {request.currency}"
+        )
 
 
 def _normalize_instruments(
@@ -650,6 +742,10 @@ def _load_cached_series(
                 MarketSeriesRecord.start_date <= request.start,
                 MarketSeriesRecord.end_date >= request.end,
                 MarketSeriesRecord.quality_status == "valid",
+                or_(
+                    MarketSeriesRecord.series_kind == "raw",
+                    MarketSeriesRecord.series_kind.is_(None),
+                ),
             )
             .order_by(MarketSeriesRecord.retrieved_at.desc())
         )
@@ -661,6 +757,73 @@ def _load_cached_series(
         from analyst_forecast.infrastructure.market.csv_provider import CsvMarketDataProvider
 
         return CsvMarketDataProvider(csv_path=cache_path).fetch(request)
+
+
+def _upsert_market_series(
+    session: Session,
+    settings: AppSettings,
+    payload: dict[str, object],
+) -> MarketSeriesRecord:
+    from typing import cast
+
+    data_hash = str(payload["data_hash"])
+    existing = session.scalar(
+        select(MarketSeriesRecord).where(MarketSeriesRecord.data_hash == data_hash)
+    )
+    if existing is not None:
+        return existing
+    cache_path = _cache_market_series(
+        settings,
+        provider=str(payload["provider"]),
+        symbol=str(payload["symbol"]),
+        data_hash=data_hash,
+        content=str(payload["csv_content"]),
+    )
+    raw_hashes = payload.get("input_series_hashes")
+    raw_weights = payload.get("basket_weights")
+    record = MarketSeriesRecord(
+        market_series_id=next_id(session, "MKS-", width=6, sequence_key="MARKET_SERIES"),
+        provider=str(payload["provider"]),
+        symbol=str(payload["symbol"]),
+        currency=str(payload["currency"]),
+        adjustment_type=str(payload["adjustment_type"]),
+        frequency=str(payload["frequency"]),
+        start_date=cast(date, payload["start_date"]),
+        end_date=cast(date, payload["end_date"]),
+        retrieved_at=cast(datetime, payload["retrieved_at"]),
+        raw_cache_path=cache_path.relative_to(settings.vault_root).as_posix(),
+        data_hash=data_hash,
+        quality_status="valid",
+        series_kind=str(payload.get("series_kind") or "raw"),
+        series_identity=(
+            str(payload["series_identity"]) if payload.get("series_identity") is not None else None
+        ),
+        mapping_hash=(
+            str(payload["mapping_hash"]) if payload.get("mapping_hash") is not None else None
+        ),
+        input_series_hashes=(
+            [str(item) for item in cast(list[object], raw_hashes)]
+            if isinstance(raw_hashes, list)
+            else None
+        ),
+        basket_weights=(
+            [float(cast(float | int | str, item)) for item in cast(list[object], raw_weights)]
+            if isinstance(raw_weights, list)
+            else None
+        ),
+        common_date_rule=(
+            str(payload["common_date_rule"])
+            if payload.get("common_date_rule") is not None
+            else None
+        ),
+        cache_hit=str(payload.get("cache_hit") or "no"),
+        attempt_count=(
+            int(str(payload["attempt_count"])) if payload.get("attempt_count") is not None else None
+        ),
+    )
+    session.add(record)
+    session.flush()
+    return record
 
 
 def _serialize_bars(

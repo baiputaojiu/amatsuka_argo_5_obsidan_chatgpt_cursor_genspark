@@ -98,6 +98,32 @@
           "default": null,
           "title": "Author Candidate"
         },
+        "content_author": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content Author"
+        },
+        "statement_speaker": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Statement Speaker"
+        },
         "author_confidence": {
           "maximum": 1.0,
           "minimum": 0.0,

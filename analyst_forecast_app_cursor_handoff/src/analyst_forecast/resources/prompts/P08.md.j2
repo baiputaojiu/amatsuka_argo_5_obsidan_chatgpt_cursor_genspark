@@ -34,8 +34,11 @@
 - 上昇後下落等はcomponent分割するが件数水増ししない。
 - 発言者明示の期間、AI推定、system default を混同しない。期間不明を1年予想へ変換しない。
 - 原文にない symbol・日付・数値・確率を補わない。
-- 上流segmentへ関連付け、speaker_attribution_status は target_confirmed / uncertain / not_target。
+- 上流segmentへ関連付け、speaker_attribution_status は target_confirmed / uncertain / not_target / legacy_unknown。
+- AIの target_confirmed は Python 検証前の申告値。正式化は Python が segment 話者と Analyst canonical/alias（NFKC exact）を照合した verified attribution のみ。
+- non-empty upstream_segment_refs と evidence quote/offset を必須にする。
 - 第三者要約だけは正式予想にしない。
+- knowledge_cutoff・made_at・publicly_available_at は発言時点境界を超えない。市場結果を根拠に使わない。
 
 ## 禁止事項・注意事項
 {{warning}}

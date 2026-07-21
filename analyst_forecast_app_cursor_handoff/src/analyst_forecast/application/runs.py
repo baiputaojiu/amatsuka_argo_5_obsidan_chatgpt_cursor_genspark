@@ -54,7 +54,9 @@ def create_run(
     now: datetime | None = None,
 ) -> CreateRunResult:
     timestamp = now or datetime.now(UTC)
-    normalized_name = " ".join(request.canonical_name.split()).casefold()
+    from analyst_forecast.domain.attribution import normalize_person_name
+
+    normalized_name = normalize_person_name(request.canonical_name)
     if not normalized_name:
         raise ValueError("分析対象者名は空にできません")
 

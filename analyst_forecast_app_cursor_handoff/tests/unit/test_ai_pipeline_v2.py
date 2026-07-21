@@ -108,6 +108,7 @@ def _p08_payload(
                 "forecast_group_ref": "group-1",
                 "made_at": "2026-01-10T09:00:00+00:00",
                 "publicly_available_at": "2026-01-10T10:00:00+00:00",
+                "made_at_source": "explicit",
                 "forecast_type": "directional",
                 "commitment_strength": "explicit",
                 "evidence_level": "A",
@@ -118,6 +119,12 @@ def _p08_payload(
                 ),
                 "human_readable_summary": quote,
                 "relation_to_previous": "initial",
+                "upstream_segment_refs": ["segment-1"],
+                "speaker_candidate": "匿名アナリストA",
+                "speaker_attribution_status": "target_confirmed",
+                "attribution_confidence": 0.95,
+                "attribution_basis": "本人segment",
+                "statement_kind": "direct_statement",
                 "evidence": [
                     {
                         "source_id": source_id,

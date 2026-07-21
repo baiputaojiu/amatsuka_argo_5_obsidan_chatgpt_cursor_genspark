@@ -82,7 +82,8 @@ def test_scenario_a_vertical_with_forecast(tmp_path: Path) -> None:
             input_path=raw,
             medium=Medium.YOUTUBE,
             url="https://example.invalid/a",
-            published_at=datetime(2026, 1, 10, tzinfo=UTC),
+            recorded_at=datetime(2026, 1, 10, 9, tzinfo=UTC),
+            published_at=datetime(2026, 1, 10, 10, tzinfo=UTC),
             retrieved_at=datetime(2026, 7, 20, tzinfo=UTC),
         ),
     )
@@ -131,7 +132,8 @@ def test_scenario_g_direction_mfe(tmp_path: Path) -> None:
             input_path=raw,
             medium=Medium.YOUTUBE,
             url="https://example.invalid/g",
-            published_at=datetime(2026, 1, 10, tzinfo=UTC),
+            recorded_at=datetime(2026, 1, 10, 9, tzinfo=UTC),
+            published_at=datetime(2026, 1, 10, 10, tzinfo=UTC),
             retrieved_at=datetime(2026, 7, 20, tzinfo=UTC),
         ),
     )

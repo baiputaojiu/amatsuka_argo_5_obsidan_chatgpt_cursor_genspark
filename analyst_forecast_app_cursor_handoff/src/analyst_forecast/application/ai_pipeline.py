@@ -18,10 +18,21 @@ from analyst_forecast.application.ai_ingestion import (
     ValidationIssue,
 )
 from analyst_forecast.application.settings import AppSettings
+from analyst_forecast.domain.attribution import (
+    AttributionVerification,
+    is_formal_verified,
+    verify_forecast_attribution,
+)
+from analyst_forecast.domain.knowledge_boundary import (
+    KnowledgeBoundary,
+    source_knowledge_boundary,
+    validate_knowledge_cutoff,
+)
 from analyst_forecast.infrastructure.db.backup import backup_database
 from analyst_forecast.infrastructure.db.ids import next_id
 from analyst_forecast.infrastructure.db.models import (
     AiArtifactRecord,
+    AnalystRecord,
     ForecastComponentRecord,
     ForecastEvidenceRecord,
     ForecastGroupRecord,
@@ -265,12 +276,26 @@ def _validate_references(
             issues.extend(_validate_p07(settings, session, source, payload))
         elif isinstance(payload, P06Output):
             issues.extend(
-                _validate_review_artifact(session, payload, allowed_prompts=("P05", "P07"))
+                _validate_review_artifact(
+                    settings,
+                    session,
+                    source,
+                    payload,
+                    allowed_prompts=("P05", "P07"),
+                )
             )
         elif isinstance(payload, P08Output):
             issues.extend(_validate_p08(settings, session, source, payload))
         elif isinstance(payload, P09Output):
-            issues.extend(_validate_review_artifact(session, payload, allowed_prompts=("P08",)))
+            issues.extend(
+                _validate_review_artifact(
+                    settings,
+                    session,
+                    source,
+                    payload,
+                    allowed_prompts=("P08",),
+                )
+            )
         elif isinstance(payload, P11Output):
             issues.extend(_validate_p11(session, run, payload))
         elif isinstance(payload, P12Output):
@@ -325,7 +350,10 @@ def _validate_p05(
     session: Session,
     source: SourceRecord,
     payload: P05Output,
+    *,
+    from_review: bool = False,
 ) -> list[ValidationIssue]:
+    del from_review  # recursion guard for review→corrected path
     if source.medium != "youtube":
         return [
             ValidationIssue(
@@ -343,6 +371,12 @@ def _validate_p05(
         segments=list(payload.segments),
         prompt_label="P05",
     )
+    issues.extend(
+        validate_knowledge_cutoff(
+            payload.knowledge_cutoff,
+            _source_boundary(source),
+        )
+    )
     return issues
 
 
@@ -351,7 +385,10 @@ def _validate_p07(
     session: Session,
     source: SourceRecord,
     payload: P07Output,
+    *,
+    from_review: bool = False,
 ) -> list[ValidationIssue]:
+    del from_review  # recursion guard for review→corrected path
     if source.medium == "youtube":
         return [
             ValidationIssue(
@@ -359,7 +396,7 @@ def _validate_p07(
                 "P07は非YouTube媒体専用です。YouTubeはP05を使ってください。",
             )
         ]
-    return _validate_text_preprocess(
+    issues = _validate_text_preprocess(
         settings,
         session,
         source,
@@ -369,13 +406,23 @@ def _validate_p07(
         segments=list(payload.segments),
         prompt_label="P07",
     )
+    issues.extend(
+        validate_knowledge_cutoff(
+            payload.knowledge_cutoff,
+            _source_boundary(source),
+        )
+    )
+    return issues
 
 
 def _validate_review_artifact(
+    settings: AppSettings,
     session: Session,
+    source: SourceRecord,
     payload: P06Output | P09Output,
     *,
     allowed_prompts: tuple[str, ...],
+    from_review: bool = False,
 ) -> list[ValidationIssue]:
     reviewed = session.get(AiArtifactRecord, payload.reviewed_artifact_id)
     if (
@@ -407,17 +454,66 @@ def _validate_review_artifact(
                 "$['reviewed_artifact_id']",
             )
         ]
+    issues = validate_knowledge_cutoff(
+        payload.knowledge_cutoff,
+        _source_boundary(source),
+    )
     if payload.decision == "correct" and payload.corrected_payload is not None:
+        if from_review:
+            return issues
         model_class = PIPELINE_MODELS.get(reviewed.prompt_id)
         if model_class is None:
-            return [
+            issues.append(
                 ValidationIssue("unsupported_corrected_prompt", "修正payloadのpromptが未対応です。")
-            ]
+            )
+            return issues
         try:
-            model_class.model_validate(payload.corrected_payload)
+            corrected = model_class.model_validate(payload.corrected_payload)
         except ValidationError as error:
-            return _pydantic_issues(error)
-    return []
+            issues.extend(_pydantic_issues(error))
+            return issues
+        if getattr(corrected, "run_id", None) != payload.run_id:
+            issues.append(
+                ValidationIssue(
+                    "corrected_run_mismatch",
+                    "修正payloadのrun_idがレビューと一致しません。",
+                    "$['corrected_payload']['run_id']",
+                )
+            )
+        if getattr(corrected, "source_id", None) != payload.source_id:
+            issues.append(
+                ValidationIssue(
+                    "corrected_source_mismatch",
+                    "修正payloadのsource_idがレビューと一致しません。",
+                    "$['corrected_payload']['source_id']",
+                )
+            )
+        if isinstance(corrected, P05Output):
+            issues.extend(_validate_p05(settings, session, source, corrected, from_review=True))
+        elif isinstance(corrected, P07Output):
+            issues.extend(_validate_p07(settings, session, source, corrected, from_review=True))
+        elif isinstance(corrected, P08Output):
+            issues.extend(_validate_p08(settings, session, source, corrected, from_review=True))
+            reviewed_upstream = None
+            try:
+                reviewed_model = P08Output.model_validate(reviewed.payload)
+                reviewed_upstream = (
+                    reviewed_model.upstream_artifact_id or reviewed_model.p05_artifact_id
+                )
+            except ValidationError:
+                reviewed_upstream = reviewed.payload.get(
+                    "upstream_artifact_id"
+                ) or reviewed.payload.get("p05_artifact_id")
+            corrected_upstream = corrected.upstream_artifact_id or corrected.p05_artifact_id
+            if reviewed_upstream is not None and corrected_upstream != reviewed_upstream:
+                issues.append(
+                    ValidationIssue(
+                        "corrected_upstream_mismatch",
+                        "修正P08のupstream参照がレビュー対象と一致しません。",
+                        "$['corrected_payload']['upstream_artifact_id']",
+                    )
+                )
+    return issues
 
 
 def _validate_p08(
@@ -425,7 +521,10 @@ def _validate_p08(
     session: Session,
     source: SourceRecord,
     payload: P08Output,
+    *,
+    from_review: bool = False,
 ) -> list[ValidationIssue]:
+    del from_review
     upstream_id = payload.upstream_artifact_id or payload.p05_artifact_id
     upstream_prompt = payload.upstream_prompt_id or ("P05" if payload.p05_artifact_id else None)
     if upstream_id is None or upstream_prompt is None:
@@ -494,6 +593,12 @@ def _validate_p08(
                 "$['input_hash']",
             )
         ]
+    run = session.get(RunRecord, payload.run_id)
+    if run is None:
+        return [ValidationIssue("unknown_run", "案件IDが存在しません。", "$['run_id']")]
+    analyst = session.get(AnalystRecord, run.analyst_id)
+    if analyst is None:
+        return [ValidationIssue("unknown_analyst", "分析対象者が存在しません。")]
     from analyst_forecast.application.raw_sources import resolve_source_raw_path
 
     raw_path = resolve_source_raw_path(settings, session, run_id=payload.run_id, source=source)
@@ -503,22 +608,54 @@ def _validate_p08(
     if hashlib.sha256(raw_bytes).hexdigest() != source.raw_hash:
         return [ValidationIssue("raw_hash_mismatch", "raw原文が変更されています。")]
     raw_text = raw_bytes.decode("utf-8-sig")
-    segments = list(
-        session.scalars(
-            select(SegmentRecord).where(SegmentRecord.ai_artifact_id == upstream.ai_artifact_id)
-        )
-    )
-    segment_by_ref = {item.local_ref: item for item in segments}
+    segment_by_ref = _p08_segment_by_ref(session, upstream.ai_artifact_id)
     issues: list[ValidationIssue] = []
     for forecast_index, forecast in enumerate(payload.forecasts):
+        forecast_path = f"$['forecasts'][{forecast_index}]"
         if forecast.made_at > forecast.publicly_available_at:
             issues.append(
                 ValidationIssue(
                     "made_at_after_public",
                     "made_atはpublicly_available_at以前にしてください。",
-                    f"$['forecasts'][{forecast_index}]",
+                    forecast_path,
                 )
             )
+        issues.extend(_validate_made_at_source(forecast, source, path=forecast_path))
+        verification = _verify_p08_forecast(
+            forecast,
+            segments_by_ref=segment_by_ref,
+            analyst=analyst,
+        )
+        claimed = forecast.speaker_attribution_status
+        if claimed == "target_confirmed":
+            if not forecast.upstream_segment_refs:
+                issues.append(
+                    ValidationIssue(
+                        "attribution_claim_rejected",
+                        "target_confirmed申告にはupstream_segment_refsが必要です。",
+                        f"{forecast_path}['upstream_segment_refs']",
+                    )
+                )
+            if forecast.statement_kind == "third_party_summary":
+                issues.append(
+                    ValidationIssue(
+                        "attribution_claim_rejected",
+                        "第三者要約をtarget_confirmedとして申告できません。",
+                        f"{forecast_path}['statement_kind']",
+                    )
+                )
+            if verification.verified_status != "target_confirmed":
+                issues.append(
+                    ValidationIssue(
+                        "attribution_claim_rejected",
+                        (
+                            "target_confirmed申告がPython検証で拒否されました。"
+                            f" verified={verification.verified_status}: {verification.reason}"
+                        ),
+                        f"{forecast_path}['speaker_attribution_status']",
+                    )
+                )
+        referenced_segments: list[SegmentRecord] = []
         if forecast.upstream_segment_refs:
             for ref in forecast.upstream_segment_refs:
                 segment = segment_by_ref.get(ref)
@@ -527,27 +664,30 @@ def _validate_p08(
                         ValidationIssue(
                             "unknown_segment_ref",
                             f"上流segment参照が存在しません: {ref}",
-                            f"$['forecasts'][{forecast_index}]['upstream_segment_refs']",
+                            f"{forecast_path}['upstream_segment_refs']",
                         )
                     )
                     continue
+                referenced_segments.append(segment)
+            if referenced_segments and len(referenced_segments) == len(
+                forecast.upstream_segment_refs
+            ):
                 for evidence_index, evidence in enumerate(forecast.evidence):
-                    issue_path = f"$['forecasts'][{forecast_index}]['evidence'][{evidence_index}]"
-                    if not (
-                        segment.raw_start_offset
-                        <= evidence.start_offset
-                        < evidence.end_offset
-                        <= segment.raw_end_offset
+                    issue_path = f"{forecast_path}['evidence'][{evidence_index}]"
+                    if not _evidence_within_segment_union(
+                        evidence.start_offset,
+                        evidence.end_offset,
+                        referenced_segments,
                     ):
                         issues.append(
                             ValidationIssue(
                                 "evidence_outside_segment",
-                                "引用offsetが申告segmentの範囲外です。",
+                                "引用offsetが参照segmentのunion範囲外です。",
                                 issue_path,
                             )
                         )
         for evidence_index, evidence in enumerate(forecast.evidence):
-            issue_path = f"$['forecasts'][{forecast_index}]['evidence'][{evidence_index}]"
+            issue_path = f"{forecast_path}['evidence'][{evidence_index}]"
             if evidence.source_id != payload.source_id:
                 issues.append(
                     ValidationIssue(
@@ -565,6 +705,143 @@ def _validate_p08(
                     )
                 )
     return issues
+
+
+def _validate_made_at_source(
+    forecast: Any,
+    source: SourceRecord,
+    *,
+    path: str,
+) -> list[ValidationIssue]:
+    made_at_source = getattr(forecast, "made_at_source", "unknown")
+    if made_at_source != "source_metadata":
+        return []
+    candidates = [value for value in (source.recorded_at, source.published_at) if value is not None]
+    if not candidates:
+        return [
+            ValidationIssue(
+                "made_at_source_mismatch",
+                "made_at_source=source_metadataですがSOURCEにrecorded_at/published_atがありません。",
+                f"{path}['made_at_source']",
+            )
+        ]
+    made_at = _as_utc(forecast.made_at)
+    if not any(made_at == _as_utc(candidate) for candidate in candidates):
+        return [
+            ValidationIssue(
+                "made_at_source_mismatch",
+                "made_atがSOURCEのrecorded_at/published_atと一致しません。",
+                f"{path}['made_at']",
+            )
+        ]
+    return []
+
+
+def _p08_segment_by_ref(session: Session, upstream_artifact_id: str) -> dict[str, SegmentRecord]:
+    segments = list(
+        session.scalars(
+            select(SegmentRecord).where(SegmentRecord.ai_artifact_id == upstream_artifact_id)
+        )
+    )
+    return {item.local_ref: item for item in segments}
+
+
+def _verify_p08_forecast(
+    forecast: Any,
+    *,
+    segments_by_ref: dict[str, Any],
+    analyst: Any,
+) -> AttributionVerification:
+    return verify_forecast_attribution(
+        claimed_status=forecast.speaker_attribution_status,
+        statement_kind=forecast.statement_kind,
+        speaker_candidate=forecast.speaker_candidate,
+        upstream_segment_refs=list(forecast.upstream_segment_refs),
+        segments_by_ref=segments_by_ref,
+        analyst=analyst,
+    )
+
+
+def _evidence_within_segment_union(
+    start_offset: int,
+    end_offset: int,
+    segments: list[SegmentRecord],
+) -> bool:
+    """証拠範囲が参照segmentのunion内に完全に収まるか（各segment個別一致は不要）。"""
+    if end_offset <= start_offset:
+        return False
+    ordered = sorted(segments, key=lambda item: (item.sequence_number, item.raw_start_offset))
+    covered = 0
+    for segment in ordered:
+        lo = max(start_offset, segment.raw_start_offset)
+        hi = min(end_offset, segment.raw_end_offset)
+        if hi > lo:
+            covered += hi - lo
+    return covered == (end_offset - start_offset)
+
+
+def _best_segment_for_evidence(
+    evidence: Any,
+    upstream_segment_refs: list[str],
+    segment_by_ref: dict[str, SegmentRecord],
+) -> SegmentRecord | None:
+    candidates: list[SegmentRecord] = []
+    for ref in upstream_segment_refs:
+        segment = segment_by_ref.get(ref)
+        if segment is None:
+            continue
+        if segment.raw_start_offset <= evidence.start_offset < segment.raw_end_offset:
+            candidates.append(segment)
+    if not candidates:
+        for ref in upstream_segment_refs:
+            segment = segment_by_ref.get(ref)
+            if segment is None:
+                continue
+            if not (
+                evidence.end_offset <= segment.raw_start_offset
+                or evidence.start_offset >= segment.raw_end_offset
+            ):
+                candidates.append(segment)
+    if not candidates:
+        return None
+    return min(candidates, key=lambda item: (item.sequence_number, item.raw_start_offset))
+
+
+def _optional_mapped_fields(model_cls: type[Any], values: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in values.items() if hasattr(model_cls, key)}
+
+
+def _effective_p08_processing_status(payload: P08Output, formal_count: int) -> str:
+    if payload.processing_status == "processed_no_forecast":
+        return "processed_no_forecast"
+    if formal_count > 0:
+        return "processed_with_forecasts"
+    if payload.forecasts:
+        return "processed_no_formal_forecast"
+    return "processed_no_forecast"
+
+
+def _p08_attribution_context(
+    session: Session,
+    payload: P08Output,
+) -> tuple[AnalystRecord | None, dict[str, SegmentRecord]]:
+    run = session.get(RunRecord, payload.run_id)
+    analyst = session.get(AnalystRecord, run.analyst_id) if run is not None else None
+    upstream_id = payload.upstream_artifact_id or payload.p05_artifact_id
+    if upstream_id is None:
+        return analyst, {}
+    return analyst, _p08_segment_by_ref(session, upstream_id)
+
+
+def _source_boundary(source: SourceRecord) -> KnowledgeBoundary:
+    """DB由来のnaive datetimeでもsource_knowledge_boundaryを使えるようにする。"""
+
+    class _AwareSource:
+        medium = source.medium
+        recorded_at = _as_utc(source.recorded_at) if source.recorded_at is not None else None
+        published_at = _as_utc(source.published_at) if source.published_at is not None else None
+
+    return source_knowledge_boundary(_AwareSource())
 
 
 def _validate_p11(
@@ -723,6 +1000,41 @@ def _validate_p12(
                     f"P12が未知のcandidateを参照しています: {review.candidate_ref}",
                 )
             )
+        if review.corrected_candidate is not None:
+            issues.extend(
+                _validate_resolution_candidate_time(
+                    review.corrected_candidate,
+                    issuance.made_at,
+                    path_prefix="$['reviews'][corrected_candidate]",
+                )
+            )
+    return issues
+
+
+def _validate_resolution_candidate_time(
+    candidate: TargetResolutionCandidate,
+    made_at: datetime,
+    *,
+    path_prefix: str,
+) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    made_at_utc = _as_utc(made_at)
+    if _as_utc(candidate.knowledge_cutoff) > made_at_utc:
+        issues.append(
+            ValidationIssue(
+                "future_candidate_cutoff",
+                "candidateのknowledge_cutoffが発言日時より後です。",
+                f"{path_prefix}['knowledge_cutoff']",
+            )
+        )
+    if candidate.existed_at > made_at.date():
+        issues.append(
+            ValidationIssue(
+                "candidate_not_existing_at_statement",
+                "candidateが発言日時点に存在しません。",
+                f"{path_prefix}['existed_at']",
+            )
+        )
     return issues
 
 
@@ -795,6 +1107,30 @@ def _validate_p13(
                     "P13が未知のcandidateを参照しています。",
                 )
             ]
+        origin = payload.selected_candidate_origin or "p11_proposal"
+        if origin == "p12_correction":
+            review_row = session.scalar(
+                select(TargetResolutionReviewRecord).where(
+                    TargetResolutionReviewRecord.review_artifact_id == payload.review_artifact_id,
+                    TargetResolutionReviewRecord.candidate_ref == payload.selected_candidate_ref,
+                    TargetResolutionReviewRecord.decision == "correct",
+                )
+            )
+            if review_row is None or not review_row.corrected_candidate:
+                return [
+                    ValidationIssue(
+                        "missing_p12_correction",
+                        "P13が参照するP12修正候補がありません。",
+                    )
+                ]
+            corrected = TargetResolutionCandidate.model_validate(review_row.corrected_candidate)
+            issues = _validate_resolution_candidate_time(
+                corrected,
+                issuance.made_at,
+                path_prefix="$['selected_candidate']",
+            )
+            if issues:
+                return issues
     return []
 
 
@@ -848,31 +1184,53 @@ def _review_issues(
                     )
                 )
     elif isinstance(payload, P08Output):
-        for index, forecast in enumerate(payload.forecasts):
-            if forecast.extraction_confidence < settings.confidence_review_threshold:
-                issues.append(
-                    ValidationIssue(
-                        "low_confidence",
-                        "予想抽出が低確信度のため別AIレビューが必要です。",
-                        f"$['forecasts'][{index}]",
+        session_factory = create_session_factory(settings.database_file)
+        with session_factory() as session:
+            analyst, segment_by_ref = _p08_attribution_context(session, payload)
+            for index, forecast in enumerate(payload.forecasts):
+                forecast_path = f"$['forecasts'][{index}]"
+                if forecast.extraction_confidence < settings.confidence_review_threshold:
+                    issues.append(
+                        ValidationIssue(
+                            "low_confidence",
+                            "予想抽出が低確信度のため別AIレビューが必要です。",
+                            forecast_path,
+                        )
                     )
-                )
-            if forecast.importance == "high":
-                issues.append(
-                    ValidationIssue(
-                        "high_importance",
-                        f"高重要度の理由: {forecast.high_importance_reason}",
-                        f"$['forecasts'][{index}]",
+                if forecast.importance == "high":
+                    issues.append(
+                        ValidationIssue(
+                            "high_importance",
+                            f"高重要度の理由: {forecast.high_importance_reason}",
+                            forecast_path,
+                        )
                     )
-                )
-            if forecast.speaker_attribution_status == "uncertain":
-                issues.append(
-                    ValidationIssue(
-                        "attribution_uncertain",
-                        "話者帰属がuncertainのため別AIレビューが必要です。",
-                        f"$['forecasts'][{index}]",
+                if forecast.made_at_source == "context_inferred":
+                    issues.append(
+                        ValidationIssue(
+                            "made_at_context_inferred",
+                            "made_at_source=context_inferredのため別AIレビューが必要です。",
+                            f"{forecast_path}['made_at_source']",
+                        )
                     )
-                )
+                verification: AttributionVerification | None = None
+                if analyst is not None:
+                    verification = _verify_p08_forecast(
+                        forecast,
+                        segments_by_ref=segment_by_ref,
+                        analyst=analyst,
+                    )
+                if forecast.speaker_attribution_status == "uncertain" or (
+                    verification is not None
+                    and verification.verified_status in {"uncertain", "needs_review"}
+                ):
+                    issues.append(
+                        ValidationIssue(
+                            "attribution_uncertain",
+                            "話者帰属がuncertain/needs_reviewのため別AIレビューが必要です。",
+                            forecast_path,
+                        )
+                    )
     return issues
 
 
@@ -999,6 +1357,16 @@ def _insert_p07(
     artifact: AiArtifactRecord,
 ) -> None:
     for segment in payload.segments:
+        # statement_speakerがあれば発言者、なければ著者を話者候補にする
+        statement_speaker = segment.statement_speaker or segment.author_candidate
+        content_author = segment.content_author or (
+            segment.author_candidate if segment.statement_kind == "direct_quote" else None
+        )
+        basis_parts = [f"{segment.statement_kind}: {segment.attribution_basis}"]
+        if content_author:
+            basis_parts.append(f"content_author={content_author}")
+        if segment.statement_speaker:
+            basis_parts.append(f"statement_speaker={segment.statement_speaker}")
         session.add(
             SegmentRecord(
                 segment_id=next_id(session, "SEG-", width=6, sequence_key="SEGMENT"),
@@ -1011,9 +1379,9 @@ def _insert_p07(
                 raw_text=segment.raw_text,
                 normalized_text=segment.normalized_text,
                 speaker_status=segment.author_status,
-                speaker_candidate=segment.author_candidate,
+                speaker_candidate=statement_speaker,
                 speaker_confidence=segment.author_confidence,
-                attribution_basis=f"{segment.statement_kind}: {segment.attribution_basis}",
+                attribution_basis="; ".join(basis_parts),
                 review_status=segment.review_status,
                 importance=segment.importance,
                 high_importance_reason=segment.high_importance_reason,
@@ -1059,7 +1427,18 @@ def _insert_p08(
     run = session.get(RunRecord, payload.run_id)
     if run is None:
         raise ValueError("P08取込み中に案件が消失しました")
-    formal_forecasts = [forecast for forecast in payload.forecasts if _is_formal_forecast(forecast)]
+    analyst, segment_by_ref = _p08_attribution_context(session, payload)
+    if analyst is None:
+        raise ValueError("P08取込み中に分析対象者が消失しました")
+    formal_forecasts = [
+        forecast
+        for forecast in payload.forecasts
+        if _is_formal_forecast(
+            forecast,
+            segments_by_ref=segment_by_ref,
+            analyst=analyst,
+        )
+    ]
     issuance_ids: list[str] = []
     component_ids: list[str] = []
     groups: dict[str, ForecastGroupRecord] = {}
@@ -1100,48 +1479,79 @@ def _insert_p08(
     session.flush()
 
     for forecast in formal_forecasts:
+        verification = _verify_p08_forecast(
+            forecast,
+            segments_by_ref=segment_by_ref,
+            analyst=analyst,
+        )
         issuance_id = next_id(session, "FCI-", width=6, sequence_key="FORECAST_ISSUANCE")
         issuance_ids.append(issuance_id)
-        issuance = ForecastIssuanceRecord(
-            forecast_issuance_id=issuance_id,
-            analyst_id=run.analyst_id,
-            forecast_group_id=groups[forecast.forecast_group_ref].forecast_group_id,
-            ai_import_id=None,
-            ai_artifact_id=artifact.ai_artifact_id,
-            source_id=payload.source_id,
-            local_ref=forecast.forecast_ref,
-            made_at=forecast.made_at,
-            publicly_available_at=forecast.publicly_available_at,
-            forecast_type=forecast.forecast_type,
-            commitment_strength=forecast.commitment_strength,
-            evidence_level=forecast.evidence_level,
-            extraction_confidence=forecast.extraction_confidence,
-            human_readable_summary=forecast.human_readable_summary,
-            relation_to_previous=forecast.relation_to_previous,
-            current_status=_forecast_initial_status(
+        issuance_kwargs: dict[str, Any] = {
+            "forecast_issuance_id": issuance_id,
+            "analyst_id": run.analyst_id,
+            "forecast_group_id": groups[forecast.forecast_group_ref].forecast_group_id,
+            "ai_import_id": None,
+            "ai_artifact_id": artifact.ai_artifact_id,
+            "source_id": payload.source_id,
+            "local_ref": forecast.forecast_ref,
+            "made_at": forecast.made_at,
+            "publicly_available_at": forecast.publicly_available_at,
+            "forecast_type": forecast.forecast_type,
+            "commitment_strength": forecast.commitment_strength,
+            "evidence_level": forecast.evidence_level,
+            "extraction_confidence": forecast.extraction_confidence,
+            "human_readable_summary": forecast.human_readable_summary,
+            "relation_to_previous": forecast.relation_to_previous,
+            "current_status": _forecast_initial_status(
                 run.evaluation_as_of,
                 forecast.components[0].normalized_start,
             ),
+        }
+        issuance_kwargs.update(
+            _optional_mapped_fields(
+                ForecastIssuanceRecord,
+                {
+                    "speaker_candidate": forecast.speaker_candidate,
+                    "speaker_attribution_status": forecast.speaker_attribution_status,
+                    "verified_attribution_status": verification.verified_status,
+                    "attribution_confidence": forecast.attribution_confidence,
+                    "attribution_basis": forecast.attribution_basis or verification.reason,
+                    "statement_kind": forecast.statement_kind,
+                    "made_at_source": forecast.made_at_source,
+                },
+            )
         )
+        issuance = ForecastIssuanceRecord(**issuance_kwargs)
         session.add(issuance)
         session.flush()
         for evidence in forecast.evidence:
-            session.add(
-                ForecastEvidenceRecord(
-                    forecast_evidence_id=next_id(
-                        session,
-                        "EVD-",
-                        width=6,
-                        sequence_key="FORECAST_EVIDENCE",
-                    ),
-                    forecast_issuance_id=issuance_id,
-                    source_id=evidence.source_id,
-                    quote=evidence.quote,
-                    start_offset=evidence.start_offset,
-                    end_offset=evidence.end_offset,
-                    role=evidence.role,
-                )
+            evidence_kwargs: dict[str, Any] = {
+                "forecast_evidence_id": next_id(
+                    session,
+                    "EVD-",
+                    width=6,
+                    sequence_key="FORECAST_EVIDENCE",
+                ),
+                "forecast_issuance_id": issuance_id,
+                "source_id": evidence.source_id,
+                "quote": evidence.quote,
+                "start_offset": evidence.start_offset,
+                "end_offset": evidence.end_offset,
+                "role": evidence.role,
+            }
+            matched_segment = _best_segment_for_evidence(
+                evidence,
+                list(forecast.upstream_segment_refs),
+                segment_by_ref,
             )
+            if matched_segment is not None:
+                evidence_kwargs.update(
+                    _optional_mapped_fields(
+                        ForecastEvidenceRecord,
+                        {"segment_id": matched_segment.segment_id},
+                    )
+                )
+            session.add(ForecastEvidenceRecord(**evidence_kwargs))
         local_ids = {
             component.component_ref: next_id(
                 session, "FCC-", width=6, sequence_key="FORECAST_COMPONENT"
@@ -1181,13 +1591,29 @@ def _insert_p08(
                     target_mapping_id=None,
                 )
             )
+    effective_status = _effective_p08_processing_status(payload, len(formal_forecasts))
+    if isinstance(artifact.payload, dict):
+        artifact.payload = {**artifact.payload, "processing_status": effective_status}
     return issuance_ids, component_ids
 
 
-def _is_formal_forecast(forecast: Any) -> bool:
-    if forecast.statement_kind == "third_party_summary":
-        return False
-    return forecast.speaker_attribution_status not in {"not_target", "uncertain"}
+def _is_formal_forecast(
+    forecast: Any,
+    *,
+    verification: AttributionVerification | None = None,
+    segments_by_ref: dict[str, Any] | None = None,
+    analyst: Any | None = None,
+) -> bool:
+    """正式化は verified_status == target_confirmed のみ。AI申告だけでは判定しない。"""
+    if verification is None:
+        if segments_by_ref is None or analyst is None:
+            return False
+        verification = _verify_p08_forecast(
+            forecast,
+            segments_by_ref=segments_by_ref,
+            analyst=analyst,
+        )
+    return is_formal_verified(verification)
 
 
 def _apply_review_decision(
@@ -1251,17 +1677,27 @@ def _apply_review_decision(
                 link.latest_ai_artifact_id = reviewed.ai_artifact_id
     elif payload.decision == "correct":
         assert payload.corrected_payload is not None
-        corrected_hash = hashlib.sha256(
-            json.dumps(payload.corrected_payload, ensure_ascii=False, sort_keys=True).encode(
-                "utf-8"
-            )
-        ).hexdigest()
+        canonical_bytes = json.dumps(
+            payload.corrected_payload, ensure_ascii=False, sort_keys=True
+        ).encode("utf-8")
+        corrected_hash = hashlib.sha256(canonical_bytes).hexdigest()
         existing_corrected = session.scalar(
             select(AiArtifactRecord).where(AiArtifactRecord.output_hash == corrected_hash)
         )
         if existing_corrected is not None:
             corrected = existing_corrected
         else:
+            corrected_path = _store_corrected_artifact_file(
+                settings,
+                run_id=payload.run_id,
+                output_hash=corrected_hash,
+                raw_bytes=canonical_bytes,
+            )
+            relative_path = (
+                corrected_path.relative_to(settings.vault_root).as_posix()
+                if corrected_path is not None
+                else review_artifact.classified_file_path
+            )
             corrected_id = next_id(session, "AIF-", width=6, sequence_key="AI_ARTIFACT")
             execution_id = next_id(session, "PEX-", width=6, sequence_key="PROMPT_EXECUTION")
             session.add(
@@ -1274,7 +1710,7 @@ def _apply_review_decision(
                     environment=payload.prompt_execution.environment,
                     model=payload.prompt_execution.model,
                     input_files=[payload.source_id, corrected_hash],
-                    output_file=review_artifact.classified_file_path,
+                    output_file=relative_path or "",
                     executed_at=payload.prompt_execution.executed_at,
                     validation_status="accepted",
                 )
@@ -1289,7 +1725,7 @@ def _apply_review_decision(
                 schema_version=str(payload.corrected_payload.get("schema_version", "2.0.0")),
                 input_hash=str(payload.corrected_payload.get("input_hash", reviewed.input_hash)),
                 output_hash=corrected_hash,
-                classified_file_path=review_artifact.classified_file_path,
+                classified_file_path=relative_path or "",
                 classification="accepted",
                 resolution_status="accepted",
                 confidence=None,
@@ -1346,13 +1782,43 @@ def _update_run_source_after_p08(
         RunSourceRecord,
         {"run_id": payload.run_id, "source_id": payload.source_id},
     )
-    if link is not None:
-        link.processing_status = (
-            payload.processing_status
-            if classification is AiIngestStatus.ACCEPTED
-            else "needs_review"
-        )
-        link.latest_ai_artifact_id = artifact.ai_artifact_id
+    if link is None:
+        return
+    if classification is AiIngestStatus.ACCEPTED:
+        analyst, segment_by_ref = _p08_attribution_context(session, payload)
+        formal_count = 0
+        if analyst is not None:
+            formal_count = sum(
+                1
+                for forecast in payload.forecasts
+                if _is_formal_forecast(
+                    forecast,
+                    segments_by_ref=segment_by_ref,
+                    analyst=analyst,
+                )
+            )
+        link.processing_status = _effective_p08_processing_status(payload, formal_count)
+    else:
+        link.processing_status = "needs_review"
+    link.latest_ai_artifact_id = artifact.ai_artifact_id
+
+
+def _store_corrected_artifact_file(
+    settings: AppSettings,
+    *,
+    run_id: str,
+    output_hash: str,
+    raw_bytes: bytes,
+) -> Path | None:
+    run_path = _run_path(settings, run_id)
+    if run_path is None:
+        return None
+    classified = run_path / "03_ai_outputs" / "accepted" / f"{output_hash[:12]}__corrected.json"
+    classified.parent.mkdir(parents=True, exist_ok=True)
+    if not classified.exists():
+        with classified.open("xb") as output:
+            output.write(raw_bytes)
+    return classified
 
 
 def _insert_p11(

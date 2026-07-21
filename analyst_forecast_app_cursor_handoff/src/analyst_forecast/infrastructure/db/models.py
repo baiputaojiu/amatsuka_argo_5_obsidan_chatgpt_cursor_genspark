@@ -50,6 +50,7 @@ class AnalystRecord(AuditMixin, Base):
     canonical_name: Mapped[str] = mapped_column(String(200), nullable=False)
     normalized_name: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
     aliases: Mapped[list[str]] = mapped_column(JSON, default=list)
+    aliases_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     affiliation: Mapped[str | None] = mapped_column(String(200))
     specialties: Mapped[list[str]] = mapped_column(JSON, default=list)
     official_youtube: Mapped[str | None] = mapped_column(Text)
@@ -258,6 +259,7 @@ class ForecastIssuanceRecord(AuditMixin, Base):
     local_ref: Mapped[str] = mapped_column(String(100))
     made_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     publicly_available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    made_at_source: Mapped[str | None] = mapped_column(String(40))
     forecast_type: Mapped[str] = mapped_column(String(40))
     commitment_strength: Mapped[str] = mapped_column(String(40))
     evidence_level: Mapped[str] = mapped_column(String(8))
@@ -265,6 +267,13 @@ class ForecastIssuanceRecord(AuditMixin, Base):
     human_readable_summary: Mapped[str] = mapped_column(Text)
     relation_to_previous: Mapped[str] = mapped_column(String(40))
     current_status: Mapped[str] = mapped_column(String(40), index=True)
+    speaker_candidate: Mapped[str | None] = mapped_column(String(200))
+    speaker_attribution_status: Mapped[str | None] = mapped_column(String(40))
+    verified_attribution_status: Mapped[str | None] = mapped_column(String(40), index=True)
+    attribution_confidence: Mapped[float | None] = mapped_column(Float)
+    attribution_basis: Mapped[str | None] = mapped_column(Text)
+    statement_kind: Mapped[str | None] = mapped_column(String(40))
+    attribution_verification_reason: Mapped[str | None] = mapped_column(Text)
 
 
 class ForecastEvidenceRecord(AuditMixin, Base):
@@ -275,6 +284,7 @@ class ForecastEvidenceRecord(AuditMixin, Base):
         ForeignKey("forecast_issuances.forecast_issuance_id"), index=True
     )
     source_id: Mapped[str] = mapped_column(ForeignKey("sources.source_id"), index=True)
+    segment_id: Mapped[str | None] = mapped_column(ForeignKey("segments.segment_id"), index=True)
     quote: Mapped[str] = mapped_column(Text)
     start_offset: Mapped[int] = mapped_column(Integer)
     end_offset: Mapped[int] = mapped_column(Integer)
@@ -448,11 +458,26 @@ class MarketSeriesRecord(AuditMixin, Base):
             "start_date",
             "end_date",
         ),
+        Index(
+            "ix_market_series_kind_lookup",
+            "series_kind",
+            "provider",
+            "symbol",
+            "currency",
+            "start_date",
+            "end_date",
+        ),
     )
 
     market_series_id: Mapped[str] = mapped_column(String(20), primary_key=True)
     provider: Mapped[str] = mapped_column(String(40), index=True)
     symbol: Mapped[str] = mapped_column(String(100), index=True)
+    series_kind: Mapped[str] = mapped_column(String(20), default="raw", index=True)
+    series_identity: Mapped[str | None] = mapped_column(String(200), index=True)
+    mapping_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    input_series_hashes: Mapped[list[str] | None] = mapped_column(JSON)
+    basket_weights: Mapped[list[float] | None] = mapped_column(JSON)
+    common_date_rule: Mapped[str | None] = mapped_column(String(80))
     currency: Mapped[str] = mapped_column(String(20))
     adjustment_type: Mapped[str] = mapped_column(String(60))
     frequency: Mapped[str] = mapped_column(String(20))

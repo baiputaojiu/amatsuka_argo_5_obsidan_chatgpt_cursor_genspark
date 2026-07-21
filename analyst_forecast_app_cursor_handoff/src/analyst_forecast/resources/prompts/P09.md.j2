@@ -27,7 +27,8 @@ needs_review の P08 があるとき。
 ## 判定基準（必須）
 - 否定誤読、条件欠落、本命誤認、時期・程度の捏造を重点確認。
 - accept / correct / reject / unresolved。
-- correct 時は P08 Schema の完全な corrected_payload。
+- correct 時は P08 Schema の完全な corrected_payload。Python は通常 P08 ingest と同じ検証（quote offset、segment、speaker、knowledge cutoff）を再実行する。
+- knowledge_cutoff は対象 SOURCE の発言・公開境界を超えない。市場結果を根拠に使わない。
 
 ## 禁止事項・注意事項
 {{warning}}

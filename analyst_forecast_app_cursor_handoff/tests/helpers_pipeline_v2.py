@@ -37,6 +37,17 @@ def import_locked_component(
     label: str = "main",
 ) -> str:
     """P05→P08→P11→P12でmapping固定済みのcomponent IDを返す。"""
+    from analyst_forecast.infrastructure.db.models import AnalystRecord, RunRecord
+    from analyst_forecast.infrastructure.db.session import create_session_factory
+
+    session_factory = create_session_factory(settings.database_file)
+    with session_factory() as session:
+        run = session.get(RunRecord, run_result.run_id)
+        assert run is not None
+        analyst = session.get(AnalystRecord, run.analyst_id)
+        assert analyst is not None
+        speaker_name = analyst.canonical_name
+
     quote = "日経平均は今後上昇する"
     p05 = ingest_ai_output(
         settings,
@@ -59,7 +70,7 @@ def import_locked_component(
                         "raw_text": RAW_TEXT,
                         "normalized_text": RAW_TEXT,
                         "speaker_status": "identified",
-                        "speaker_candidate": "匿名アナリストA",
+                        "speaker_candidate": speaker_name,
                         "speaker_confidence": 0.95,
                         "attribution_basis": "fixtureメタデータと発言者が一致",
                         "review_status": "accepted",
@@ -91,6 +102,7 @@ def import_locked_component(
                         "forecast_group_ref": f"group-{label}",
                         "made_at": "2026-01-10T09:00:00+00:00",
                         "publicly_available_at": "2026-01-10T10:00:00+00:00",
+                        "made_at_source": "explicit",
                         "forecast_type": "directional",
                         "commitment_strength": "explicit",
                         "evidence_level": "A",
@@ -99,6 +111,12 @@ def import_locked_component(
                         "high_importance_reason": None,
                         "human_readable_summary": quote,
                         "relation_to_previous": "initial",
+                        "upstream_segment_refs": [f"segment-{label}"],
+                        "speaker_candidate": speaker_name,
+                        "speaker_attribution_status": "target_confirmed",
+                        "attribution_confidence": 0.95,
+                        "attribution_basis": "本人segment",
+                        "statement_kind": "direct_statement",
                         "evidence": [
                             {
                                 "source_id": source_result.source_id,
@@ -114,8 +132,8 @@ def import_locked_component(
                                 "sequence_number": 1,
                                 "prediction_form": "period_direction",
                                 "direction": direction,
-                                "time_expression_raw": "今後3か月",
                                 "time_source": "explicit",
+                                "time_expression_raw": "今後3か月",
                                 "normalized_start": "2026-01-13",
                                 "normalized_end": "2026-04-13",
                                 "raw_target_label": "日経平均",

@@ -160,7 +160,10 @@ def _load_run_context(
                     fallback = settings.vault_root / Path(source.raw_file_path)
                     if fallback.is_file():
                         context.existing_inputs.append(str(fallback))
-        if link.processing_status == "processed_no_forecast":
+        if link.processing_status in {
+            "processed_no_forecast",
+            "processed_no_formal_forecast",
+        }:
             context.processed_no_forecast += 1
         if (
             link.processing_status in {"raw_imported", "p05_pending", "p07_pending", "needs_review"}
@@ -305,7 +308,12 @@ def _load_run_context(
         preprocess_prompt = _preprocess_prompt_for_medium(medium)
         if (
             link.source_id not in accepted_preprocess_sources
-            and link.processing_status not in {"processed_no_forecast", "accepted"}
+            and link.processing_status
+            not in {
+                "processed_no_forecast",
+                "processed_no_formal_forecast",
+                "accepted",
+            }
             and link.local_input_path
         ):
             pending_path = str(settings.vault_root / Path(link.local_input_path))
@@ -314,17 +322,30 @@ def _load_run_context(
                     context.pending_p05.append(pending_path)
             elif pending_path not in context.pending_p07:
                 context.pending_p07.append(pending_path)
+        terminal_p08_statuses = {
+            "accepted",
+            "processed_with_forecasts",
+            "processed_no_forecast",
+            "processed_no_formal_forecast",
+        }
         has_p08 = any(
             item.prompt_id == "P08"
             and item.source_id == link.source_id
-            and item.classification
-            in {"accepted", "processed_with_forecasts", "processed_no_forecast"}
+            and (
+                item.classification in terminal_p08_statuses
+                or link.processing_status in terminal_p08_statuses
+            )
             for item in artifacts
-        )
+        ) or link.processing_status in {
+            "processed_no_forecast",
+            "processed_no_formal_forecast",
+            "processed_with_forecasts",
+        }
         if (
             link.source_id in accepted_preprocess_sources
             and not has_p08
-            and link.processing_status != "processed_no_forecast"
+            and link.processing_status
+            not in {"processed_no_forecast", "processed_no_formal_forecast"}
             and link.local_input_path
         ):
             context.pending_p08.append(str(settings.vault_root / Path(link.local_input_path)))
@@ -460,13 +481,28 @@ def _choose_action(
             [],
         )
 
-    if context.pending_p08 and not context.issuances and context.processed_no_forecast == 0:
+    # source単位: 他sourceにissuanceがあっても、pending P08がある限りEXTRACTを優先
+    if context.pending_p08:
+        pending_ids = sorted(
+            {
+                link.source_id
+                for link in context.source_links
+                if link.local_input_path
+                and any(
+                    str(settings.vault_root / Path(link.local_input_path)) == path
+                    for path in context.pending_p08
+                )
+            }
+        )
         return (
             "awaiting_forecast_extraction",
             WorkflowAction(
                 action_id="EXTRACT_FORECASTS",
                 title="AIで予想抽出を実行する",
-                reason="前処理受理済みですが、予想抽出（P08）が未完了です。",
+                reason=(
+                    f"前処理受理済みだがP08未完了のSOURCEが{len(context.pending_p08)}件あります。"
+                    + (f" pending_source_ids={pending_ids}" if pending_ids else "")
+                ),
                 executor="[AI Cursor]",
                 inputs=context.pending_p08[:5] or context.existing_inputs[:5],
                 outputs=["03_ai_outputs/inbox/forecast_extraction.json"],

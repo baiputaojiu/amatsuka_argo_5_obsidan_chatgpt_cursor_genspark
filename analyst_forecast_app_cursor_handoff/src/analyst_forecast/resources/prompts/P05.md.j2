@@ -27,8 +27,9 @@
 
 ## 判定基準（必須）
 - 話者交代、司会者の質問、相づち、他出演者を混同しない。
+- content author（番組側メタ）と statement speaker（実際の発言者）を混同しない。
 - 調査対象者の過去発言や動画メタデータは根拠として記録し、後発情報は使わない。
-- knowledge_cutoff は発言時点以前に制限する。
+- knowledge_cutoff は recorded_at（なければ published_at）以前に制限する。市場結果を渡さない。
 - 判断不能は unknown / needs_review とし、無理に確定しない。
 
 ## 禁止事項・注意事項
