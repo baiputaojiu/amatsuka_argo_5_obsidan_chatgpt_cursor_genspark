@@ -299,6 +299,20 @@ def _try_reuse_preprocess_artifact(
             return None
         if reused_source.medium != source.medium:
             return None
+        from analyst_forecast.application.artifact_reuse import (
+            ReuseError,
+            reuse_artifact_for_source,
+        )
+
+        try:
+            reuse_artifact_for_source(
+                session,
+                original_artifact_id=reused.ai_artifact_id,
+                target_run_id=run.run_id,
+                target_source_id=source.source_id,
+            )
+        except ReuseError:
+            return None
     elif source.medium != medium:
         return None
     if reused.prompt_id != prompt_id:

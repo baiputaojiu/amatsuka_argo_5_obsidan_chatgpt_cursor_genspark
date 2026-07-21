@@ -262,6 +262,8 @@ class P09Output(PipelineModel):
     findings: list[ReviewFinding] = Field(default_factory=list)
     corrected_payload: dict[str, object] | None = None
     knowledge_cutoff: datetime
+    reject_terminal: bool = False
+    reject_reason: str | None = Field(default=None, min_length=1)
 
     @field_validator("knowledge_cutoff")
     @classmethod
@@ -274,6 +276,10 @@ class P09Output(PipelineModel):
             raise ValueError("correctにはcorrected_payloadが必要です")
         if self.decision != "correct" and self.corrected_payload is not None:
             raise ValueError("correct以外にcorrected_payloadは設定できません")
+        if self.reject_terminal and self.decision != "reject":
+            raise ValueError("reject_terminalはdecision=rejectのときだけ設定できます")
+        if self.reject_terminal and not self.reject_reason:
+            raise ValueError("reject_terminalにはreject_reasonが必要です")
         return self
 
 
@@ -329,8 +335,8 @@ class ForecastIssuanceV2(PipelineModel):
     forecast_ref: LocalRef
     forecast_group_ref: LocalRef
     existing_forecast_group_id: str | None = Field(default=None, pattern=r"^FCG-\d{6}$")
-    made_at: datetime
-    publicly_available_at: datetime
+    made_at: datetime | None = None
+    publicly_available_at: datetime | None = None
     made_at_source: Literal[
         "explicit",
         "source_metadata",
@@ -382,7 +388,9 @@ class ForecastIssuanceV2(PipelineModel):
 
     @field_validator("made_at", "publicly_available_at")
     @classmethod
-    def validate_datetime(cls, value: datetime) -> datetime:
+    def validate_datetime(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
         return _require_timezone(value)
 
     @model_validator(mode="after")
@@ -398,7 +406,25 @@ class ForecastIssuanceV2(PipelineModel):
             raise ValueError("parent_component_refが同じ表明内に存在しません")
         if self.importance == "high" and not self.high_importance_reason:
             raise ValueError("高重要度には理由が必要です")
-        if self.made_at > self.publicly_available_at:
+        if self.made_at_source == "unknown" and self.made_at is not None:
+            raise ValueError("made_at_source=unknownではmade_atはnullにしてください")
+        if (
+            self.made_at_source in {"explicit", "source_metadata", "context_inferred"}
+            and self.made_at is None
+        ):
+            raise ValueError(f"made_at_source={self.made_at_source}ではmade_atが必須です")
+        if (
+            self.made_at_source in {"explicit", "source_metadata", "context_inferred"}
+            and self.publicly_available_at is None
+        ):
+            raise ValueError(
+                f"made_at_source={self.made_at_source}ではpublicly_available_atが必須です"
+            )
+        if (
+            self.made_at is not None
+            and self.publicly_available_at is not None
+            and self.made_at > self.publicly_available_at
+        ):
             raise ValueError("made_atはpublicly_available_at以前にしてください")
         return self
 
@@ -410,6 +436,11 @@ class P08Output(PipelineModel):
         json_schema_extra={
             "$id": "https://local.invalid/schemas/p08-forecast-extraction-2.1.0.json",
             "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "if": {
+                "properties": {"schema_version": {"const": "2.1.0"}},
+                "required": ["schema_version"],
+            },
+            "then": {"required": ["knowledge_cutoff"]},
         },
     )
 
@@ -421,8 +452,16 @@ class P08Output(PipelineModel):
     upstream_prompt_id: Literal["P05", "P07"] | None = None
     prompt_execution: P08PromptExecution
     input_hash: HashValue
+    knowledge_cutoff: datetime | None = None
     processing_status: Literal["processed_with_forecasts", "processed_no_forecast"]
     forecasts: list[ForecastIssuanceV2]
+
+    @field_validator("knowledge_cutoff")
+    @classmethod
+    def validate_p08_cutoff(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        return _require_timezone(value)
 
     @model_validator(mode="after")
     def validate_processing_status(self) -> P08Output:
@@ -439,6 +478,8 @@ class P08Output(PipelineModel):
         object.__setattr__(self, "upstream_prompt_id", upstream_prompt)
         if self.p05_artifact_id is None and upstream_prompt == "P05":
             object.__setattr__(self, "p05_artifact_id", upstream_id)
+        if self.schema_version == "2.1.0" and self.knowledge_cutoff is None:
+            raise ValueError("schema_version=2.1.0ではknowledge_cutoffが必須です")
         if self.processing_status == "processed_no_forecast" and self.forecasts:
             raise ValueError("processed_no_forecastではforecastsを空にしてください")
         if self.processing_status == "processed_with_forecasts" and not self.forecasts:

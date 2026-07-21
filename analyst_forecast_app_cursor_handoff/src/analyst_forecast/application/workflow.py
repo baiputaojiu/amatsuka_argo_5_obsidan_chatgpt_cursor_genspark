@@ -184,13 +184,25 @@ def _load_run_context(
         item
         for item in artifacts
         if item.classification == "needs_review"
-        and item.resolution_status not in {"resolved", "superseded", "accepted", "rejected"}
+        and item.resolution_status not in {
+            "resolved", "superseded", "accepted", "rejected", "unresolved",
+        }
     ]
     for item in unresolved_review:
         if item.prompt_id in {"P05", "P07"}:
             context.pending_p06.append(item.ai_artifact_id)
         elif item.prompt_id == "P08":
-            context.pending_p09.append(item.ai_artifact_id)
+            source_link = next(
+                (lnk for lnk in context.source_links if lnk.source_id == item.source_id),
+                None,
+            )
+            if source_link is not None and source_link.processing_status in {
+                "p08_review_unresolved_terminal",
+                "p08_rejected_terminal",
+            }:
+                pass
+            else:
+                context.pending_p09.append(item.ai_artifact_id)
     legacy_imports = list(
         session.scalars(select(AiImportRecord).where(AiImportRecord.run_id == run.run_id))
     )
@@ -218,7 +230,11 @@ def _load_run_context(
                 AiArtifactRecord,
                 AiArtifactRecord.ai_artifact_id == ForecastIssuanceRecord.ai_artifact_id,
             )
-            .where((AiImportRecord.run_id == run.run_id) | (AiArtifactRecord.run_id == run.run_id))
+            .where(
+                (AiImportRecord.run_id == run.run_id) | (AiArtifactRecord.run_id == run.run_id),
+                ForecastIssuanceRecord.lifecycle_status == "active",
+                ForecastIssuanceRecord.made_at.is_not(None),
+            )
         )
     )
     issuance_ids = [item.forecast_issuance_id for item in context.issuances]
@@ -287,12 +303,19 @@ def _load_run_context(
             }
         )
 
+    from analyst_forecast.application.artifact_reuse import is_artifact_applicable_for_source
+
     accepted_preprocess_sources = {
         item.source_id
         for item in artifacts
-        if item.prompt_id in {"P05", "P07"} and item.classification == "accepted" and item.source_id
+        if item.prompt_id in {"P05", "P07"}
+        and item.classification == "accepted"
+        and item.source_id
+        and is_artifact_applicable_for_source(
+            session, artifact_id=item.ai_artifact_id, source_id=item.source_id
+        )
     }
-    # 他runから再利用された上流artifactも受理扱い
+    # 再利用適用済みの上流artifactも受理扱い（P08と同じ applicability 判定）
     for link in context.source_links:
         if link.latest_ai_artifact_id:
             reused = session.get(AiArtifactRecord, link.latest_ai_artifact_id)
@@ -300,6 +323,11 @@ def _load_run_context(
                 reused is not None
                 and reused.prompt_id in {"P05", "P07"}
                 and reused.classification == "accepted"
+                and is_artifact_applicable_for_source(
+                    session,
+                    artifact_id=reused.ai_artifact_id,
+                    source_id=link.source_id,
+                )
             ):
                 accepted_preprocess_sources.add(link.source_id)
     for link in context.source_links:
@@ -327,6 +355,8 @@ def _load_run_context(
             "processed_with_forecasts",
             "processed_no_forecast",
             "processed_no_formal_forecast",
+            "p08_rejected_terminal",
+            "p08_review_unresolved_terminal",
         }
         has_p08 = any(
             item.prompt_id == "P08"
@@ -341,13 +371,19 @@ def _load_run_context(
             "processed_no_formal_forecast",
             "processed_with_forecasts",
         }
-        if (
+        pending_p08 = (
             link.source_id in accepted_preprocess_sources
-            and not has_p08
-            and link.processing_status
-            not in {"processed_no_forecast", "processed_no_formal_forecast"}
             and link.local_input_path
-        ):
+            and (
+                (
+                    not has_p08
+                    and link.processing_status
+                    not in {"processed_no_forecast", "processed_no_formal_forecast"}
+                )
+                or link.processing_status == "p08_reextract_required"
+            )
+        )
+        if pending_p08 and link.local_input_path is not None:
             context.pending_p08.append(str(settings.vault_root / Path(link.local_input_path)))
 
     rejected = sum(1 for item in artifacts if item.classification == "rejected")
@@ -528,6 +564,46 @@ def _choose_action(
                 executor="[USER]",
                 inputs=context.existing_inputs[:5],
                 outputs=["調査網羅性の確認"],
+                command_or_prompt="追加原文がある場合のみ source import してください。",
+            ),
+            [
+                WorkflowAction(
+                    action_id="ADD_ANOTHER_SOURCE",
+                    title="同じ案件へ原文を追加する",
+                    reason="別情報源を追加する場合の代替です。",
+                    executor="[USER]",
+                    inputs=["追加raw原文"],
+                    outputs=["追加SOURCEと差分処理"],
+                )
+            ],
+        )
+
+    source_terminal_statuses = {
+        "p08_rejected_terminal",
+        "p08_review_unresolved_terminal",
+        "processed_no_forecast",
+        "processed_no_formal_forecast",
+    }
+    if (
+        context.counts["forecast_issuances"] == 0
+        and context.source_links
+        and all(link.processing_status in source_terminal_statuses for link in context.source_links)
+        and not context.pending_p08
+        and not context.pending_p05
+        and not context.pending_p07
+    ):
+        return (
+            "complete_no_active_forecast",
+            WorkflowAction(
+                action_id="COMPLETE_NO_ACTIVE_FORECAST",
+                title="アクティブ予想なしで完了する",
+                reason=(
+                    "全SOURCEが終端状態であり、active予想表明が0件です。"
+                    "これ以上の自動P08/P09反復は行いません。"
+                ),
+                executor="[USER]",
+                inputs=context.existing_inputs[:5],
+                outputs=["完了確認", "追加原文の検討"],
                 command_or_prompt="追加原文がある場合のみ source import してください。",
             ),
             [

@@ -49,7 +49,11 @@ def generate_run_results(settings: AppSettings, run_id: str) -> dict[str, Path]:
                     AiArtifactRecord,
                     AiArtifactRecord.ai_artifact_id == ForecastIssuanceRecord.ai_artifact_id,
                 )
-                .where((AiImportRecord.run_id == run_id) | (AiArtifactRecord.run_id == run_id))
+                .where(
+                    (AiImportRecord.run_id == run_id) | (AiArtifactRecord.run_id == run_id),
+                    ForecastIssuanceRecord.lifecycle_status == "active",
+                    ForecastIssuanceRecord.made_at.is_not(None),
+                )
             )
         )
         issuance_ids = [item.forecast_issuance_id for item in issuances]

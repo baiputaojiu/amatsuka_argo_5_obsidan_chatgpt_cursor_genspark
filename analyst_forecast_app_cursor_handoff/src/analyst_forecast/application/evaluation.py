@@ -79,6 +79,16 @@ def evaluate_component(
                 f"構成予想IDが存在しません: {component_id}\n"
                 "次の操作: 状態表示に記載されたIDを使用してください。"
             )
+        issuance = session.get(ForecastIssuanceRecord, component.forecast_issuance_id)
+        if issuance is not None and (
+            getattr(issuance, "lifecycle_status", "active") != "active"
+            or getattr(issuance, "made_at", None) is None
+        ):
+            raise ValueError(
+                f"構成予想 {component_id} はsuperseded/excluded/"
+                "made_at未確定 issuanceに属しています。\n"
+                "次の操作: active世代のcomponent IDを使用してください。"
+            )
         resolved_run_id = _resolve_run_id(session, component)
         if run_id is not None and resolved_run_id != run_id:
             raise ValueError(
@@ -267,9 +277,10 @@ def evaluate_component(
                     series_by_symbol[str(instrument["symbol"])] = fetched
                     raw_cache_hits[str(instrument["symbol"])] = False
             common_dates = _common_bar_dates(series_by_symbol, normalized_start, effective_end)
-            if len(common_dates) < 1:
+            if len(common_dates) < 2:
                 raise MarketDataUnavailable(
-                    "共通取引日が不足しているためバスケットを評価できません"
+                    "insufficient_common_dates: "
+                    f"共通取引日が{len(common_dates)}日しかなく、複数日バスケット評価には2日以上必要です"
                 )
             bars = _build_basket_bars(series_by_symbol, instruments, common_dates)
             if not bars:
@@ -408,6 +419,24 @@ def evaluate_component(
         for payload in raw_series_payloads:
             _upsert_market_series(session, settings, payload)
         existing_series = _upsert_market_series(session, settings, evaluation_payload)
+        coverage_audit_data = None
+        common_date_count_val = None
+        selected_start_date_val = None
+        selected_end_date_val = None
+        if series_kind == "basket":
+            common_date_count_val = len(bars)
+            selected_start_date_val = bars[0].date
+            selected_end_date_val = bars[-1].date
+            coverage_audit_data = {
+                "common_date_count": len(bars),
+                "selected_start_date": str(bars[0].date),
+                "selected_end_date": str(bars[-1].date),
+                "basket_weights": basket_weights,
+                "mapping_hash": mapping_hash,
+                "input_series_hashes": input_series_hashes,
+                "common_date_rule": common_date_rule,
+                "evaluation_method_version": method_version,
+            }
         evaluation = EvaluationRecord(
             evaluation_id=next_id(session, "EVAL-", width=6, sequence_key="EVALUATION"),
             forecast_component_id=component_id,
@@ -427,6 +456,10 @@ def evaluate_component(
             max_adverse_excursion=max_adverse,
             cache_hit="yes" if cache_hit else "no",
             attempt_count=attempt_count,
+            common_date_count=common_date_count_val,
+            selected_start_date=selected_start_date_val,
+            selected_end_date=selected_end_date_val,
+            coverage_audit=coverage_audit_data,
         )
         session.add(evaluation)
         session.flush()

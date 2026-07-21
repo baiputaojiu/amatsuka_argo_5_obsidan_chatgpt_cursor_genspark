@@ -117,6 +117,7 @@ def _p08_from_upstream(
         "upstream_prompt_id": upstream_prompt,
         "prompt_execution": _prompt("P08"),
         "input_hash": input_hash,
+        "knowledge_cutoff": "2026-01-10T09:00:00+00:00",
         "processing_status": "processed_with_forecasts" if forecasts else "processed_no_forecast",
         "forecasts": [],
     }

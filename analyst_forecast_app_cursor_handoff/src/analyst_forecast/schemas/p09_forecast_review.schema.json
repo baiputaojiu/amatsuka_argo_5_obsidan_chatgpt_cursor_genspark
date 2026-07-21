@@ -148,6 +148,24 @@
       "format": "date-time",
       "title": "Knowledge Cutoff",
       "type": "string"
+    },
+    "reject_terminal": {
+      "default": false,
+      "title": "Reject Terminal",
+      "type": "boolean"
+    },
+    "reject_reason": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reject Reason"
     }
   },
   "required": [

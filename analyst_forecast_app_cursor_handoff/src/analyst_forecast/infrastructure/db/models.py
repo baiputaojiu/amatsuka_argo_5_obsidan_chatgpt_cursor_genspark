@@ -136,6 +136,11 @@ class RunSourceRecord(Base):
     local_input_path: Mapped[str | None] = mapped_column(Text)
     input_kind: Mapped[str] = mapped_column(String(20), default="copy")
     artifact_manifest_path: Mapped[str | None] = mapped_column(Text)
+    # Round4 separate state axes
+    preprocess_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    p08_review_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    p09_attempt_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    terminal_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class AiImportRecord(AuditMixin, Base):
@@ -257,8 +262,10 @@ class ForecastIssuanceRecord(AuditMixin, Base):
     )
     source_id: Mapped[str] = mapped_column(ForeignKey("sources.source_id"), index=True)
     local_ref: Mapped[str] = mapped_column(String(100))
-    made_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    publicly_available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    made_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    publicly_available_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     made_at_source: Mapped[str | None] = mapped_column(String(40))
     forecast_type: Mapped[str] = mapped_column(String(40))
     commitment_strength: Mapped[str] = mapped_column(String(40))
@@ -274,6 +281,15 @@ class ForecastIssuanceRecord(AuditMixin, Base):
     attribution_basis: Mapped[str | None] = mapped_column(Text)
     statement_kind: Mapped[str | None] = mapped_column(String(40))
     attribution_verification_reason: Mapped[str | None] = mapped_column(Text)
+    # Round4 lifecycle
+    lifecycle_status: Mapped[str] = mapped_column(String(40), default="active", index=True)
+    supersedes_forecast_issuance_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    superseded_by_issuance_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    lifecycle_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    review_artifact_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    generation: Mapped[int] = mapped_column(Integer, default=1)
+    lineage_root_id: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
 
 
 class ForecastEvidenceRecord(AuditMixin, Base):
@@ -494,6 +510,29 @@ class MarketSeriesRecord(AuditMixin, Base):
     cache_hit: Mapped[str | None] = mapped_column(String(10))
 
 
+class ArtifactApplicabilityRecord(Base):
+    __tablename__ = "artifact_applicability"
+    __table_args__ = (
+        UniqueConstraint(
+            "ai_artifact_id", "target_source_id", name="uq_applicability_artifact_source"
+        ),
+    )
+
+    applicability_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    ai_artifact_id: Mapped[str] = mapped_column(
+        ForeignKey("ai_artifacts.ai_artifact_id"), nullable=False
+    )
+    target_run_id: Mapped[str] = mapped_column(ForeignKey("runs.run_id"), nullable=False)
+    target_source_id: Mapped[str] = mapped_column(ForeignKey("sources.source_id"), nullable=False)
+    reused_from_artifact_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ai_artifacts.ai_artifact_id"), nullable=True
+    )
+    raw_artifact_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    raw_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    applicability_status: Mapped[str] = mapped_column(String(40), default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class EvaluationRecord(AuditMixin, Base):
     __tablename__ = "evaluations"
     __table_args__ = (
@@ -547,6 +586,11 @@ class EvaluationRecord(AuditMixin, Base):
     retryable: Mapped[str | None] = mapped_column(String(10))
     attempt_count: Mapped[int | None] = mapped_column(Integer)
     cache_hit: Mapped[str | None] = mapped_column(String(10))
+    # Round4 coverage audit
+    common_date_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    selected_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    selected_end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    coverage_audit: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
 
 class WorkflowTaskRecord(AuditMixin, Base):

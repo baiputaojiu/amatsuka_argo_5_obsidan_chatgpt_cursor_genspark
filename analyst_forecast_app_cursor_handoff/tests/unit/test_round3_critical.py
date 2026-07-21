@@ -102,6 +102,7 @@ def _p08(
         "upstream_prompt_id": "P05",
         "prompt_execution": _prompt("P08"),
         "input_hash": input_hash,
+        "knowledge_cutoff": "2026-01-10T09:00:00+00:00",
         "processing_status": "processed_with_forecasts",
         "forecasts": [
             {
@@ -539,6 +540,7 @@ def test_basket_cache_does_not_pollute_single_symbol(
     source_result: Any,
     tmp_path: Path,
 ) -> None:
+    """R4-042: basket cache must not pollute single-symbol AAA series cache."""
     from analyst_forecast.infrastructure.db.ids import next_id
     from analyst_forecast.infrastructure.db.models import (
         ForecastComponentRecord,

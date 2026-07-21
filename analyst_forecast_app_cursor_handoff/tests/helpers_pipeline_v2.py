@@ -89,12 +89,14 @@ def import_locked_component(
             tmp_path,
             f"p08-{label}.json",
             {
-                "schema_version": "2.0.0",
+                "schema_version": "2.1.0",
                 "run_id": run_result.run_id,
                 "source_id": source_result.source_id,
-                "p05_artifact_id": p05.artifact_ids[0],
+                "upstream_artifact_id": p05.artifact_ids[0],
+                "upstream_prompt_id": "P05",
                 "prompt_execution": _prompt("P08"),
                 "input_hash": p05.output_hash,
+                "knowledge_cutoff": "2026-01-10T09:00:00+00:00",
                 "processing_status": "processed_with_forecasts",
                 "forecasts": [
                     {

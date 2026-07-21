@@ -23,7 +23,7 @@ def _assert_round3_columns(database: Path) -> None:
     assert "segment_id" in evidence_cols
     assert "series_kind" in series_cols
     assert "aliases_updated_at" in analyst_cols
-    assert version == ("0007",)
+    assert version == ("0009",)
 
 
 def test_empty_database_upgrades_to_head(tmp_path: Path) -> None:
@@ -69,3 +69,23 @@ def test_upgrade_from_0006_to_head(tmp_path: Path) -> None:
             "SELECT analyst_id, aliases_updated_at FROM analysts WHERE analyst_id='A0001'"
         ).fetchone()
     assert row == ("A0001", None)
+
+
+def test_upgrade_from_0007_to_head(tmp_path: Path) -> None:
+    """R4-043: upgrade from 0007 reaches head (0009)."""
+    database = tmp_path / "from0007.sqlite"
+    upgrade_database(database, revision="0007")
+    with sqlite3.connect(database) as connection:
+        version = connection.execute("SELECT version_num FROM alembic_version").fetchone()
+    assert version == ("0007",)
+    upgrade_database(database)
+    _assert_round3_columns(database)
+    with sqlite3.connect(database) as connection:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+    assert "artifact_applicability" in tables
+

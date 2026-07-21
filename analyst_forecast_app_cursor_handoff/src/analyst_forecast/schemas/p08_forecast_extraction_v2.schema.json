@@ -259,14 +259,30 @@
           "title": "Existing Forecast Group Id"
         },
         "made_at": {
-          "format": "date-time",
-          "title": "Made At",
-          "type": "string"
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Made At"
         },
         "publicly_available_at": {
-          "format": "date-time",
-          "title": "Publicly Available At",
-          "type": "string"
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Publicly Available At"
         },
         "made_at_source": {
           "default": "unknown",
@@ -448,8 +464,6 @@
       "required": [
         "forecast_ref",
         "forecast_group_ref",
-        "made_at",
-        "publicly_available_at",
         "forecast_type",
         "commitment_strength",
         "evidence_level",
@@ -519,6 +533,16 @@
   "$id": "https://local.invalid/schemas/p08-forecast-extraction-2.1.0.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "if": {
+    "properties": {
+      "schema_version": {
+        "const": "2.1.0"
+      }
+    },
+    "required": [
+      "schema_version"
+    ]
+  },
   "properties": {
     "schema_version": {
       "default": "2.1.0",
@@ -589,6 +613,19 @@
       "title": "Input Hash",
       "type": "string"
     },
+    "knowledge_cutoff": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Knowledge Cutoff"
+    },
     "processing_status": {
       "enum": [
         "processed_with_forecasts",
@@ -613,6 +650,11 @@
     "processing_status",
     "forecasts"
   ],
+  "then": {
+    "required": [
+      "knowledge_cutoff"
+    ]
+  },
   "title": "P08ForecastExtractionOutput",
   "type": "object"
 }

@@ -52,6 +52,7 @@ from analyst_forecast.infrastructure.db.session import create_session_factory
 from analyst_forecast.schemas.pipeline import (
     PIPELINE_MODELS,
     CandidateReview,
+    ForecastIssuanceV2,
     P05Output,
     P06Output,
     P07Output,
@@ -115,8 +116,6 @@ def ingest_pipeline_output(
             payload = model_class.model_validate(untyped_payload)  # type: ignore[assignment]
         except ValidationError as error:
             issues.extend(_pydantic_issues(error))
-    if payload is not None:
-        issues.extend(_validate_references(settings, payload))
     if issues:
         return _reject(
             settings,
@@ -128,6 +127,7 @@ def ingest_pipeline_output(
         )
     assert payload is not None
 
+    # Idempotency before mutable-state reference checks (e.g. re-ingest after correct).
     session_factory = create_session_factory(settings.database_file)
     with session_factory() as session:
         existing = session.scalar(
@@ -152,6 +152,17 @@ def ingest_pipeline_output(
                 component_ids=component_ids,
                 guidance="同じAI成果物は既に記録済みです。",
             )
+
+    issues.extend(_validate_references(settings, payload))
+    if issues:
+        return _reject(
+            settings,
+            input_path=input_path,
+            raw_bytes=raw_bytes,
+            output_hash=output_hash,
+            run_id=run_id,
+            issues=issues,
+        )
 
     review_issues = _review_issues(settings, payload)
     classification = AiIngestStatus.NEEDS_REVIEW if review_issues else AiIngestStatus.ACCEPTED
@@ -458,6 +469,21 @@ def _validate_review_artifact(
         payload.knowledge_cutoff,
         _source_boundary(source),
     )
+    if isinstance(payload, P09Output) and reviewed.prompt_id == "P08":
+        try:
+            reviewed_p08 = P08Output.model_validate(reviewed.payload)
+            for forecast in reviewed_p08.forecasts:
+                if forecast.made_at is not None and payload.knowledge_cutoff > forecast.made_at:
+                    issues.append(
+                        ValidationIssue(
+                            "p09_cutoff_exceeds_reviewed_made_at",
+                            "P09 knowledge_cutoffがレビュー対象forecastのmade_atを超えています。",
+                            "$['knowledge_cutoff']",
+                        )
+                    )
+                    break
+        except (ValidationError, Exception):
+            pass
     if payload.decision == "correct" and payload.corrected_payload is not None:
         if from_review:
             return issues
@@ -534,27 +560,18 @@ def _validate_p08(
                 "P08にはupstream_artifact_id（または互換のp05_artifact_id）が必要です。",
             )
         ]
+    from analyst_forecast.application.artifact_reuse import is_artifact_applicable_for_source
+
     upstream = session.get(AiArtifactRecord, upstream_id)
-    link = session.get(
-        RunSourceRecord,
-        {"run_id": payload.run_id, "source_id": payload.source_id},
+    # Same source OR explicit applicability — never allow bare cross-source IDs.
+    run_ok = upstream is not None and is_artifact_applicable_for_source(
+        session, artifact_id=upstream.ai_artifact_id, source_id=payload.source_id
     )
-    run_ok = False
-    if upstream is not None and (
-        upstream.run_id == payload.run_id
-        or (
-            link is not None
-            and link.latest_ai_artifact_id == upstream.ai_artifact_id
-            and upstream.source_id == payload.source_id
-        )
-    ):
-        run_ok = True
     if (
         upstream is None
         or upstream.prompt_id != upstream_prompt
         or upstream.prompt_id not in {"P05", "P07"}
         or not run_ok
-        or upstream.source_id != payload.source_id
     ):
         return [
             ValidationIssue(
@@ -610,13 +627,39 @@ def _validate_p08(
     raw_text = raw_bytes.decode("utf-8-sig")
     segment_by_ref = _p08_segment_by_ref(session, upstream.ai_artifact_id)
     issues: list[ValidationIssue] = []
+    if payload.knowledge_cutoff is not None:
+        boundary = _source_boundary(source)
+        if boundary.boundary is not None and payload.knowledge_cutoff > boundary.boundary:
+            issues.append(
+                ValidationIssue(
+                    "p08_cutoff_exceeds_boundary",
+                    "P08 knowledge_cutoffがsource allowed boundaryを超えています。",
+                    "$['knowledge_cutoff']",
+                )
+            )
     for forecast_index, forecast in enumerate(payload.forecasts):
         forecast_path = f"$['forecasts'][{forecast_index}]"
-        if forecast.made_at > forecast.publicly_available_at:
+        if (
+            forecast.made_at is not None
+            and forecast.publicly_available_at is not None
+            and forecast.made_at > forecast.publicly_available_at
+        ):
             issues.append(
                 ValidationIssue(
                     "made_at_after_public",
                     "made_atはpublicly_available_at以前にしてください。",
+                    forecast_path,
+                )
+            )
+        if (
+            payload.knowledge_cutoff is not None
+            and forecast.made_at is not None
+            and payload.knowledge_cutoff > forecast.made_at
+        ):
+            issues.append(
+                ValidationIssue(
+                    "p08_cutoff_exceeds_made_at",
+                    "P08 knowledge_cutoffがforecastのmade_atを超えています。",
                     forecast_path,
                 )
             )
@@ -881,6 +924,14 @@ def _validate_p11(
                 "$['input_hash']",
             )
         )
+    if issuance.made_at is None:
+        issues.append(
+            ValidationIssue(
+                "missing_made_at",
+                "P11参照先の発言日時が未確定です。",
+            )
+        )
+        return issues
     made_at = _as_utc(issuance.made_at)
     if _as_utc(payload.knowledge_cutoff) > made_at:
         issues.append(
@@ -899,7 +950,7 @@ def _validate_p11(
                     f"$['candidates'][{index}]['knowledge_cutoff']",
                 )
             )
-        if candidate.existed_at > issuance.made_at.date():
+        if candidate.existed_at > made_at.date():
             issues.append(
                 ValidationIssue(
                     "candidate_not_existing_at_statement",
@@ -978,6 +1029,14 @@ def _validate_p12(
                 "P12の構成予想が案件・SOURCEと一致しません。",
             )
         )
+    if issuance.made_at is None:
+        issues.append(
+            ValidationIssue(
+                "missing_made_at",
+                "P12参照先の発言日時が未確定です。",
+            )
+        )
+        return issues
     if _as_utc(payload.knowledge_cutoff) > _as_utc(issuance.made_at):
         issues.append(
             ValidationIssue(
@@ -1085,6 +1144,8 @@ def _validate_p13(
         ]
     if issuance.analyst_id != run.analyst_id:
         return [ValidationIssue("component_context_mismatch", "P13の案件参照が不正です。")]
+    if issuance.made_at is None:
+        return [ValidationIssue("missing_made_at", "P13参照先の発言日時が未確定です。")]
     if _as_utc(payload.knowledge_cutoff) > _as_utc(issuance.made_at):
         return [
             ValidationIssue(
@@ -1446,22 +1507,33 @@ def _insert_p08(
         members = [
             forecast for forecast in formal_forecasts if forecast.forecast_group_ref == group_ref
         ]
-        first = min(members, key=lambda item: item.made_at)
-        latest = max(members, key=lambda item: item.made_at)
+        made_at_members = [item for item in members if item.made_at is not None]
+        if not made_at_members:
+            continue
+
+        def _made_at_key(item: ForecastIssuanceV2) -> datetime:
+            assert item.made_at is not None
+            return item.made_at
+
+        first = min(made_at_members, key=_made_at_key)
+        latest = max(made_at_members, key=_made_at_key)
+        first_made_at = first.made_at
+        latest_made_at = latest.made_at
+        assert first_made_at is not None and latest_made_at is not None
         existing_id = first.existing_forecast_group_id
         if existing_id is not None:
             group = session.get(ForecastGroupRecord, existing_id)
             if group is None or group.analyst_id != run.analyst_id:
                 raise ValueError("既存予想グループ参照が不正です")
-            group.latest_issued_at = latest.made_at
+            group.latest_issued_at = latest_made_at
             group.current_stance = latest.components[0].direction.value
         else:
             group = ForecastGroupRecord(
                 forecast_group_id=next_id(session, "FCG-", width=6, sequence_key="FORECAST_GROUP"),
                 analyst_id=run.analyst_id,
                 central_thesis=first.human_readable_summary,
-                first_issued_at=first.made_at,
-                latest_issued_at=latest.made_at,
+                first_issued_at=first_made_at,
+                latest_issued_at=latest_made_at,
                 current_stance=latest.components[0].direction.value,
                 reaffirmation_count=sum(
                     item.relation_to_previous == "reaffirmation" for item in members
@@ -1494,7 +1566,11 @@ def _insert_p08(
             "ai_artifact_id": artifact.ai_artifact_id,
             "source_id": payload.source_id,
             "local_ref": forecast.forecast_ref,
-            "made_at": forecast.made_at,
+            "made_at": (
+                forecast.made_at
+                if getattr(forecast, "made_at_source", None) != "unknown"
+                else None
+            ),
             "publicly_available_at": forecast.publicly_available_at,
             "forecast_type": forecast.forecast_type,
             "commitment_strength": forecast.commitment_strength,
@@ -1506,6 +1582,9 @@ def _insert_p08(
                 run.evaluation_as_of,
                 forecast.components[0].normalized_start,
             ),
+            "lifecycle_status": "active",
+            "generation": 1,
+            "lineage_root_id": issuance_id,
         }
         issuance_kwargs.update(
             _optional_mapped_fields(
@@ -1604,7 +1683,13 @@ def _is_formal_forecast(
     segments_by_ref: dict[str, Any] | None = None,
     analyst: Any | None = None,
 ) -> bool:
-    """正式化は verified_status == target_confirmed のみ。AI申告だけでは判定しない。"""
+    """正式化は verified_status == target_confirmed のみ。AI申告だけでは判定しない。
+    made_at_source=unknown (made_at=null) は正式化しない。
+    """
+    if getattr(forecast, "made_at_source", None) == "unknown":
+        return False
+    if getattr(forecast, "made_at", None) is None:
+        return False
     if verification is None:
         if segments_by_ref is None or analyst is None:
             return False
@@ -1665,7 +1750,27 @@ def _apply_review_decision(
         review_artifact.resolution_status = "resolved"
         if reviewed.prompt_id == "P08":
             p08 = P08Output.model_validate(reviewed.payload)
-            issuance_ids, component_ids = _insert_p08(session, p08, reviewed)
+            existing_issuances = list(
+                session.scalars(
+                    select(ForecastIssuanceRecord).where(
+                        ForecastIssuanceRecord.ai_artifact_id == reviewed.ai_artifact_id
+                    )
+                )
+            )
+            if existing_issuances:
+                issuance_ids = [i.forecast_issuance_id for i in existing_issuances]
+                component_ids = [
+                    c.forecast_component_id
+                    for i in existing_issuances
+                    for c in session.scalars(
+                        select(ForecastComponentRecord).where(
+                            ForecastComponentRecord.forecast_issuance_id
+                            == i.forecast_issuance_id
+                        )
+                    )
+                ]
+            else:
+                issuance_ids, component_ids = _insert_p08(session, p08, reviewed)
             _update_run_source_after_p08(session, p08, reviewed, AiIngestStatus.ACCEPTED)
         else:
             link = session.get(
@@ -1744,7 +1849,31 @@ def _apply_review_decision(
             elif isinstance(corrected_model, P07Output):
                 _insert_p07(session, settings, corrected_model, corrected)
             elif isinstance(corrected_model, P08Output):
+                old_issuances = list(
+                    session.scalars(
+                        select(ForecastIssuanceRecord).where(
+                            ForecastIssuanceRecord.ai_artifact_id == reviewed.ai_artifact_id,
+                            ForecastIssuanceRecord.lifecycle_status == "active",
+                        )
+                    )
+                )
                 issuance_ids, component_ids = _insert_p08(session, corrected_model, corrected)
+                for new_id in issuance_ids:
+                    new_iss = session.get(ForecastIssuanceRecord, new_id)
+                    if new_iss is not None:
+                        new_iss.lifecycle_status = "active"
+                        new_iss.review_artifact_id = review_artifact.ai_artifact_id
+                        if old_issuances:
+                            old_first = old_issuances[0]
+                            root = old_first.lineage_root_id or old_first.forecast_issuance_id
+                            new_iss.lineage_root_id = root
+                            new_iss.generation = (old_first.generation or 1) + 1
+                            new_iss.supersedes_forecast_issuance_id = old_first.forecast_issuance_id
+                for old_iss in old_issuances:
+                    old_iss.lifecycle_status = "superseded"
+                    old_iss.superseded_at = datetime.now(UTC)
+                    old_iss.superseded_by_issuance_id = issuance_ids[0] if issuance_ids else None
+                    old_iss.lifecycle_reason = "corrected_by_p09"
                 _update_run_source_after_p08(
                     session, corrected_model, corrected, AiIngestStatus.ACCEPTED
                 )
@@ -1765,10 +1894,66 @@ def _apply_review_decision(
         reviewed.resolution_status = "rejected"
         reviewed.resolved_by_artifact_id = review_artifact.ai_artifact_id
         review_artifact.resolution_status = "resolved"
-    else:
+        if reviewed.prompt_id == "P08":
+            is_terminal = getattr(payload, "reject_terminal", False)
+            link = session.get(
+                RunSourceRecord,
+                {"run_id": payload.run_id, "source_id": payload.source_id},
+            )
+            if link is not None:
+                if is_terminal:
+                    link.processing_status = "p08_rejected_terminal"
+                    link.p08_review_status = "p08_rejected_terminal"
+                    link.terminal_reason = getattr(payload, "reject_reason", None) or "terminal"
+                else:
+                    link.processing_status = "p08_reextract_required"
+                    link.p08_review_status = "p08_reextract_required_retryable"
+                    # Keep accepted P05/P07 as latest so re-extract reuses upstream.
+                    try:
+                        reviewed_p08 = P08Output.model_validate(reviewed.payload)
+                        upstream_id = (
+                            reviewed_p08.upstream_artifact_id or reviewed_p08.p05_artifact_id
+                        )
+                        if upstream_id is not None:
+                            link.latest_ai_artifact_id = upstream_id
+                    except (ValidationError, Exception):
+                        pass
+            existing_active = list(
+                session.scalars(
+                    select(ForecastIssuanceRecord).where(
+                        ForecastIssuanceRecord.ai_artifact_id == reviewed.ai_artifact_id,
+                        ForecastIssuanceRecord.lifecycle_status == "active",
+                    )
+                )
+            )
+            for iss in existing_active:
+                iss.lifecycle_status = "rejected_or_withdrawn"
+                iss.lifecycle_reason = "rejected_by_p09"
+    elif payload.decision == "unresolved":
         reviewed.resolution_status = "unresolved"
         reviewed.resolved_by_artifact_id = review_artifact.ai_artifact_id
         review_artifact.resolution_status = "unresolved"
+        if reviewed.prompt_id == "P08":
+            link = session.get(
+                RunSourceRecord,
+                {"run_id": payload.run_id, "source_id": payload.source_id},
+            )
+            if link is not None:
+                link.processing_status = "p08_review_unresolved_terminal"
+                link.p08_review_status = "p08_review_unresolved_terminal"
+                link.terminal_reason = "unresolved"
+                link.p09_attempt_count = (link.p09_attempt_count or 0) + 1
+            existing_active = list(
+                session.scalars(
+                    select(ForecastIssuanceRecord).where(
+                        ForecastIssuanceRecord.ai_artifact_id == reviewed.ai_artifact_id,
+                        ForecastIssuanceRecord.lifecycle_status == "active",
+                    )
+                )
+            )
+            for iss in existing_active:
+                iss.lifecycle_status = "review_unresolved_excluded"
+                iss.lifecycle_reason = "unresolved_by_p09"
     return issuance_ids, component_ids
 
 
