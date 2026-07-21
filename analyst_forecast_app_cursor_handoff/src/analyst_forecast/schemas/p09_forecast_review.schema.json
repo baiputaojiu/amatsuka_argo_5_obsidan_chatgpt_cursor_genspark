@@ -1,5 +1,56 @@
 {
   "$defs": {
+    "ForecastCorrectionOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "update",
+            "add",
+            "remove"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "reviewed_forecast_ref": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewed Forecast Ref"
+        },
+        "corrected_forecast_ref": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Corrected Forecast Ref"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "reason"
+      ],
+      "title": "ForecastCorrectionOperation",
+      "type": "object"
+    },
     "P09PromptExecution": {
       "additionalProperties": false,
       "properties": {
@@ -81,13 +132,17 @@
       "type": "object"
     }
   },
-  "$id": "https://local.invalid/schemas/p09-forecast-review-2.0.0.json",
+  "$id": "https://local.invalid/schemas/p09-forecast-review-2.1.0.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "予想抽出レビュー。",
   "properties": {
     "schema_version": {
-      "const": "2.0.0",
+      "default": "2.1.0",
+      "enum": [
+        "2.0.0",
+        "2.1.0"
+      ],
       "title": "Schema Version",
       "type": "string"
     },
@@ -144,20 +199,45 @@
       "default": null,
       "title": "Corrected Payload"
     },
+    "forecast_operations": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/ForecastCorrectionOperation"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Forecast Operations"
+    },
     "knowledge_cutoff": {
       "format": "date-time",
       "title": "Knowledge Cutoff",
       "type": "string"
     },
-    "reject_terminal": {
-      "default": false,
-      "title": "Reject Terminal",
-      "type": "boolean"
+    "reject_disposition": {
+      "anyOf": [
+        {
+          "enum": [
+            "retryable",
+            "terminal"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reject Disposition"
     },
     "reject_reason": {
       "anyOf": [
         {
-          "minLength": 1,
           "type": "string"
         },
         {
@@ -166,10 +246,21 @@
       ],
       "default": null,
       "title": "Reject Reason"
+    },
+    "reject_terminal": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reject Terminal"
     }
   },
   "required": [
-    "schema_version",
     "run_id",
     "source_id",
     "reviewed_artifact_id",

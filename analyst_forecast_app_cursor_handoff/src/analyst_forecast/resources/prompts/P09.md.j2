@@ -22,19 +22,59 @@ needs_review の P08 があるとき。
 {{input_instruction}}
 
 ## 出力ファイル・Schema
-`03_ai_outputs/inbox/{{output_name}}`。`01_prompts/schemas/{{schema_name}}` に厳密に従う。
+`03_ai_outputs/inbox/{{output_name}}`。`01_prompts/schemas/{{schema_name}}` に厳密に従う。schema_version は **2.1.0**。
+
+## decision（必須・4種）
+- **accept**: レビュー対象P08を正式として受理する。
+- **correct**: 誤りを直し、完全な corrected_payload（P08 Schema）を返す。複数forecastがある場合は **forecast_operations** で旧ref↔新refを明示する。
+- **reject**: 同じSOURCEから有効な正式予想をこの成果物では得られない。**reject_disposition** と **reject_reason** が必須。
+- **unresolved**: 証拠不足等で判定不能。rejectとは別。同じP09を無限反復しない。
+
+## reject_disposition（decision=reject のとき必須）
+- **retryable**: 同じ受理済みP05/P07を使い、P08を再抽出すれば修正可能な場合だけ。reject_reason に「再試行で何を直すか」を書く。
+- **terminal**: 原文・帰属・時刻・証拠上、同じSOURCEから有効な正式予想を得られない場合。reject_reason に terminal 根拠を書く。
+- reject 以外の decision では reject_disposition / reject_reason を付けない。
+- 旧 `reject_terminal` bool は 2.1.0 では禁止。
+
+### reject 例（retryable）
+```json
+{
+  "schema_version": "2.1.0",
+  "decision": "reject",
+  "reject_disposition": "retryable",
+  "reject_reason": "本命方向の否定を取り違えている。P08を再抽出し否定誤読を修正する。"
+}
+```
+
+### reject 例（terminal）
+```json
+{
+  "schema_version": "2.1.0",
+  "decision": "reject",
+  "reject_disposition": "terminal",
+  "reject_reason": "話者が分析対象者ではなく、同一SOURCEから対象者の正式予想は得られない。"
+}
+```
+
+## forecast_operations（decision=correct・複数forecast時）
+- action: `update` / `add` / `remove`
+- update: reviewed_forecast_ref と corrected_forecast_ref 必須（1:1）
+- add: corrected_forecast_ref 必須、reviewed_forecast_ref は null
+- remove: reviewed_forecast_ref 必須、corrected_forecast_ref は null
+- reason 必須。配列順は identity に使わない。
+- 単一旧・単一新の legacy correct のみ operations 省略可。複数は省略禁止。
 
 ## 判定基準（必須）
 - 否定誤読、条件欠落、本命誤認、時期・程度の捏造を重点確認。
-- accept / correct / reject / unresolved。
 - correct 時は P08 Schema の完全な corrected_payload。Python は通常 P08 ingest と同じ検証（quote offset、segment、speaker、knowledge cutoff）を再実行する。
-- knowledge_cutoff は対象 SOURCE の発言・公開境界を超えない。市場結果を根拠に使わない。
+- **knowledge_cutoff** は対象 SOURCE の発言・公開境界を超えず、訂正後の各 formal forecast `made_at` も超えない（同値は可）。市場結果・評価・現在価格を根拠に使わない。
+- executed_at は knowledge_cutoff の代用にしない。
 
 ## 禁止事項・注意事項
 {{warning}}
 
 ## 完了条件
-decision と findings、必要なら corrected_payload が揃う。
+decision と findings、必要なら corrected_payload / forecast_operations / reject_disposition+reject_reason が揃う。
 
 ## コピペ用依頼文
 この案件の{{title}}を実行してください。上記の禁止事項と出力先を厳守してください。

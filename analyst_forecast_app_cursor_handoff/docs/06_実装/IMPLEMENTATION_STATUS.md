@@ -3,12 +3,28 @@
 ## 最終更新
 
 - 日時：2026-07-21
-- 状態：Round4 受入マトリクス R4-001〜R4-048 を証拠付きで PASS
-- MVP判定：`READY_FOR_REAL_SAMPLE_DIRECTIONAL_SLICE`（詳細は `FINAL_REVIEW_ROUND4.md`）
+- 状態：Round5 コア修正（A–G）実装済み。受入マトリクス R5-001〜052 は **52 PASS / 0 GAP**（`FINAL_REVIEW_ROUND5.md`）
+- MVP判定：`READY_FOR_REAL_SAMPLE_DIRECTIONAL_SLICE`
+- Round4時点：`READY_FOR_REAL_SAMPLE_DIRECTIONAL_SLICE`（`FINAL_REVIEW_ROUND4.md`）
 - Round3時点：`READY_FOR_REAL_SAMPLE_DIRECTIONAL_SLICE`（`FINAL_REVIEW_ROUND3.md`）
 - 重大ブロッカー：なし
-- 推奨する次の一作業：実Vaultで原文1件の縦断目視確認
+- 推奨する次の一作業：実Vault原文1件の方向評価目視（directional slice）
 - commit / push：未実施
+
+## Round5 状況
+
+- Fix 07 migration FK-safe + 0010 + data-bearing / legacy_conflict tests
+- Fix 02 forecast_operations lineage（update/add/remove + ALREADY_IMPORTED）
+- Fix 03 require_active_component_context（P11/P12/P13/eval）
+- Fix 04 P09 cutoff vs corrected made_at / source boundary（超過拒否・同値許可・+1µs拒否）
+- Fix 05 single-symbol / basket coverage audit（common_date_count=1）+ same-day method unsupported
+- Fix 06 reject_disposition 2.1.0 + P09 prompt
+- Fix 08 品質ゲート実ログ（pytest 181 / ruff / mypy / docs sync / alembic / wheel xfail除去）
+- 追加受入：`tests/unit/test_round5_acceptance_extra.py` / `tests/unit/test_round5_gaps.py`
+
+## Round5 残GAP
+
+- なし（R5-001〜052 全 PASS）
 
 ## Round4 完了状況
 
@@ -44,15 +60,17 @@
 
 - Fix 02〜09（話者帰属、cutoff、P09、複数source、basket cache、Vault docs、migration）
 
-## 検査結果（Round4後）
+## 検査結果（Round5 本セッション）
 
-- pytest unit：**138 passed**, 3 deselected
+- pytest unit：**181 passed**, 3 deselected
+- round5 modules：**43 passed**
 - ruff check：pass
+- ruff format --check：pass（`test_round5_gaps.py` 再フォーマット後）
 - mypy src：pass
 - packaged docs sync --check：pass
-- Alembic check：pass
-- wheel clean venv：`test_r4_046_wheel_help` pass
-- CHAT_HISTORY.pdf：保持確認（SHA256 `F1D95670…ADDD4A`）
+- Alembic upgrade head / check：pass
+- wheel：`test_r4_046_wheel_help` pass（xfail除去済み）
+- git diff --check：pass（CRLF警告のみ）
 
 ## 未完了・限定（FULL MVP外）
 

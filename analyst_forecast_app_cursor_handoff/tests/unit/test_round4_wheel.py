@@ -43,10 +43,10 @@ def test_r4_046_wheel_help(tmp_path: Path) -> None:
         [sys.executable, "-m", "build", "--wheel", "--outdir", str(dist_dir)],
         cwd=PROJECT_ROOT,
     )
-    if build.returncode != 0:
-        pytest.xfail(
-            f"wheel build failed in this environment: {(build.stderr or build.stdout)[-500:]}"
-        )
+    assert build.returncode == 0, (
+        "wheel build failed (R5-050: do not hide with xfail): "
+        f"{(build.stderr or build.stdout)[-800:]}"
+    )
 
     wheels = list(dist_dir.glob("*.whl"))
     assert wheels, "expected a wheel artifact"

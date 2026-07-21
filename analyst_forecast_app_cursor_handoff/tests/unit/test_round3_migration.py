@@ -23,7 +23,7 @@ def _assert_round3_columns(database: Path) -> None:
     assert "segment_id" in evidence_cols
     assert "series_kind" in series_cols
     assert "aliases_updated_at" in analyst_cols
-    assert version == ("0009",)
+    assert version == ("0010",)
 
 
 def test_empty_database_upgrades_to_head(tmp_path: Path) -> None:
@@ -83,9 +83,6 @@ def test_upgrade_from_0007_to_head(tmp_path: Path) -> None:
     with sqlite3.connect(database) as connection:
         tables = {
             row[0]
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
     assert "artifact_applicability" in tables
-

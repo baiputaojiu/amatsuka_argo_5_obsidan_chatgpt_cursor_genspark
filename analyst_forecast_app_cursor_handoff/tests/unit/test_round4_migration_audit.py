@@ -14,14 +14,7 @@ from analyst_forecast.infrastructure.db.models import Base
 from analyst_forecast.infrastructure.db.session import create_sqlite_engine
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-MIGRATIONS = (
-    PROJECT_ROOT
-    / "src"
-    / "analyst_forecast"
-    / "infrastructure"
-    / "db"
-    / "migrations"
-)
+MIGRATIONS = PROJECT_ROOT / "src" / "analyst_forecast" / "infrastructure" / "db" / "migrations"
 
 
 def _seed_pre_round4_fixture(database: Path) -> dict[str, int]:
@@ -85,7 +78,7 @@ def test_r4_044_upgrade_preserves_rows_fk_and_metadata(tmp_path: Path) -> None:
 
     with sqlite3.connect(database) as connection:
         version = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-        assert version == ("0009",)
+        assert version == ("0010",)
         after = {
             "analysts": connection.execute("SELECT COUNT(*) FROM analysts").fetchone()[0],
             "runs": connection.execute("SELECT COUNT(*) FROM runs").fetchone()[0],
@@ -96,8 +89,7 @@ def test_r4_044_upgrade_preserves_rows_fk_and_metadata(tmp_path: Path) -> None:
 
         # R4-036 adjacent: made_at nullable after 0009 (notnull=0)
         made_at_col = {
-            row[1]: row
-            for row in connection.execute("PRAGMA table_info(forecast_issuances)")
+            row[1]: row for row in connection.execute("PRAGMA table_info(forecast_issuances)")
         }["made_at"]
         assert made_at_col[3] == 0, "made_at must be nullable after 0009"
 

@@ -6,6 +6,15 @@ Create Date: 2026-07-21
 
 - made_at / publicly_available_at: nullable for unknown-time issuances
 - lifecycle_status / generation: NOT NULL with defaults after 0008 backfill
+
+SQLite batch_alter_table rebuilds forecast_issuances (DROP+CREATE). With child
+rows (components/evidence/evaluations) and PRAGMA foreign_keys=ON this fails.
+upgrade_database() MUST disable foreign_keys on the connection *outside* the
+migration transaction before running this revision. Do not rely on PRAGMA
+inside this upgrade() body (ineffective inside a multi-statement transaction).
+
+Round5 adds 0010 for active lineage partial unique index and correction ops
+for DBs already at 0009.
 """
 
 from __future__ import annotations
@@ -29,9 +38,7 @@ def upgrade() -> None:
             "WHERE lifecycle_status IS NULL"
         )
     )
-    op.execute(
-        sa.text("UPDATE forecast_issuances SET generation = 1 WHERE generation IS NULL")
-    )
+    op.execute(sa.text("UPDATE forecast_issuances SET generation = 1 WHERE generation IS NULL"))
 
     with op.batch_alter_table("forecast_issuances") as batch:
         batch.alter_column("made_at", existing_type=sa.DateTime(timezone=True), nullable=True)

@@ -240,6 +240,32 @@ class P06Output(PipelineModel):
         return self
 
 
+class ForecastCorrectionOperation(PipelineModel):
+    action: Literal["update", "add", "remove"]
+    reviewed_forecast_ref: LocalRef | None = None
+    corrected_forecast_ref: LocalRef | None = None
+    reason: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_refs(self) -> ForecastCorrectionOperation:
+        if self.action == "update":
+            if self.reviewed_forecast_ref is None or self.corrected_forecast_ref is None:
+                raise ValueError(
+                    "updateにはreviewed_forecast_refとcorrected_forecast_refが必要です"
+                )
+        elif self.action == "add":
+            if self.reviewed_forecast_ref is not None:
+                raise ValueError("addではreviewed_forecast_refをnullにしてください")
+            if self.corrected_forecast_ref is None:
+                raise ValueError("addにはcorrected_forecast_refが必要です")
+        elif self.action == "remove":
+            if self.reviewed_forecast_ref is None:
+                raise ValueError("removeにはreviewed_forecast_refが必要です")
+            if self.corrected_forecast_ref is not None:
+                raise ValueError("removeではcorrected_forecast_refをnullにしてください")
+        return self
+
+
 class P09Output(PipelineModel):
     """予想抽出レビュー。"""
 
@@ -247,12 +273,12 @@ class P09Output(PipelineModel):
         extra="forbid",
         title="P09ForecastExtractionReviewOutput",
         json_schema_extra={
-            "$id": "https://local.invalid/schemas/p09-forecast-review-2.0.0.json",
+            "$id": "https://local.invalid/schemas/p09-forecast-review-2.1.0.json",
             "$schema": "https://json-schema.org/draft/2020-12/schema",
         },
     )
 
-    schema_version: Literal["2.0.0"]
+    schema_version: Literal["2.0.0", "2.1.0"] = "2.1.0"
     run_id: RunId
     source_id: SourceId
     reviewed_artifact_id: ArtifactId
@@ -261,14 +287,24 @@ class P09Output(PipelineModel):
     decision: Literal["accept", "correct", "reject", "unresolved"]
     findings: list[ReviewFinding] = Field(default_factory=list)
     corrected_payload: dict[str, object] | None = None
+    forecast_operations: list[ForecastCorrectionOperation] | None = None
     knowledge_cutoff: datetime
-    reject_terminal: bool = False
-    reject_reason: str | None = Field(default=None, min_length=1)
+    reject_disposition: Literal["retryable", "terminal"] | None = None
+    reject_reason: str | None = None
+    # Legacy 2.0.0 only — forbidden on 2.1.0
+    reject_terminal: bool | None = None
 
     @field_validator("knowledge_cutoff")
     @classmethod
     def validate_cutoff(cls, value: datetime) -> datetime:
         return _require_timezone(value)
+
+    @field_validator("reject_reason")
+    @classmethod
+    def validate_reason_nonblank(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("reject_reasonは空白だけの文字列にできません")
+        return value
 
     @model_validator(mode="after")
     def validate_decision(self) -> P09Output:
@@ -276,11 +312,47 @@ class P09Output(PipelineModel):
             raise ValueError("correctにはcorrected_payloadが必要です")
         if self.decision != "correct" and self.corrected_payload is not None:
             raise ValueError("correct以外にcorrected_payloadは設定できません")
-        if self.reject_terminal and self.decision != "reject":
-            raise ValueError("reject_terminalはdecision=rejectのときだけ設定できます")
-        if self.reject_terminal and not self.reject_reason:
-            raise ValueError("reject_terminalにはreject_reasonが必要です")
+        if self.decision != "correct" and self.forecast_operations:
+            raise ValueError("forecast_operationsはdecision=correctのときだけ設定できます")
+
+        if self.schema_version == "2.1.0":
+            if self.reject_terminal is not None:
+                raise ValueError("schema_version=2.1.0ではreject_terminalを使用できません")
+            if self.decision == "reject":
+                if self.reject_disposition is None:
+                    raise ValueError("decision=rejectではreject_dispositionが必須です")
+                if self.reject_reason is None or not self.reject_reason.strip():
+                    raise ValueError("decision=rejectではreject_reasonが必須です")
+            else:
+                if self.reject_disposition is not None:
+                    raise ValueError("reject以外にreject_dispositionは設定できません")
+                if self.reject_reason is not None:
+                    raise ValueError("reject以外にreject_reasonは設定できません")
+        else:
+            # Legacy 2.0.0 adapter
+            if self.decision == "reject":
+                if self.reject_disposition is None and self.reject_terminal is True:
+                    object.__setattr__(self, "reject_disposition", "terminal")
+                elif (
+                    self.reject_disposition is None
+                    and self.reject_terminal is False
+                    and self.reject_reason
+                ):
+                    object.__setattr__(self, "reject_disposition", "retryable")
+                elif self.reject_disposition is None:
+                    raise ValueError(
+                        "legacy_reject_disposition_unknown: "
+                        "reject_dispositionもreject_terminal+reasonもありません"
+                    )
+                if self.reject_reason is None or not str(self.reject_reason).strip():
+                    raise ValueError("decision=rejectではreject_reasonが必須です")
+            elif self.reject_terminal:
+                raise ValueError("reject_terminalはdecision=rejectのときだけ設定できます")
         return self
+
+    @property
+    def is_reject_terminal(self) -> bool:
+        return self.decision == "reject" and self.reject_disposition == "terminal"
 
 
 class ForecastComponentV2(PipelineModel):

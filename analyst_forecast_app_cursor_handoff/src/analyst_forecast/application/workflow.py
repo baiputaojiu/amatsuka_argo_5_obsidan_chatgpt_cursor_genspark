@@ -184,8 +184,13 @@ def _load_run_context(
         item
         for item in artifacts
         if item.classification == "needs_review"
-        and item.resolution_status not in {
-            "resolved", "superseded", "accepted", "rejected", "unresolved",
+        and item.resolution_status
+        not in {
+            "resolved",
+            "superseded",
+            "accepted",
+            "rejected",
+            "unresolved",
         }
     ]
     for item in unresolved_review:

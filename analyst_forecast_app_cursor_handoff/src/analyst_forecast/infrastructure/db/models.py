@@ -16,6 +16,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -249,6 +250,12 @@ class ForecastIssuanceRecord(AuditMixin, Base):
         UniqueConstraint("ai_import_id", "local_ref", name="uq_issuance_import_ref"),
         UniqueConstraint("ai_artifact_id", "local_ref", name="uq_issuance_artifact_ref"),
         Index("ix_forecast_issuance_analyst_status", "analyst_id", "current_status"),
+        Index(
+            "uq_forecast_issuances_active_lineage",
+            "lineage_root_id",
+            unique=True,
+            sqlite_where=text("lifecycle_status = 'active' AND lineage_root_id IS NOT NULL"),
+        ),
     )
 
     forecast_issuance_id: Mapped[str] = mapped_column(String(20), primary_key=True)
@@ -290,6 +297,23 @@ class ForecastIssuanceRecord(AuditMixin, Base):
     review_artifact_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
     generation: Mapped[int] = mapped_column(Integer, default=1)
     lineage_root_id: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+
+
+class ForecastCorrectionOperationRecord(Base):
+    """Audit row for P09 correct forecast_operations (Round5)."""
+
+    __tablename__ = "forecast_correction_operations"
+    __table_args__ = (Index("ix_forecast_correction_operations_review", "review_artifact_id"),)
+
+    operation_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    review_artifact_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    action: Mapped[str] = mapped_column(String(20), nullable=False)
+    reviewed_forecast_ref: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    corrected_forecast_ref: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    old_issuance_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    new_issuance_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class ForecastEvidenceRecord(AuditMixin, Base):

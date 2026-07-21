@@ -34,9 +34,7 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     # --- ForecastIssuance lifecycle ---
     with op.batch_alter_table("forecast_issuances") as batch:
-        batch.add_column(
-            sa.Column("lifecycle_status", sa.String(length=40), nullable=True)
-        )
+        batch.add_column(sa.Column("lifecycle_status", sa.String(length=40), nullable=True))
         batch.add_column(
             sa.Column("supersedes_forecast_issuance_id", sa.String(length=20), nullable=True)
         )
@@ -64,12 +62,8 @@ def upgrade() -> None:
 
     # --- Run source separate state axes ---
     with op.batch_alter_table("run_sources") as batch:
-        batch.add_column(
-            sa.Column("preprocess_status", sa.String(length=40), nullable=True)
-        )
-        batch.add_column(
-            sa.Column("p08_review_status", sa.String(length=40), nullable=True)
-        )
+        batch.add_column(sa.Column("preprocess_status", sa.String(length=40), nullable=True))
+        batch.add_column(sa.Column("p08_review_status", sa.String(length=40), nullable=True))
         batch.add_column(sa.Column("p09_attempt_count", sa.Integer(), nullable=True))
         batch.add_column(sa.Column("terminal_reason", sa.Text(), nullable=True))
 
@@ -86,15 +80,36 @@ def upgrade() -> None:
     op.create_table(
         "artifact_applicability",
         sa.Column("applicability_id", sa.String(length=20), primary_key=True),
-        sa.Column("ai_artifact_id", sa.String(length=20), sa.ForeignKey("ai_artifacts.ai_artifact_id"), nullable=False),
-        sa.Column("target_run_id", sa.String(length=32), sa.ForeignKey("runs.run_id"), nullable=False),
-        sa.Column("target_source_id", sa.String(length=20), sa.ForeignKey("sources.source_id"), nullable=False),
-        sa.Column("reused_from_artifact_id", sa.String(length=20), sa.ForeignKey("ai_artifacts.ai_artifact_id"), nullable=True),
+        sa.Column(
+            "ai_artifact_id",
+            sa.String(length=20),
+            sa.ForeignKey("ai_artifacts.ai_artifact_id"),
+            nullable=False,
+        ),
+        sa.Column(
+            "target_run_id", sa.String(length=32), sa.ForeignKey("runs.run_id"), nullable=False
+        ),
+        sa.Column(
+            "target_source_id",
+            sa.String(length=20),
+            sa.ForeignKey("sources.source_id"),
+            nullable=False,
+        ),
+        sa.Column(
+            "reused_from_artifact_id",
+            sa.String(length=20),
+            sa.ForeignKey("ai_artifacts.ai_artifact_id"),
+            nullable=True,
+        ),
         sa.Column("raw_artifact_id", sa.String(length=20), nullable=True),
         sa.Column("raw_hash", sa.String(length=64), nullable=False),
-        sa.Column("applicability_status", sa.String(length=40), nullable=False, server_default="active"),
+        sa.Column(
+            "applicability_status", sa.String(length=40), nullable=False, server_default="active"
+        ),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.UniqueConstraint("ai_artifact_id", "target_source_id", name="uq_applicability_artifact_source"),
+        sa.UniqueConstraint(
+            "ai_artifact_id", "target_source_id", name="uq_applicability_artifact_source"
+        ),
     )
 
     # --- Evaluation coverage audit ---

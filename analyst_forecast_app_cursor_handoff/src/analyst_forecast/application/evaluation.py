@@ -79,16 +79,18 @@ def evaluate_component(
                 f"構成予想IDが存在しません: {component_id}\n"
                 "次の操作: 状態表示に記載されたIDを使用してください。"
             )
-        issuance = session.get(ForecastIssuanceRecord, component.forecast_issuance_id)
-        if issuance is not None and (
-            getattr(issuance, "lifecycle_status", "active") != "active"
-            or getattr(issuance, "made_at", None) is None
-        ):
+        from analyst_forecast.application.active_forecast_query import (
+            InactiveComponentError,
+            require_active_component_context,
+        )
+
+        gate = require_active_component_context(session, component_id)
+        if isinstance(gate, InactiveComponentError):
             raise ValueError(
-                f"構成予想 {component_id} はsuperseded/excluded/"
-                "made_at未確定 issuanceに属しています。\n"
+                f"{gate.code}: {gate.message}\n"
                 "次の操作: active世代のcomponent IDを使用してください。"
             )
+        issuance = session.get(ForecastIssuanceRecord, component.forecast_issuance_id)
         resolved_run_id = _resolve_run_id(session, component)
         if run_id is not None and resolved_run_id != run_id:
             raise ValueError(
@@ -239,10 +241,25 @@ def evaluate_component(
             if not bars:
                 raise MarketDataUnavailable("評価期間内の市場データが0件です")
             _validate_bars(bars)
+            if normalized_start == normalized_end:
+                raise MarketDataUnavailable(
+                    "single_day_method_not_supported: "
+                    "同日予想の明示methodは未実装のため評価しません"
+                )
+            unique_dates = {bar.date for bar in bars}
+            if len(unique_dates) < 2:
+                raise MarketDataUnavailable(
+                    "insufficient_trading_dates: "
+                    f"複数日予想の評価には2取引日以上必要ですが{len(unique_dates)}日しかありません"
+                )
             start_price = bars[0].adjusted_open
             end_price = bars[-1].adjusted_close
             if start_price <= 0:
                 raise MarketDataUnavailable("開始値が0以下のため変化率を計算できません")
+            if bars[0].date >= bars[-1].date:
+                raise MarketDataUnavailable(
+                    "insufficient_trading_dates: selected_start_date < selected_end_date が必要です"
+                )
             series_kind = "raw"
             series_identity = request.symbol
             store_provider = series.provider
@@ -251,6 +268,7 @@ def evaluate_component(
             store_adjustment_type = series.adjustment_type
             store_frequency = series.frequency
             store_retrieved_at = series.retrieved_at
+            common_date_rule = "single_symbol_trading_dates_v1"
         else:
             mapping_hash = _basket_mapping_hash(instruments)
             series_identity = f"BASKET:{mapping_hash}"
@@ -350,19 +368,51 @@ def evaluate_component(
             attempt_count=error.attempt_count,
         )
     except MarketDataUnavailable as error:
+        reason_text = str(error)
+        audit_ctx: dict[str, object] = {
+            "requested_start_date": str(normalized_start) if normalized_start else None,
+            "requested_end_date": str(normalized_end) if normalized_end else None,
+            "effective_start_date": str(normalized_start) if normalized_start else None,
+            "effective_end_date": str(effective_end) if normalized_start else None,
+            "evaluation_as_of": str(as_of),
+            "method_version": method_version,
+            "series_kind": series_kind,
+            "coverage_status": "insufficient",
+            "common_date_rule": common_date_rule,
+            "basket_weights": basket_weights,
+            "mapping_hash": mapping_hash,
+            "input_series_hashes": input_series_hashes,
+        }
+        common_count: int | None = None
+        if reason_text.startswith("insufficient_common_dates"):
+            audit_ctx["reason_code"] = "insufficient_common_dates"
+            # Parse trailing count when present: "...がN日しかなく..."
+            import re as _re
+
+            match = _re.search(r"が(\d+)日", reason_text)
+            if match:
+                common_count = int(match.group(1))
+                audit_ctx["common_date_count"] = common_count
+        elif reason_text.startswith("insufficient_trading_dates"):
+            audit_ctx["reason_code"] = "insufficient_trading_dates"
+            audit_ctx["unique_valid_date_count"] = 1
+        elif reason_text.startswith("single_day_method_not_supported"):
+            audit_ctx["reason_code"] = "single_day_method_not_supported"
         return _store_without_values(
             settings,
             component_id=component_id,
             mapping_id=mapping_id,
             as_of=as_of,
             status="unevaluable",
-            reason=str(error),
+            reason=reason_text,
             run_id=resolved_run_id,
             method_version=method_version,
             provider_error_code=provider_error_code or "no_data",
-            provider_error_message=provider_error_message or str(error),
+            provider_error_message=provider_error_message or reason_text,
             retryable=retryable or "no",
             attempt_count=attempt_count,
+            coverage_audit=audit_ctx,
+            common_date_count=common_count,
         )
 
     actual_return = (end_price - start_price) / start_price
@@ -419,24 +469,29 @@ def evaluate_component(
         for payload in raw_series_payloads:
             _upsert_market_series(session, settings, payload)
         existing_series = _upsert_market_series(session, settings, evaluation_payload)
-        coverage_audit_data = None
-        common_date_count_val = None
-        selected_start_date_val = None
-        selected_end_date_val = None
-        if series_kind == "basket":
-            common_date_count_val = len(bars)
-            selected_start_date_val = bars[0].date
-            selected_end_date_val = bars[-1].date
-            coverage_audit_data = {
-                "common_date_count": len(bars),
-                "selected_start_date": str(bars[0].date),
-                "selected_end_date": str(bars[-1].date),
-                "basket_weights": basket_weights,
-                "mapping_hash": mapping_hash,
-                "input_series_hashes": input_series_hashes,
-                "common_date_rule": common_date_rule,
-                "evaluation_method_version": method_version,
-            }
+        coverage_audit_data = {
+            "requested_start_date": str(normalized_start),
+            "requested_end_date": str(normalized_end),
+            "effective_start_date": str(normalized_start),
+            "effective_end_date": str(effective_end),
+            "evaluation_as_of": str(as_of),
+            "method_version": method_version,
+            "series_kind": series_kind,
+            "common_date_count": len(bars),
+            "unique_valid_date_count": len({bar.date for bar in bars}),
+            "selected_start_date": str(bars[0].date),
+            "selected_end_date": str(bars[-1].date),
+            "coverage_status": "ok",
+            "reason_code": None,
+            "common_date_rule": common_date_rule,
+            "basket_weights": basket_weights,
+            "mapping_hash": mapping_hash,
+            "input_series_hashes": input_series_hashes,
+            "evaluation_method_version": method_version,
+        }
+        common_date_count_val = len(bars)
+        selected_start_date_val = bars[0].date
+        selected_end_date_val = bars[-1].date
         evaluation = EvaluationRecord(
             evaluation_id=next_id(session, "EVAL-", width=6, sequence_key="EVALUATION"),
             forecast_component_id=component_id,
@@ -691,6 +746,10 @@ def _store_without_values(
     provider_error_message: str | None = None,
     retryable: str | None = None,
     attempt_count: int | None = None,
+    coverage_audit: dict[str, object] | None = None,
+    common_date_count: int | None = None,
+    selected_start_date: date | None = None,
+    selected_end_date: date | None = None,
 ) -> EvaluationResult:
     session_factory = create_session_factory(settings.database_file)
     with session_factory.begin() as session:
@@ -704,6 +763,30 @@ def _store_without_values(
         )
         if existing is not None:
             return _to_result(existing)
+        reason_code = None
+        if reason:
+            if reason.startswith("insufficient_common_dates"):
+                reason_code = "insufficient_common_dates"
+            elif reason.startswith("insufficient_trading_dates"):
+                reason_code = "insufficient_trading_dates"
+            elif reason.startswith("single_day_method_not_supported"):
+                reason_code = "single_day_method_not_supported"
+        audit = coverage_audit
+        if audit is None and reason_code is not None:
+            audit = {
+                "coverage_status": "insufficient",
+                "reason_code": reason_code,
+                "evaluation_as_of": str(as_of),
+                "method_version": method_version,
+            }
+        elif audit is not None and reason_code is not None:
+            audit = {**audit, "coverage_status": "insufficient", "reason_code": reason_code}
+        if common_date_count is None and reason_code in {
+            "insufficient_common_dates",
+            "insufficient_trading_dates",
+        }:
+            # Preserve explicit "1 day" when message embeds count
+            common_date_count = 1
         evaluation = EvaluationRecord(
             evaluation_id=next_id(session, "EVAL-", width=6, sequence_key="EVALUATION"),
             forecast_component_id=component_id,
@@ -716,6 +799,10 @@ def _store_without_values(
             provider_error_message=provider_error_message,
             retryable=retryable,
             attempt_count=attempt_count,
+            common_date_count=common_date_count,
+            selected_start_date=selected_start_date,
+            selected_end_date=selected_end_date,
+            coverage_audit=audit,
         )
         session.add(evaluation)
         session.flush()
@@ -733,7 +820,6 @@ def _store_without_values(
                 notes=reason,
             )
         )
-        # 親issuance状態は単一component評価で上書きしない
         result = _to_result(evaluation)
 
     from analyst_forecast.application.workflow import refresh_workflow

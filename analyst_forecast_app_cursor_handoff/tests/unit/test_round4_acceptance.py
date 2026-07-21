@@ -269,9 +269,10 @@ def _p09(
     knowledge_cutoff: str = "2026-01-10T09:00:00+00:00",
     reject_terminal: bool = False,
     reject_reason: str | None = None,
+    reject_disposition: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
-        "schema_version": "2.0.0",
+        "schema_version": "2.1.0",
         "run_id": run_id,
         "source_id": source_id,
         "reviewed_artifact_id": reviewed_artifact_id,
@@ -282,11 +283,14 @@ def _p09(
         "findings": findings or [],
         "corrected_payload": corrected_payload,
     }
-    if reject_terminal:
-        payload["reject_terminal"] = True
-        payload["reject_reason"] = reject_reason
-    elif reject_reason is not None:
-        payload["reject_reason"] = reject_reason
+    if decision == "reject":
+        disposition = reject_disposition
+        if disposition is None:
+            disposition = "terminal" if reject_terminal else "retryable"
+        payload["reject_disposition"] = disposition
+        payload["reject_reason"] = reject_reason or (
+            "terminal reject" if disposition == "terminal" else "retryable reject"
+        )
     return payload
 
 
@@ -428,9 +432,7 @@ class TestR4001NeedsReviewAccept:
                 ),
             ),
         )
-        assert p09.status is AiIngestStatus.ACCEPTED, [
-            f"{i.code}: {i.message}" for i in p09.issues
-        ]
+        assert p09.status is AiIngestStatus.ACCEPTED, [f"{i.code}: {i.message}" for i in p09.issues]
 
         sf = create_session_factory(settings.database_file)
         with sf() as session:
@@ -483,9 +485,7 @@ class TestR4004LineageActive:
                 ),
             ),
         )
-        assert p09.status is AiIngestStatus.ACCEPTED, [
-            f"{i.code}: {i.message}" for i in p09.issues
-        ]
+        assert p09.status is AiIngestStatus.ACCEPTED, [f"{i.code}: {i.message}" for i in p09.issues]
 
         sf = create_session_factory(settings.database_file)
         with sf() as session:
@@ -724,9 +724,7 @@ class TestR4009SummaryActiveCountOnly:
                 ),
             ),
         )
-        assert p09.status is AiIngestStatus.ACCEPTED, [
-            f"{i.code}: {i.message}" for i in p09.issues
-        ]
+        assert p09.status is AiIngestStatus.ACCEPTED, [f"{i.code}: {i.message}" for i in p09.issues]
 
         sf = create_session_factory(settings.database_file)
         with sf() as session:
@@ -1130,16 +1128,17 @@ class TestR4019WorkflowSharesApplicability:
         # inputs are local vault paths for pending P08 sources (reuse target included)
         assert state.recommended_action.inputs
         assert any(
-            src2.source_id in path
-            or "r4019b" in path
-            or Path(path).name.endswith(".txt")
+            src2.source_id in path or "r4019b" in path or Path(path).name.endswith(".txt")
             for path in state.recommended_action.inputs
         )
         # Shared applicability: reused P05 remains applicable for target source
         with sf() as session:
-            assert is_artifact_applicable_for_source(
-                session, artifact_id=origin_p05_id, source_id=src2.source_id
-            ) is True
+            assert (
+                is_artifact_applicable_for_source(
+                    session, artifact_id=origin_p05_id, source_id=src2.source_id
+                )
+                is True
+            )
             link = session.get(
                 RunSourceRecord,
                 {"run_id": run_result.run_id, "source_id": src2.source_id},
@@ -1191,9 +1190,7 @@ class TestR4020RejectRetryableExtract:
                 ),
             ),
         )
-        assert p09.status is AiIngestStatus.ACCEPTED, [
-            f"{i.code}: {i.message}" for i in p09.issues
-        ]
+        assert p09.status is AiIngestStatus.ACCEPTED, [f"{i.code}: {i.message}" for i in p09.issues]
 
         state = refresh_workflow(settings, run_result.run_id)
         assert state.recommended_action.action_id == "EXTRACT_FORECASTS"
@@ -1281,9 +1278,7 @@ class TestR4022RejectTerminal:
                 ),
             ),
         )
-        assert p09.status is AiIngestStatus.ACCEPTED, [
-            f"{i.code}: {i.message}" for i in p09.issues
-        ]
+        assert p09.status is AiIngestStatus.ACCEPTED, [f"{i.code}: {i.message}" for i in p09.issues]
 
         sf = create_session_factory(settings.database_file)
         with sf() as session:
@@ -1296,11 +1291,15 @@ class TestR4022RejectTerminal:
 
         state = refresh_workflow(settings, run_result.run_id)
         assert state.recommended_action.action_id != "REVIEW_AI_OUTPUT"
-        assert state.recommended_action.action_id in {
-            "COMPLETE_NO_ACTIVE_FORECAST",
-            "REVIEW_NO_FORECAST",
-            "ADD_ANOTHER_SOURCE",
-        } or state.stage == "complete_no_active_forecast"
+        assert (
+            state.recommended_action.action_id
+            in {
+                "COMPLETE_NO_ACTIVE_FORECAST",
+                "REVIEW_NO_FORECAST",
+                "ADD_ANOTHER_SOURCE",
+            }
+            or state.stage == "complete_no_active_forecast"
+        )
 
 
 class TestR4023UnresolvedTerminal:
@@ -1375,9 +1374,7 @@ class TestR4024UnresolvedExcluded:
                 ),
             ),
         )
-        assert p09.status is AiIngestStatus.ACCEPTED, [
-            f"{i.code}: {i.message}" for i in p09.issues
-        ]
+        assert p09.status is AiIngestStatus.ACCEPTED, [f"{i.code}: {i.message}" for i in p09.issues]
 
         sf = create_session_factory(settings.database_file)
         with sf() as session:
@@ -1759,9 +1756,7 @@ class TestR4035UnknownFormalizedByCorrect:
                 ),
             ),
         )
-        assert p09.status is AiIngestStatus.ACCEPTED, [
-            f"{i.code}: {i.message}" for i in p09.issues
-        ]
+        assert p09.status is AiIngestStatus.ACCEPTED, [f"{i.code}: {i.message}" for i in p09.issues]
         sf = create_session_factory(settings.database_file)
         with sf() as session:
             assert len(_active_issuances(session)) == 1

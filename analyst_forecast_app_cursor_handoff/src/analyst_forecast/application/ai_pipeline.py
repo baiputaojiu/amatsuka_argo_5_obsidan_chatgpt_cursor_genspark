@@ -465,9 +465,15 @@ def _validate_review_artifact(
                 "$['reviewed_artifact_id']",
             )
         ]
+    cutoff_code = (
+        "p09_cutoff_exceeds_source_boundary"
+        if isinstance(payload, P09Output)
+        else "future_knowledge_cutoff"
+    )
     issues = validate_knowledge_cutoff(
         payload.knowledge_cutoff,
         _source_boundary(source),
+        code=cutoff_code,
     )
     if isinstance(payload, P09Output) and reviewed.prompt_id == "P08":
         try:
@@ -484,6 +490,44 @@ def _validate_review_artifact(
                     break
         except (ValidationError, Exception):
             pass
+        if (
+            payload.decision == "correct"
+            and payload.corrected_payload is not None
+            and not from_review
+        ):
+            try:
+                corrected_p08 = P08Output.model_validate(payload.corrected_payload)
+                for forecast in corrected_p08.forecasts:
+                    if forecast.made_at is None:
+                        continue
+                    if payload.knowledge_cutoff > forecast.made_at:
+                        issues.append(
+                            ValidationIssue(
+                                "p09_cutoff_exceeds_corrected_made_at",
+                                "P09 knowledge_cutoffが訂正後forecastのmade_atを超えています。",
+                                "$['knowledge_cutoff']",
+                            )
+                        )
+                        break
+                    if (
+                        corrected_p08.knowledge_cutoff is not None
+                        and corrected_p08.knowledge_cutoff > forecast.made_at
+                    ):
+                        issues.append(
+                            ValidationIssue(
+                                "corrected_p08_cutoff_exceeds_made_at",
+                                "訂正P08のknowledge_cutoffが訂正後made_atを超えています。",
+                                "$['corrected_payload']['knowledge_cutoff']",
+                            )
+                        )
+                        break
+            except (ValidationError, Exception) as exc:
+                issues.append(
+                    ValidationIssue(
+                        "invalid_corrected_payload",
+                        f"corrected_payloadの検証に失敗しました: {exc}",
+                    )
+                )
     if payload.decision == "correct" and payload.corrected_payload is not None:
         if from_review:
             return issues
@@ -539,6 +583,23 @@ def _validate_review_artifact(
                         "$['corrected_payload']['upstream_artifact_id']",
                     )
                 )
+            # Round5: multi-forecast correct requires explicit forecast_operations.
+            if isinstance(payload, P09Output) and reviewed.prompt_id == "P08":
+                ops = list(getattr(payload, "forecast_operations", None) or [])
+                try:
+                    reviewed_for_ops = P08Output.model_validate(reviewed.payload)
+                    old_refs = {f.forecast_ref for f in reviewed_for_ops.forecasts}
+                except ValidationError:
+                    old_refs = set()
+                new_refs = {f.forecast_ref for f in corrected.forecasts}
+                if not ops and (len(old_refs) > 1 or len(new_refs) > 1):
+                    issues.append(
+                        ValidationIssue(
+                            "ambiguous_forecast_correction",
+                            "複数forecastのP09 correctにはforecast_operationsが必要です。",
+                            "$['forecast_operations']",
+                        )
+                    )
     return issues
 
 
@@ -892,6 +953,26 @@ def _validate_p11(
     run: RunRecord,
     payload: P11Output,
 ) -> list[ValidationIssue]:
+    from analyst_forecast.application.active_forecast_query import (
+        InactiveComponentError,
+        require_active_component_context,
+    )
+
+    gate = require_active_component_context(
+        session,
+        payload.forecast_component_id,
+        run_id=payload.run_id,
+        source_id=payload.source_id,
+        analyst_id=run.analyst_id,
+    )
+    if isinstance(gate, InactiveComponentError):
+        return [
+            ValidationIssue(
+                gate.code,
+                gate.message,
+                "$['forecast_component_id']",
+            )
+        ]
     context = _component_context(session, payload.forecast_component_id)
     if context is None:
         return [
@@ -973,6 +1054,26 @@ def _validate_p12(
     run: RunRecord,
     payload: P12Output,
 ) -> list[ValidationIssue]:
+    from analyst_forecast.application.active_forecast_query import (
+        InactiveComponentError,
+        require_active_component_context,
+    )
+
+    gate = require_active_component_context(
+        session,
+        payload.forecast_component_id,
+        run_id=payload.run_id,
+        source_id=payload.source_id,
+        analyst_id=run.analyst_id,
+    )
+    if isinstance(gate, InactiveComponentError):
+        return [
+            ValidationIssue(
+                gate.code,
+                gate.message,
+                "$['forecast_component_id']",
+            )
+        ]
     proposal = session.get(AiArtifactRecord, payload.proposal_artifact_id)
     if proposal is None or proposal.prompt_id != "P11":
         return [
@@ -1102,6 +1203,26 @@ def _validate_p13(
     run: RunRecord,
     payload: P13Output,
 ) -> list[ValidationIssue]:
+    from analyst_forecast.application.active_forecast_query import (
+        InactiveComponentError,
+        require_active_component_context,
+    )
+
+    gate = require_active_component_context(
+        session,
+        payload.forecast_component_id,
+        run_id=payload.run_id,
+        source_id=payload.source_id,
+        analyst_id=run.analyst_id,
+    )
+    if isinstance(gate, InactiveComponentError):
+        return [
+            ValidationIssue(
+                gate.code,
+                gate.message,
+                "$['forecast_component_id']",
+            )
+        ]
     proposal = session.get(AiArtifactRecord, payload.proposal_artifact_id)
     review = session.get(AiArtifactRecord, payload.review_artifact_id)
     if proposal is None or proposal.prompt_id != "P11":
@@ -1567,9 +1688,7 @@ def _insert_p08(
             "source_id": payload.source_id,
             "local_ref": forecast.forecast_ref,
             "made_at": (
-                forecast.made_at
-                if getattr(forecast, "made_at_source", None) != "unknown"
-                else None
+                forecast.made_at if getattr(forecast, "made_at_source", None) != "unknown" else None
             ),
             "publicly_available_at": forecast.publicly_available_at,
             "forecast_type": forecast.forecast_type,
@@ -1764,8 +1883,7 @@ def _apply_review_decision(
                     for i in existing_issuances
                     for c in session.scalars(
                         select(ForecastComponentRecord).where(
-                            ForecastComponentRecord.forecast_issuance_id
-                            == i.forecast_issuance_id
+                            ForecastComponentRecord.forecast_issuance_id == i.forecast_issuance_id
                         )
                     )
                 ]
@@ -1857,23 +1975,148 @@ def _apply_review_decision(
                         )
                     )
                 )
+                old_by_ref = {iss.local_ref: iss for iss in old_issuances}
+                operations = list(getattr(payload, "forecast_operations", None) or [])
+                if not operations:
+                    # Legacy: only deterministic for single old + single new
+                    if len(old_issuances) == 1 and len(corrected_model.forecasts) == 1:
+                        operations = []  # paired below by sole members
+                    elif len(old_issuances) > 1 or len(corrected_model.forecasts) > 1:
+                        raise ValueError(
+                            "複数forecastのP09 correctにはforecast_operationsが必要です"
+                        )
                 issuance_ids, component_ids = _insert_p08(session, corrected_model, corrected)
+                new_by_ref: dict[str, ForecastIssuanceRecord] = {}
                 for new_id in issuance_ids:
                     new_iss = session.get(ForecastIssuanceRecord, new_id)
                     if new_iss is not None:
+                        # Keep unique lineage_root=self until olds are superseded.
                         new_iss.lifecycle_status = "active"
                         new_iss.review_artifact_id = review_artifact.ai_artifact_id
-                        if old_issuances:
-                            old_first = old_issuances[0]
-                            root = old_first.lineage_root_id or old_first.forecast_issuance_id
-                            new_iss.lineage_root_id = root
-                            new_iss.generation = (old_first.generation or 1) + 1
-                            new_iss.supersedes_forecast_issuance_id = old_first.forecast_issuance_id
-                for old_iss in old_issuances:
+                        new_by_ref[new_iss.local_ref] = new_iss
+                paired: list[tuple[ForecastIssuanceRecord, ForecastIssuanceRecord]] = []
+                op_audit_rows: list[dict[str, Any]] = []
+                if operations:
+                    for op in operations:
+                        action = op.action if hasattr(op, "action") else op.get("action")
+                        reviewed_ref = (
+                            op.reviewed_forecast_ref
+                            if hasattr(op, "reviewed_forecast_ref")
+                            else op.get("reviewed_forecast_ref")
+                        )
+                        corrected_ref = (
+                            op.corrected_forecast_ref
+                            if hasattr(op, "corrected_forecast_ref")
+                            else op.get("corrected_forecast_ref")
+                        )
+                        reason = op.reason if hasattr(op, "reason") else op.get("reason", "")
+                        if action == "update":
+                            old_iss = old_by_ref.get(str(reviewed_ref))
+                            new_iss = new_by_ref.get(str(corrected_ref))
+                            if old_iss is None or new_iss is None:
+                                raise ValueError(
+                                    f"forecast_operations updateのrefが不正: "
+                                    f"{reviewed_ref}->{corrected_ref}"
+                                )
+                            paired.append((old_iss, new_iss))
+                            op_audit_rows.append(
+                                {
+                                    "action": "update",
+                                    "reviewed_forecast_ref": str(reviewed_ref),
+                                    "corrected_forecast_ref": str(corrected_ref),
+                                    "old_issuance_id": old_iss.forecast_issuance_id,
+                                    "new_issuance_id": new_iss.forecast_issuance_id,
+                                    "reason": str(reason),
+                                }
+                            )
+                        elif action == "add":
+                            new_iss = new_by_ref.get(str(corrected_ref))
+                            if new_iss is None:
+                                raise ValueError(
+                                    f"addのcorrected_forecast_refが不正: {corrected_ref}"
+                                )
+                            new_iss.lineage_root_id = new_iss.forecast_issuance_id
+                            new_iss.generation = 1
+                            new_iss.supersedes_forecast_issuance_id = None
+                            op_audit_rows.append(
+                                {
+                                    "action": "add",
+                                    "reviewed_forecast_ref": None,
+                                    "corrected_forecast_ref": str(corrected_ref),
+                                    "old_issuance_id": None,
+                                    "new_issuance_id": new_iss.forecast_issuance_id,
+                                    "reason": str(reason),
+                                }
+                            )
+                        elif action == "remove":
+                            old_iss = old_by_ref.get(str(reviewed_ref))
+                            if old_iss is None:
+                                raise ValueError(
+                                    f"removeのreviewed_forecast_refが不正: {reviewed_ref}"
+                                )
+                            old_iss.lifecycle_status = "withdrawn_by_correction"
+                            old_iss.superseded_at = datetime.now(UTC)
+                            old_iss.lifecycle_reason = "removed_by_p09_correction"
+                            op_audit_rows.append(
+                                {
+                                    "action": "remove",
+                                    "reviewed_forecast_ref": str(reviewed_ref),
+                                    "corrected_forecast_ref": None,
+                                    "old_issuance_id": old_iss.forecast_issuance_id,
+                                    "new_issuance_id": None,
+                                    "reason": str(reason),
+                                }
+                            )
+                elif len(old_issuances) == 1 and len(issuance_ids) == 1:
+                    old_iss = old_issuances[0]
+                    new_iss = session.get(ForecastIssuanceRecord, issuance_ids[0])
+                    if new_iss is not None:
+                        paired.append((old_iss, new_iss))
+                        op_audit_rows.append(
+                            {
+                                "action": "update",
+                                "reviewed_forecast_ref": old_iss.local_ref,
+                                "corrected_forecast_ref": new_iss.local_ref,
+                                "old_issuance_id": old_iss.forecast_issuance_id,
+                                "new_issuance_id": new_iss.forecast_issuance_id,
+                                "reason": "legacy_single_forecast_correct",
+                            }
+                        )
+                # Supersede olds first so active lineage unique index allows re-root.
+                for old_iss, new_iss in paired:
                     old_iss.lifecycle_status = "superseded"
                     old_iss.superseded_at = datetime.now(UTC)
-                    old_iss.superseded_by_issuance_id = issuance_ids[0] if issuance_ids else None
+                    old_iss.superseded_by_issuance_id = new_iss.forecast_issuance_id
                     old_iss.lifecycle_reason = "corrected_by_p09"
+                session.flush()
+                for old_iss, new_iss in paired:
+                    root = old_iss.lineage_root_id or old_iss.forecast_issuance_id
+                    new_iss.lineage_root_id = root
+                    new_iss.generation = (old_iss.generation or 1) + 1
+                    new_iss.supersedes_forecast_issuance_id = old_iss.forecast_issuance_id
+                from analyst_forecast.infrastructure.db.models import (
+                    ForecastCorrectionOperationRecord,
+                )
+
+                for row in op_audit_rows:
+                    session.add(
+                        ForecastCorrectionOperationRecord(
+                            operation_id=next_id(
+                                session,
+                                "FCO-",
+                                width=6,
+                                sequence_key="FORECAST_CORRECTION_OP",
+                            ),
+                            review_artifact_id=review_artifact.ai_artifact_id,
+                            action=str(row["action"]),
+                            reviewed_forecast_ref=row["reviewed_forecast_ref"],
+                            corrected_forecast_ref=row["corrected_forecast_ref"],
+                            old_issuance_id=row["old_issuance_id"],
+                            new_issuance_id=row["new_issuance_id"],
+                            reason=str(row["reason"]),
+                            created_at=datetime.now(UTC),
+                        )
+                    )
                 _update_run_source_after_p08(
                     session, corrected_model, corrected, AiIngestStatus.ACCEPTED
                 )
@@ -1895,7 +2138,9 @@ def _apply_review_decision(
         reviewed.resolved_by_artifact_id = review_artifact.ai_artifact_id
         review_artifact.resolution_status = "resolved"
         if reviewed.prompt_id == "P08":
-            is_terminal = getattr(payload, "reject_terminal", False)
+            is_terminal = getattr(payload, "is_reject_terminal", False) or (
+                getattr(payload, "reject_disposition", None) == "terminal"
+            )
             link = session.get(
                 RunSourceRecord,
                 {"run_id": payload.run_id, "source_id": payload.source_id},
@@ -2011,6 +2256,19 @@ def _insert_p11(
     payload: P11Output,
     artifact: AiArtifactRecord,
 ) -> None:
+    from analyst_forecast.application.active_forecast_query import (
+        InactiveComponentError,
+        require_active_component_context,
+    )
+
+    gate = require_active_component_context(
+        session,
+        payload.forecast_component_id,
+        run_id=payload.run_id,
+        source_id=payload.source_id,
+    )
+    if isinstance(gate, InactiveComponentError):
+        raise ValueError(f"{gate.code}: {gate.message}")
     for candidate in payload.candidates:
         session.add(
             TargetResolutionCandidateRecord(
@@ -2048,6 +2306,19 @@ def _insert_p12(
     payload: P12Output,
     artifact: AiArtifactRecord,
 ) -> None:
+    from analyst_forecast.application.active_forecast_query import (
+        InactiveComponentError,
+        require_active_component_context,
+    )
+
+    gate = require_active_component_context(
+        session,
+        payload.forecast_component_id,
+        run_id=payload.run_id,
+        source_id=payload.source_id,
+    )
+    if isinstance(gate, InactiveComponentError):
+        raise ValueError(f"{gate.code}: {gate.message}")
     for review in payload.reviews:
         session.add(
             TargetResolutionReviewRecord(
@@ -2142,6 +2413,19 @@ def _insert_p13(
     payload: P13Output,
     artifact: AiArtifactRecord,
 ) -> None:
+    from analyst_forecast.application.active_forecast_query import (
+        InactiveComponentError,
+        require_active_component_context,
+    )
+
+    gate = require_active_component_context(
+        session,
+        payload.forecast_component_id,
+        run_id=payload.run_id,
+        source_id=payload.source_id,
+    )
+    if isinstance(gate, InactiveComponentError):
+        raise ValueError(f"{gate.code}: {gate.message}")
     session.add(
         TargetResolutionAdjudicationRecord(
             target_resolution_adjudication_id=next_id(
