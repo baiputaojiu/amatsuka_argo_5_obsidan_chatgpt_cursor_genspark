@@ -4,7 +4,7 @@
 
 - 作成日：2026-07-20
 - 対象HEAD：`cc9e8db6a5efcd5e79db343480319dcd4c27c99c`
-- 対象アプリ：`analyst_forecast_app_cursor_handoff/analyst_forecast_app_cursor_handoff/`
+- 対象アプリ：`analyst_forecast_app_cursor_handoff/`
 - 指示書：`Fix_instructions/analyst_forecast_cursor_fix_instructions/01_PREFLIGHT_AND_REMEDIATION_PLAN.md`
 - 実装順：修正指示02、03、04、05、06、07
 - 本文書作成時点では、本体コード、Schema、migration、テストの機能変更を行っていない。

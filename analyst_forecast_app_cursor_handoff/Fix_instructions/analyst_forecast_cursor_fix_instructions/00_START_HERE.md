@@ -4,7 +4,7 @@
 
 - リポジトリ：`amatsuka_argo_5_obsidan_chatgpt_cursor_genspark`
 - 対象ブランチの基準コミット：`cc9e8db6a5efcd5e79db343480319dcd4c27c99c`
-- アプリルート：`analyst_forecast_app_cursor_handoff/analyst_forecast_app_cursor_handoff/`
+- アプリルート：`analyst_forecast_app_cursor_handoff/`
 
 基準コミット以後に変更がある場合、Cursorは最新コードとGit差分を先に確認し、完了済み修正を重複実装しない。
 

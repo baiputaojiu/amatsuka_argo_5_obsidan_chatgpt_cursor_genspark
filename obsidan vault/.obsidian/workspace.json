@@ -41,7 +41,7 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "30_Permanent/★業務/★ToDoリスト.md",
+                "file": "30_Permanent/★業務/週報/★ToDoリスト.md",
                 "mode": "source",
                 "source": false
               },
@@ -123,7 +123,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "30_Permanent/★業務/★ToDoリスト.md",
+                "file": "30_Permanent/★業務/週報/★ToDoリスト.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -224,6 +224,7 @@
   },
   "active": "058a446a3c1b53c1",
   "lastOpenFiles": [
+    "30_Permanent/★業務/週報/週報/週報_20260720-20260726.md",
     "30_Permanent/★業務/週次技術トレンド/レポート/_README.md",
     "30_Permanent/★業務/週次技術トレンド/レポート",
     "30_Permanent/★業務/週次技術トレンド/週次技術トレンド調査プロンプト.md",
@@ -260,7 +261,6 @@
     "20_Literature/履歴/20260112_作者不明_株式投資_おすすめ無料株サイト5選.md",
     "10_Fleeting/投資アイデア_分散投資ウォッチリスト_2026年1月.md",
     "Templates/Fleeting Note.md",
-    "Templates/Daily Note.md",
     "00_Inbox/無題のファイル.base",
     "00_Inbox/無題のファイル 1.base",
     "無題のファイル.canvas"

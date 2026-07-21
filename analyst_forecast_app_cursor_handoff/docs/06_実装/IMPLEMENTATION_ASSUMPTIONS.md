@@ -8,9 +8,9 @@
 
 ### A-001 実装配置
 
-- 暫定内容：正本資料がある `analyst_forecast_app_cursor_handoff/analyst_forecast_app_cursor_handoff/` をPythonプロジェクトのルートとする。
+- 暫定内容：正本資料がある `analyst_forecast_app_cursor_handoff/` をPythonプロジェクトのルートとする。
 - 理由：仕様と実装を同じ配布単位に置き、外側のワークスペースにある無関係な既存プロジェクトを変更しないため。
-- 影響：Gitリポジトリ全体では一段深い配置になる。
+- 影響：モノレポ内では他プロジェクトと並ぶ1段の配置になる（同名フォルダの二重ネストは解消済み）。
 - 見直し条件：正本フォルダをGitルートへ移す方針が明示されたとき。
 
 ### A-002 Python対応範囲
