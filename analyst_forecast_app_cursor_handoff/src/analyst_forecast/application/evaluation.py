@@ -50,6 +50,7 @@ INSTRUMENT_AUDIT_KEYS = (
     "symbol",
     "currency",
     "weight",
+    "adjustment_type",
     "requested_start_date",
     "requested_end_date",
     "input_row_count",
@@ -263,6 +264,7 @@ def evaluate_component(
                 requested_start=normalized_start,
                 requested_end=effective_end,
                 input_bars=list(series.bars),
+                adjustment_type=series.adjustment_type,
             )
             instrument_audits = [stats]
             unique_valid = _unique_valid_bars(
@@ -341,6 +343,7 @@ def evaluate_component(
                     requested_start=normalized_start,
                     requested_end=effective_end,
                     input_bars=list(series_by_symbol[symbol].bars),
+                    adjustment_type=series_by_symbol[symbol].adjustment_type,
                 )
                 instrument_audits.append(stats)
                 if int(str(stats.get("invalid_row_count") or 0)) > 0:
@@ -470,6 +473,12 @@ def evaluate_component(
     except MarketDataUnavailable as error:
         reason_text = str(error)
         reason_code = _coverage_reason_code(reason_text)
+        if not instrument_audits and instruments:
+            instrument_audits = _instrument_audit_defaults(
+                instruments,
+                requested_start=normalized_start,
+                requested_end=effective_end,
+            )
         common_count: int | None = None
         selected_start: date | None = None
         selected_end: date | None = None
@@ -488,10 +497,8 @@ def evaluate_component(
                 # selected dates left null unless we recompute; keep null for insufficient
                 selected_start = None
                 selected_end = None
-        elif reason_text.startswith("invalid_market_rows"):
-            reason_code = "invalid_market_rows"
         audit_ctx = build_coverage_audit(
-            coverage_status="invalid" if reason_code == "invalid_market_rows" else "insufficient",
+            coverage_status=_coverage_status_for_reason(reason_code),
             reason_code=reason_code,
             requested_start=normalized_start,
             requested_end=normalized_end,
@@ -520,7 +527,7 @@ def evaluate_component(
             reason=reason_text,
             run_id=resolved_run_id,
             method_version=method_version,
-            provider_error_code=provider_error_code or "no_data",
+            provider_error_code=provider_error_code or reason_code,
             provider_error_message=provider_error_message or reason_text,
             retryable=retryable or "no",
             attempt_count=attempt_count,
@@ -674,7 +681,55 @@ def _coverage_reason_code(reason_text: str) -> str:
         return "single_day_method_not_supported"
     if reason_text.startswith("invalid_market_rows"):
         return "invalid_market_rows"
+    if "評価期間内の市場データが0件" in reason_text or reason_text.startswith("missing "):
+        return "missing_market_data_in_range"
+    if "市場データが0件" in reason_text:
+        return "missing_market_data_in_range"
+    if reason_text.startswith("providerのsymbol"):
+        return "provider_symbol_mismatch"
+    if reason_text.startswith("providerのcurrency"):
+        return "provider_currency_mismatch"
+    if any(
+        token in reason_text
+        for token in (
+            "0以下の不正価格",
+            "高値と安値の関係が不正",
+            "開始値が0以下",
+            "基準値が不正",
+        )
+    ):
+        return "invalid_market_rows"
     return "market_data_unavailable"
+
+
+def _coverage_status_for_reason(reason_code: str) -> str:
+    if reason_code == "invalid_market_rows":
+        return "invalid"
+    if reason_code in {"provider_symbol_mismatch", "provider_currency_mismatch"}:
+        return "invalid"
+    return "insufficient"
+
+
+def _instrument_audit_defaults(
+    instruments: list[dict[str, object]],
+    *,
+    requested_start: date,
+    requested_end: date,
+    adjustment_type: str = "unknown",
+) -> list[dict[str, object]]:
+    """Build empty instrument audits when provider fetch fails before series stats."""
+    return [
+        build_instrument_coverage_audit(
+            symbol=str(item["symbol"]),
+            currency=str(item["currency"]),
+            weight=float(str(item["weight"])) if item.get("weight") is not None else None,
+            requested_start=requested_start,
+            requested_end=requested_end,
+            input_bars=[],
+            adjustment_type=adjustment_type,
+        )
+        for item in instruments
+    ]
 
 
 def _count_invalid_bars(bars: tuple[MarketBar, ...] | list[MarketBar]) -> int:
@@ -728,6 +783,7 @@ def series_hash_for_audit(
     symbol: str,
     currency: str,
     bars: list[MarketBar],
+    adjustment_type: str,
 ) -> str | None:
     """SHA-256 of canonical JSON for valid bars sorted by date (order-invariant)."""
     valid = [bar for bar in bars if _is_valid_bar(bar)]
@@ -737,6 +793,7 @@ def series_hash_for_audit(
         {
             "adjusted_close": str(bar.adjusted_close),
             "adjusted_open": str(bar.adjusted_open),
+            "adjustment_type": adjustment_type,
             "close": str(bar.close),
             "currency": currency,
             "date": bar.date.isoformat(),
@@ -759,6 +816,7 @@ def build_instrument_coverage_audit(
     requested_start: date,
     requested_end: date,
     input_bars: list[MarketBar],
+    adjustment_type: str,
     invalid_row_count: int = 0,
 ) -> dict[str, object]:
     """Build per-instrument coverage stats from the full input series.
@@ -815,7 +873,13 @@ def build_instrument_coverage_audit(
         "invalid_row_count": total_invalid,
         "dropped_out_of_range_count": dropped_out_of_range_count,
         "dropped_row_count": dropped_row_count,
-        "series_hash": series_hash_for_audit(symbol=symbol, currency=currency, bars=unique_valid),
+        "adjustment_type": adjustment_type,
+        "series_hash": series_hash_for_audit(
+            symbol=symbol,
+            currency=currency,
+            bars=unique_valid,
+            adjustment_type=adjustment_type,
+        ),
     }
 
 
@@ -1084,24 +1148,21 @@ def _store_without_values(
         )
         if existing is not None:
             return _to_result(existing)
-        reason_code = None
-        if reason:
-            if reason.startswith("insufficient_common_dates"):
-                reason_code = "insufficient_common_dates"
-            elif reason.startswith("insufficient_trading_dates"):
-                reason_code = "insufficient_trading_dates"
-            elif reason.startswith("single_day_method_not_supported"):
-                reason_code = "single_day_method_not_supported"
+        reason_code = _coverage_reason_code(reason) if reason else None
         audit = coverage_audit
         if audit is None and reason_code is not None:
             audit = {
-                "coverage_status": "insufficient",
+                "coverage_status": _coverage_status_for_reason(reason_code),
                 "reason_code": reason_code,
                 "evaluation_as_of": str(as_of),
                 "method_version": method_version,
             }
-        elif audit is not None and reason_code is not None:
-            audit = {**audit, "coverage_status": "insufficient", "reason_code": reason_code}
+        elif audit is not None and reason_code is not None and audit.get("reason_code") is None:
+            audit = {
+                **audit,
+                "coverage_status": _coverage_status_for_reason(reason_code),
+                "reason_code": reason_code,
+            }
         if common_date_count is None and reason_code in {
             "insufficient_common_dates",
             "insufficient_trading_dates",

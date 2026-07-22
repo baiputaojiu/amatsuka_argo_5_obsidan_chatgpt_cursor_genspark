@@ -244,12 +244,22 @@ class TestR6CoverageAudit:
             _bar(date(2026, 1, 13), "100", "100"),
         ]
         bars_b = list(reversed(bars_a))
-        h1 = series_hash_for_audit(symbol="N225", currency="JPY", bars=bars_a)
-        h2 = series_hash_for_audit(symbol="N225", currency="JPY", bars=bars_b)
+        h1 = series_hash_for_audit(
+            symbol="N225", currency="JPY", bars=bars_a, adjustment_type="split_dividend"
+        )
+        h2 = series_hash_for_audit(
+            symbol="N225", currency="JPY", bars=bars_b, adjustment_type="split_dividend"
+        )
         assert h1 == h2
         bars_c = [
             _bar(date(2026, 1, 13), "100", "100"),
             _bar(date(2026, 1, 14), "100", "102"),
         ]
-        h3 = series_hash_for_audit(symbol="N225", currency="JPY", bars=bars_c)
+        h3 = series_hash_for_audit(
+            symbol="N225", currency="JPY", bars=bars_c, adjustment_type="split_dividend"
+        )
         assert h3 != h1
+        h4 = series_hash_for_audit(
+            symbol="N225", currency="JPY", bars=bars_a, adjustment_type="split_adjusted_ohlc"
+        )
+        assert h4 != h1

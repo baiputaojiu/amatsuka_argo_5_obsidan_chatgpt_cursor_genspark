@@ -316,7 +316,7 @@ class P09Output(PipelineModel):
             raise ValueError("correctにはcorrected_payloadが必要です")
         if self.decision != "correct" and self.corrected_payload is not None:
             raise ValueError("correct以外にcorrected_payloadは設定できません")
-        if self.decision != "correct" and self.forecast_operations:
+        if self.decision != "correct" and self.forecast_operations is not None:
             raise ValueError("forecast_operationsはdecision=correctのときだけ設定できます")
 
         if self.schema_version == "2.1.0":
