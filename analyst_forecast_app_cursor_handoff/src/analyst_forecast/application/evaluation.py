@@ -783,7 +783,7 @@ def series_hash_for_audit(
     symbol: str,
     currency: str,
     bars: list[MarketBar],
-    adjustment_type: str,
+    adjustment_type: str = "split_adjusted_ohlc",
 ) -> str | None:
     """SHA-256 of canonical JSON for valid bars sorted by date (order-invariant)."""
     valid = [bar for bar in bars if _is_valid_bar(bar)]
