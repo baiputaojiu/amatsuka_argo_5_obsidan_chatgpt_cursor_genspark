@@ -2,16 +2,40 @@
 
 ## 最終更新
 
-- 日時：2026-07-21
-- 状態：Round5 コア修正（A–G）実装済み。受入マトリクス R5-001〜052 は **52 PASS / 0 GAP**（`FINAL_REVIEW_ROUND5.md`）
+- 日時：2026-07-22
+- 状態：Round6 完了。受入マトリクス R6-001〜050 は **50 PASS / 0 GAP**（`FINAL_REVIEW_ROUND6.md`）
 - MVP判定：`READY_FOR_REAL_SAMPLE_DIRECTIONAL_SLICE`
-- Round4時点：`READY_FOR_REAL_SAMPLE_DIRECTIONAL_SLICE`（`FINAL_REVIEW_ROUND4.md`）
-- Round3時点：`READY_FOR_REAL_SAMPLE_DIRECTIONAL_SLICE`（`FINAL_REVIEW_ROUND3.md`）
+- Round5時点：独立レビューで追加指摘 → Round6で解消
 - 重大ブロッカー：なし
 - 推奨する次の一作業：実Vault原文1件の方向評価目視（directional slice）
 - commit / push：未実施
 
-## Round5 状況
+## Round6 完了状況
+
+- Fix 02: forecast_operations 完全被覆・一対一（多対一/未申告拒否）
+- Fix 03: coverage_audit schema_version + instruments[]
+- Fix 04: 固定JSON Schema allOf + legacy 2.0 + prompt例
+- Fix 05: PK/legacy hash + DDL後失敗復元
+- Fix 06: build dev依存、wheel正式縦断、品質ゲート全通（pytest 212）
+
+## Round6 残GAP
+
+- なし（R6-001〜050 全 PASS）
+
+## Round5 完了状況（維持）
+
+- lifecycle / reuse / P09 state / cutoff / basket / migration 0007→head 等
+
+## 検査結果（Round6 本セッション）
+
+- pytest unit：**212 passed**, 3 deselected
+- ruff check / format --check：pass
+- mypy：pass
+- packaged docs sync --check：pass
+- Alembic check：pass
+- python -m build：pass
+- git diff --check from 88864c2：pass（CRLF warningのみ）
+
 
 - Fix 07 migration FK-safe + 0010 + data-bearing / legacy_conflict tests
 - Fix 02 forecast_operations lineage（update/add/remove + ALREADY_IMPORTED）

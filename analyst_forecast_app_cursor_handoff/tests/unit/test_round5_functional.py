@@ -728,7 +728,12 @@ class TestR5RejectDisposition:
         from analyst_forecast.schemas.pipeline import pipeline_schema_path
 
         fixed = json.loads(pipeline_schema_path("P09").read_text(encoding="utf-8"))
-        assert fixed == P09Output.model_json_schema()
+        generated = P09Output.model_json_schema()
+        # Round6: fixed Schema includes allOf version/decision contracts beyond
+        # model_json_schema(); see test_round6_p09_schema_contract.py.
+        assert "allOf" in fixed
+        assert set(fixed["properties"]) >= set(generated["properties"])
+        assert fixed["title"] == generated["title"]
 
     def test_prompt_mentions_disposition(self) -> None:
         prompt = (

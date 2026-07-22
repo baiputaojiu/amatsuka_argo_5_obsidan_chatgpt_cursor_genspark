@@ -316,7 +316,15 @@ def _ingest_p05_p08(
 )
 def test_pipeline_fixed_schema_matches_pydantic_model(prompt_id: str) -> None:
     fixed = json.loads(pipeline_schema_path(prompt_id).read_text(encoding="utf-8"))
-    assert fixed == PIPELINE_MODELS[prompt_id].model_json_schema()
+    generated = PIPELINE_MODELS[prompt_id].model_json_schema()
+    if prompt_id == "P09":
+        # Round6: fixed Schema carries Draft 2020-12 allOf conditionals that
+        # model_json_schema() cannot express; dual-validator matrix covers them.
+        assert "allOf" in fixed
+        assert set(fixed["properties"]) >= set(generated["properties"])
+        assert fixed["title"] == generated["title"]
+    else:
+        assert fixed == generated
 
 
 def test_p05_unknown_speaker_is_saved_without_forcing_analyst(

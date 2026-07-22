@@ -61,8 +61,38 @@ needs_review の P08 があるとき。
 - update: reviewed_forecast_ref と corrected_forecast_ref 必須（1:1）
 - add: corrected_forecast_ref 必須、reviewed_forecast_ref は null
 - remove: reviewed_forecast_ref 必須、corrected_forecast_ref は null
-- reason 必須。配列順は identity に使わない。
+- reason 必須（空白のみ不可）。配列順は identity に使わない。
+- 集合契約: 旧forecast集合 O = update旧 ⊎ remove、新集合 N = update新 ⊎ add。未申告・多対一・一対多禁止。
 - 単一旧・単一新の legacy correct のみ operations 省略可。複数は省略禁止。
+
+### correct 例（複数forecast・集合完全被覆）
+```json
+{
+  "schema_version": "2.1.0",
+  "decision": "correct",
+  "corrected_payload": {
+    "schema_version": "2.1.0",
+    "forecasts": [
+      { "forecast_ref": "A2" },
+      { "forecast_ref": "B2" }
+    ]
+  },
+  "forecast_operations": [
+    {
+      "action": "update",
+      "reviewed_forecast_ref": "A",
+      "corrected_forecast_ref": "A2",
+      "reason": "Aの本命方向を訂正"
+    },
+    {
+      "action": "update",
+      "reviewed_forecast_ref": "B",
+      "corrected_forecast_ref": "B2",
+      "reason": "Bの時期表現を訂正"
+    }
+  ]
+}
+```
 
 ## 判定基準（必須）
 - 否定誤読、条件欠落、本命誤認、時期・程度の捏造を重点確認。

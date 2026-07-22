@@ -24,6 +24,7 @@ market = [
     "yfinance==1.5.1",
 ]
 dev = [
+    "build==1.3.0",
     "mypy==2.3.0",
     "pytest==9.1.1",
     "ruff==0.15.22",

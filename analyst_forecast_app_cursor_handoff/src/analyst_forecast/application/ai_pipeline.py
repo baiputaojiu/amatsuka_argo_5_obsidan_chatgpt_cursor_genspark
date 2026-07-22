@@ -426,6 +426,193 @@ def _validate_p07(
     return issues
 
 
+def _validate_forecast_operations_coverage(
+    *,
+    reviewed_forecasts: list[Any],
+    corrected_forecasts: list[Any],
+    operations: list[Any],
+) -> list[ValidationIssue]:
+    """Enforce O = Uo ⊎ R and N = Un ⊎ A before any DB mutation.
+
+    Round6: ops nonempty alone is insufficient; multi-to-one and undeclared
+    refs must be rejected with stable reason codes.
+    """
+    issues: list[ValidationIssue] = []
+    reviewed_refs = [str(f.forecast_ref) for f in reviewed_forecasts]
+    corrected_refs = [str(f.forecast_ref) for f in corrected_forecasts]
+    if len(reviewed_refs) != len(set(reviewed_refs)):
+        issues.append(
+            ValidationIssue(
+                "duplicate_reviewed_forecast_ref",
+                "reviewed P08内のforecast_refが重複しています。",
+                "$['corrected_payload']",
+            )
+        )
+    if len(corrected_refs) != len(set(corrected_refs)):
+        issues.append(
+            ValidationIssue(
+                "duplicate_corrected_forecast_ref",
+                "corrected P08内のforecast_refが重複しています。",
+                "$['corrected_payload']['forecasts']",
+            )
+        )
+    if issues:
+        return issues
+
+    old_set = set(reviewed_refs)
+    new_set = set(corrected_refs)
+    ops = list(operations or [])
+    if not ops:
+        if len(old_set) == 1 and len(new_set) == 1:
+            return []
+        issues.append(
+            ValidationIssue(
+                "ambiguous_legacy_forecast_mapping"
+                if len(old_set) <= 1 and len(new_set) <= 1
+                else "ambiguous_forecast_correction",
+                "複数forecastのP09 correctにはforecast_operationsによる完全対応が必要です。"
+                if len(old_set) > 1 or len(new_set) > 1
+                else "legacy correctは旧1件・新1件の決定的対応のみ許可されます。",
+                "$['forecast_operations']",
+            )
+        )
+        return issues
+
+    uo: list[str] = []
+    un: list[str] = []
+    rem: list[str] = []
+    add: list[str] = []
+    for index, op in enumerate(ops):
+        action = op.action if hasattr(op, "action") else op.get("action")
+        reviewed_ref = (
+            op.reviewed_forecast_ref
+            if hasattr(op, "reviewed_forecast_ref")
+            else op.get("reviewed_forecast_ref")
+        )
+        corrected_ref = (
+            op.corrected_forecast_ref
+            if hasattr(op, "corrected_forecast_ref")
+            else op.get("corrected_forecast_ref")
+        )
+        reason = op.reason if hasattr(op, "reason") else op.get("reason")
+        path = f"$['forecast_operations'][{index}]"
+        if reason is None or not str(reason).strip():
+            issues.append(
+                ValidationIssue(
+                    "invalid_forecast_operation_fields",
+                    "operation.reasonはtrim後非空が必須です。",
+                    f"{path}['reason']",
+                )
+            )
+            continue
+        if action == "update":
+            if reviewed_ref is None or corrected_ref is None:
+                issues.append(
+                    ValidationIssue(
+                        "invalid_forecast_operation_fields",
+                        "updateにはreviewed/corrected forecast_refが両方必須です。",
+                        path,
+                    )
+                )
+                continue
+            uo.append(str(reviewed_ref))
+            un.append(str(corrected_ref))
+        elif action == "add":
+            if reviewed_ref is not None or corrected_ref is None:
+                issues.append(
+                    ValidationIssue(
+                        "invalid_forecast_operation_fields",
+                        "addはreviewed_forecast_ref=nullかつcorrected必須です。",
+                        path,
+                    )
+                )
+                continue
+            add.append(str(corrected_ref))
+        elif action == "remove":
+            if reviewed_ref is None or corrected_ref is not None:
+                issues.append(
+                    ValidationIssue(
+                        "invalid_forecast_operation_fields",
+                        "removeはreviewed必須かつcorrected=nullです。",
+                        path,
+                    )
+                )
+                continue
+            rem.append(str(reviewed_ref))
+        else:
+            issues.append(
+                ValidationIssue(
+                    "invalid_forecast_operation_fields",
+                    f"未知のactionです: {action}",
+                    path,
+                )
+            )
+    if issues:
+        return issues
+
+    if len(uo) != len(set(uo)) or len(rem) != len(set(rem)) or set(uo) & set(rem):
+        issues.append(
+            ValidationIssue(
+                "duplicate_operation_reviewed_ref",
+                "operation間でreviewed_forecast_refが重複または衝突しています。",
+                "$['forecast_operations']",
+            )
+        )
+    if len(un) != len(set(un)) or len(add) != len(set(add)) or set(un) & set(add):
+        issues.append(
+            ValidationIssue(
+                "duplicate_operation_corrected_ref",
+                "operation間でcorrected_forecast_refが重複または衝突しています。",
+                "$['forecast_operations']",
+            )
+        )
+    if len(uo) != len(un):
+        issues.append(
+            ValidationIssue(
+                "duplicate_operation_corrected_ref",
+                "updateは旧1件↔新1件でなければなりません（多対一/一対多禁止）。",
+                "$['forecast_operations']",
+            )
+        )
+
+    uo_set, un_set, rem_set, add_set = set(uo), set(un), set(rem), set(add)
+    for ref in uo_set | rem_set:
+        if ref not in old_set:
+            issues.append(
+                ValidationIssue(
+                    "unknown_reviewed_forecast_ref",
+                    f"reviewedに存在しないforecast_refです: {ref}",
+                    "$['forecast_operations']",
+                )
+            )
+    for ref in un_set | add_set:
+        if ref not in new_set:
+            issues.append(
+                ValidationIssue(
+                    "unknown_corrected_forecast_ref",
+                    f"correctedに存在しないforecast_refです: {ref}",
+                    "$['forecast_operations']",
+                )
+            )
+    if old_set != (uo_set | rem_set):
+        issues.append(
+            ValidationIssue(
+                "incomplete_reviewed_forecast_coverage",
+                "reviewed forecast集合がupdate/removeで完全被覆されていません。",
+                "$['forecast_operations']",
+            )
+        )
+    if new_set != (un_set | add_set):
+        issues.append(
+            ValidationIssue(
+                "incomplete_corrected_forecast_coverage",
+                "corrected forecast集合がupdate/addで完全被覆されていません。",
+                "$['forecast_operations']",
+            )
+        )
+    return issues
+
+
 def _validate_review_artifact(
     settings: AppSettings,
     session: Session,
@@ -583,23 +770,21 @@ def _validate_review_artifact(
                         "$['corrected_payload']['upstream_artifact_id']",
                     )
                 )
-            # Round5: multi-forecast correct requires explicit forecast_operations.
+            # Round6: total mapping O=Uo⊎R / N=Un⊎A before any mutation.
             if isinstance(payload, P09Output) and reviewed.prompt_id == "P08":
                 ops = list(getattr(payload, "forecast_operations", None) or [])
                 try:
                     reviewed_for_ops = P08Output.model_validate(reviewed.payload)
-                    old_refs = {f.forecast_ref for f in reviewed_for_ops.forecasts}
+                    reviewed_list = list(reviewed_for_ops.forecasts)
                 except ValidationError:
-                    old_refs = set()
-                new_refs = {f.forecast_ref for f in corrected.forecasts}
-                if not ops and (len(old_refs) > 1 or len(new_refs) > 1):
-                    issues.append(
-                        ValidationIssue(
-                            "ambiguous_forecast_correction",
-                            "複数forecastのP09 correctにはforecast_operationsが必要です。",
-                            "$['forecast_operations']",
-                        )
+                    reviewed_list = []
+                issues.extend(
+                    _validate_forecast_operations_coverage(
+                        reviewed_forecasts=reviewed_list,
+                        corrected_forecasts=list(corrected.forecasts),
+                        operations=ops,
                     )
+                )
     return issues
 
 

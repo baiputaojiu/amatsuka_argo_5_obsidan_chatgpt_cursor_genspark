@@ -4,11 +4,7 @@
       "additionalProperties": false,
       "properties": {
         "action": {
-          "enum": [
-            "update",
-            "add",
-            "remove"
-          ],
+          "enum": ["update", "add", "remove"],
           "title": "Action",
           "type": "string"
         },
@@ -40,16 +36,67 @@
         },
         "reason": {
           "minLength": 1,
+          "pattern": ".*\\S.*",
           "title": "Reason",
           "type": "string"
         }
       },
-      "required": [
-        "action",
-        "reason"
-      ],
+      "required": ["action", "reason"],
       "title": "ForecastCorrectionOperation",
-      "type": "object"
+      "type": "object",
+      "allOf": [
+        {
+          "if": {
+            "properties": { "action": { "const": "update" } },
+            "required": ["action"]
+          },
+          "then": {
+            "required": ["reviewed_forecast_ref", "corrected_forecast_ref"],
+            "properties": {
+              "reviewed_forecast_ref": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$"
+              },
+              "corrected_forecast_ref": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "action": { "const": "add" } },
+            "required": ["action"]
+          },
+          "then": {
+            "required": ["corrected_forecast_ref"],
+            "properties": {
+              "reviewed_forecast_ref": { "type": "null" },
+              "corrected_forecast_ref": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "action": { "const": "remove" } },
+            "required": ["action"]
+          },
+          "then": {
+            "required": ["reviewed_forecast_ref"],
+            "properties": {
+              "reviewed_forecast_ref": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$"
+              },
+              "corrected_forecast_ref": { "type": "null" }
+            }
+          }
+        }
+      ]
     },
     "P09PromptExecution": {
       "additionalProperties": false,
@@ -65,10 +112,7 @@
           "type": "string"
         },
         "environment": {
-          "enum": [
-            "cursor",
-            "chatgpt"
-          ],
+          "enum": ["cursor", "chatgpt"],
           "title": "Environment",
           "type": "string"
         },
@@ -103,11 +147,7 @@
           "type": "string"
         },
         "severity": {
-          "enum": [
-            "info",
-            "warning",
-            "error"
-          ],
+          "enum": ["info", "warning", "error"],
           "title": "Severity",
           "type": "string"
         },
@@ -122,12 +162,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "finding_ref",
-        "severity",
-        "message",
-        "evidence"
-      ],
+      "required": ["finding_ref", "severity", "message", "evidence"],
       "title": "ReviewFinding",
       "type": "object"
     }
@@ -135,14 +170,11 @@
   "$id": "https://local.invalid/schemas/p09-forecast-review-2.1.0.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "予想抽出レビュー。",
+  "description": "予想抽出レビュー。集合完全被覆（O/N set equality）は application validator の責務。",
   "properties": {
     "schema_version": {
       "default": "2.1.0",
-      "enum": [
-        "2.0.0",
-        "2.1.0"
-      ],
+      "enum": ["2.0.0", "2.1.0"],
       "title": "Schema Version",
       "type": "string"
     },
@@ -170,12 +202,7 @@
       "type": "string"
     },
     "decision": {
-      "enum": [
-        "accept",
-        "correct",
-        "reject",
-        "unresolved"
-      ],
+      "enum": ["accept", "correct", "reject", "unresolved"],
       "title": "Decision",
       "type": "string"
     },
@@ -222,10 +249,7 @@
     "reject_disposition": {
       "anyOf": [
         {
-          "enum": [
-            "retryable",
-            "terminal"
-          ],
+          "enum": ["retryable", "terminal"],
           "type": "string"
         },
         {
@@ -238,7 +262,8 @@
     "reject_reason": {
       "anyOf": [
         {
-          "type": "string"
+          "type": "string",
+          "pattern": ".*\\S.*"
         },
         {
           "type": "null"
@@ -261,6 +286,7 @@
     }
   },
   "required": [
+    "schema_version",
     "run_id",
     "source_id",
     "reviewed_artifact_id",
@@ -270,5 +296,111 @@
     "knowledge_cutoff"
   ],
   "title": "P09ForecastExtractionReviewOutput",
-  "type": "object"
+  "type": "object",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "schema_version": { "const": "2.1.0" },
+          "decision": { "const": "reject" }
+        },
+        "required": ["schema_version", "decision"]
+      },
+      "then": {
+        "required": ["reject_disposition", "reject_reason"],
+        "properties": {
+          "reject_disposition": {
+            "type": "string",
+            "enum": ["retryable", "terminal"]
+          },
+          "reject_reason": {
+            "type": "string",
+            "pattern": ".*\\S.*"
+          },
+          "reject_terminal": { "type": "null" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": { "const": "2.1.0" },
+          "decision": { "enum": ["accept", "correct", "unresolved"] }
+        },
+        "required": ["schema_version", "decision"]
+      },
+      "then": {
+        "properties": {
+          "reject_disposition": { "type": "null" },
+          "reject_reason": { "type": "null" },
+          "reject_terminal": { "type": "null" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": { "const": "2.0.0" },
+          "decision": { "const": "reject" }
+        },
+        "required": ["schema_version", "decision"]
+      },
+      "then": {
+        "required": ["reject_terminal", "reject_reason"],
+        "properties": {
+          "reject_terminal": { "type": "boolean" },
+          "reject_reason": {
+            "type": "string",
+            "pattern": ".*\\S.*"
+          },
+          "reject_disposition": { "type": "null" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": { "const": "2.0.0" },
+          "decision": { "enum": ["accept", "correct", "unresolved"] }
+        },
+        "required": ["schema_version", "decision"]
+      },
+      "then": {
+        "properties": {
+          "reject_disposition": { "type": "null" },
+          "reject_reason": { "type": "null" },
+          "reject_terminal": { "type": "null" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "decision": { "const": "correct" } },
+        "required": ["decision"]
+      },
+      "then": {
+        "required": ["corrected_payload"],
+        "properties": {
+          "corrected_payload": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "decision": { "enum": ["accept", "reject", "unresolved"] }
+        },
+        "required": ["decision"]
+      },
+      "then": {
+        "properties": {
+          "corrected_payload": { "type": "null" },
+          "forecast_operations": { "type": "null" }
+        }
+      }
+    }
+  ]
 }

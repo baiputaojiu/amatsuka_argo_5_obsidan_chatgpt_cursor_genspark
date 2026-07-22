@@ -45,6 +45,24 @@ from analyst_forecast.infrastructure.db.session import create_session_factory
 #         adverse = (period_high - start) / start
 EVALUATION_METHOD_VERSION = "direction-v2.0.0"
 LEGACY_EVALUATION_METHOD_VERSION = "direction-v1.0.0"
+COVERAGE_AUDIT_SCHEMA_VERSION = "1.0.0"
+INSTRUMENT_AUDIT_KEYS = (
+    "symbol",
+    "currency",
+    "weight",
+    "requested_start_date",
+    "requested_end_date",
+    "input_row_count",
+    "input_first_date",
+    "input_last_date",
+    "in_range_row_count",
+    "unique_valid_date_count",
+    "duplicate_date_count",
+    "invalid_row_count",
+    "dropped_out_of_range_count",
+    "dropped_row_count",
+    "series_hash",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,6 +230,7 @@ def evaluate_component(
     input_series_hashes: list[str] | None = None
     basket_weights: list[float] | None = None
     common_date_rule: str | None = None
+    instrument_audits: list[dict[str, object]] = []
     store_provider: str
     store_symbol: str
     store_currency: str
@@ -235,22 +254,38 @@ def evaluate_component(
             else:
                 series = provider.fetch(request)
                 _validate_provider_series(series, request)
-            bars = tuple(
-                bar for bar in series.bars if normalized_start <= bar.date <= effective_end
+            stats = build_instrument_coverage_audit(
+                symbol=str(instrument["symbol"]),
+                currency=str(instrument["currency"]),
+                weight=float(str(instrument["weight"]))
+                if instrument.get("weight") is not None
+                else None,
+                requested_start=normalized_start,
+                requested_end=effective_end,
+                input_bars=list(series.bars),
             )
+            instrument_audits = [stats]
+            unique_valid = _unique_valid_bars(
+                list(series.bars),
+                requested_start=normalized_start,
+                requested_end=effective_end,
+            )
+            if int(str(stats.get("invalid_row_count") or 0)) > 0:
+                raise MarketDataUnavailable(
+                    f"invalid_market_rows: invalid_row_count={stats['invalid_row_count']}"
+                )
+            bars = tuple(unique_valid)
             if not bars:
                 raise MarketDataUnavailable("評価期間内の市場データが0件です")
-            _validate_bars(bars)
             if normalized_start == normalized_end:
                 raise MarketDataUnavailable(
                     "single_day_method_not_supported: "
                     "同日予想の明示methodは未実装のため評価しません"
                 )
-            unique_dates = {bar.date for bar in bars}
-            if len(unique_dates) < 2:
+            if len(bars) < 2:
                 raise MarketDataUnavailable(
                     "insufficient_trading_dates: "
-                    f"複数日予想の評価には2取引日以上必要ですが{len(unique_dates)}日しかありません"
+                    f"複数日予想の評価には2取引日以上必要ですが{len(bars)}日しかありません"
                 )
             start_price = bars[0].adjusted_open
             end_price = bars[-1].adjusted_close
@@ -269,6 +304,7 @@ def evaluate_component(
             store_frequency = series.frequency
             store_retrieved_at = series.retrieved_at
             common_date_rule = "single_symbol_trading_dates_v1"
+            input_series_hashes = [str(stats["series_hash"])] if stats["series_hash"] else []
         else:
             mapping_hash = _basket_mapping_hash(instruments)
             series_identity = f"BASKET:{mapping_hash}"
@@ -294,13 +330,50 @@ def evaluate_component(
                     _validate_provider_series(fetched, request)
                     series_by_symbol[str(instrument["symbol"])] = fetched
                     raw_cache_hits[str(instrument["symbol"])] = False
-            common_dates = _common_bar_dates(series_by_symbol, normalized_start, effective_end)
+            instrument_audits = []
+            valid_by_symbol: dict[str, list[MarketBar]] = {}
+            for instrument in instruments:
+                symbol = str(instrument["symbol"])
+                stats = build_instrument_coverage_audit(
+                    symbol=symbol,
+                    currency=str(instrument["currency"]),
+                    weight=float(str(instrument["weight"])),
+                    requested_start=normalized_start,
+                    requested_end=effective_end,
+                    input_bars=list(series_by_symbol[symbol].bars),
+                )
+                instrument_audits.append(stats)
+                if int(str(stats.get("invalid_row_count") or 0)) > 0:
+                    raise MarketDataUnavailable(
+                        f"invalid_market_rows: symbol={symbol} "
+                        f"invalid_row_count={stats['invalid_row_count']}"
+                    )
+                valid_by_symbol[symbol] = _unique_valid_bars(
+                    list(series_by_symbol[symbol].bars),
+                    requested_start=normalized_start,
+                    requested_end=effective_end,
+                )
+            date_sets = [set(bar.date for bar in bars) for bars in valid_by_symbol.values()]
+            common_dates = sorted(set.intersection(*date_sets)) if date_sets else []
             if len(common_dates) < 2:
                 raise MarketDataUnavailable(
                     "insufficient_common_dates: "
                     f"共通取引日が{len(common_dates)}日しかなく、複数日バスケット評価には2日以上必要です"
                 )
-            bars = _build_basket_bars(series_by_symbol, instruments, common_dates)
+            series_for_basket = {
+                symbol: MarketSeries(
+                    provider=series_by_symbol[symbol].provider,
+                    symbol=symbol,
+                    currency=series_by_symbol[symbol].currency,
+                    adjustment_type=series_by_symbol[symbol].adjustment_type,
+                    frequency=series_by_symbol[symbol].frequency,
+                    retrieved_at=series_by_symbol[symbol].retrieved_at,
+                    bars=tuple(valid_by_symbol[symbol]),
+                )
+                for symbol in valid_by_symbol
+                if valid_by_symbol[symbol]
+            }
+            bars = _build_basket_bars(series_for_basket, instruments, common_dates)
             if not bars:
                 raise MarketDataUnavailable("評価期間内の市場データが0件です")
             _validate_bars(bars)
@@ -319,15 +392,11 @@ def evaluate_component(
             for instrument in instruments:
                 symbol = str(instrument["symbol"])
                 raw_series = series_by_symbol[symbol]
-                raw_bars = tuple(
-                    bar for bar in raw_series.bars if normalized_start <= bar.date <= effective_end
-                )
-                raw_hash, raw_csv = _serialize_bars(
-                    provider=raw_series.provider,
-                    symbol=symbol,
-                    currency=str(instrument["currency"]),
-                    adjustment_type=raw_series.adjustment_type,
-                    bars=raw_bars,
+                raw_bars = tuple(valid_by_symbol[symbol])
+                raw_hash = next(
+                    str(item["series_hash"])
+                    for item in instrument_audits
+                    if item["symbol"] == symbol
                 )
                 input_series_hashes.append(raw_hash)
                 raw_series_payloads.append(
@@ -341,7 +410,13 @@ def evaluate_component(
                         "start_date": raw_bars[0].date if raw_bars else bars[0].date,
                         "end_date": raw_bars[-1].date if raw_bars else bars[-1].date,
                         "data_hash": raw_hash,
-                        "csv_content": raw_csv,
+                        "csv_content": _serialize_bars(
+                            provider=raw_series.provider,
+                            symbol=symbol,
+                            currency=str(instrument["currency"]),
+                            adjustment_type=raw_series.adjustment_type,
+                            bars=raw_bars,
+                        )[1],
                         "series_kind": "raw",
                         "series_identity": symbol,
                         "mapping_hash": None,
@@ -366,38 +441,76 @@ def evaluate_component(
             provider_error_message=str(error),
             retryable="yes" if error.retryable else "no",
             attempt_count=error.attempt_count,
+            coverage_audit=build_coverage_audit(
+                coverage_status="insufficient",
+                reason_code=error.code,
+                requested_start=normalized_start,
+                requested_end=normalized_end,
+                effective_start=normalized_start,
+                effective_end=effective_end,
+                evaluation_as_of=as_of,
+                method_version=method_version,
+                series_kind=series_kind,
+                selected_start=None,
+                selected_end=None,
+                common_date_count=None,
+                intersection_rule=common_date_rule,
+                mapping_hash=mapping_hash,
+                instruments=instrument_audits,
+                basket_weights=basket_weights,
+                input_series_hashes=[
+                    str(item["series_hash"])
+                    for item in instrument_audits
+                    if item.get("series_hash")
+                ],
+            )
+            if normalized_start is not None and normalized_end is not None
+            else None,
         )
     except MarketDataUnavailable as error:
         reason_text = str(error)
-        audit_ctx: dict[str, object] = {
-            "requested_start_date": str(normalized_start) if normalized_start else None,
-            "requested_end_date": str(normalized_end) if normalized_end else None,
-            "effective_start_date": str(normalized_start) if normalized_start else None,
-            "effective_end_date": str(effective_end) if normalized_start else None,
-            "evaluation_as_of": str(as_of),
-            "method_version": method_version,
-            "series_kind": series_kind,
-            "coverage_status": "insufficient",
-            "common_date_rule": common_date_rule,
-            "basket_weights": basket_weights,
-            "mapping_hash": mapping_hash,
-            "input_series_hashes": input_series_hashes,
-        }
+        reason_code = _coverage_reason_code(reason_text)
         common_count: int | None = None
-        if reason_text.startswith("insufficient_common_dates"):
-            audit_ctx["reason_code"] = "insufficient_common_dates"
-            # Parse trailing count when present: "...がN日しかなく..."
-            import re as _re
-
-            match = _re.search(r"が(\d+)日", reason_text)
+        selected_start: date | None = None
+        selected_end: date | None = None
+        if reason_code == "insufficient_common_dates":
+            match = re.search(r"が(\d+)日", reason_text)
             if match:
                 common_count = int(match.group(1))
-                audit_ctx["common_date_count"] = common_count
-        elif reason_text.startswith("insufficient_trading_dates"):
-            audit_ctx["reason_code"] = "insufficient_trading_dates"
-            audit_ctx["unique_valid_date_count"] = 1
-        elif reason_text.startswith("single_day_method_not_supported"):
-            audit_ctx["reason_code"] = "single_day_method_not_supported"
+            elif instrument_audits:
+                common_count = 0
+        elif reason_code == "insufficient_trading_dates":
+            common_count = 1
+            if (
+                instrument_audits
+                and int(str(instrument_audits[0].get("unique_valid_date_count") or 0)) == 1
+            ):
+                # selected dates left null unless we recompute; keep null for insufficient
+                selected_start = None
+                selected_end = None
+        elif reason_text.startswith("invalid_market_rows"):
+            reason_code = "invalid_market_rows"
+        audit_ctx = build_coverage_audit(
+            coverage_status="invalid" if reason_code == "invalid_market_rows" else "insufficient",
+            reason_code=reason_code,
+            requested_start=normalized_start,
+            requested_end=normalized_end,
+            effective_start=normalized_start,
+            effective_end=effective_end,
+            evaluation_as_of=as_of,
+            method_version=method_version,
+            series_kind=series_kind,
+            selected_start=selected_start,
+            selected_end=selected_end,
+            common_date_count=common_count,
+            intersection_rule=common_date_rule,
+            mapping_hash=mapping_hash,
+            instruments=instrument_audits,
+            basket_weights=basket_weights,
+            input_series_hashes=[
+                str(item["series_hash"]) for item in instrument_audits if item.get("series_hash")
+            ],
+        )
         return _store_without_values(
             settings,
             component_id=component_id,
@@ -413,6 +526,8 @@ def evaluate_component(
             attempt_count=attempt_count,
             coverage_audit=audit_ctx,
             common_date_count=common_count,
+            selected_start_date=selected_start,
+            selected_end_date=selected_end,
         )
 
     actual_return = (end_price - start_price) / start_price
@@ -469,26 +584,25 @@ def evaluate_component(
         for payload in raw_series_payloads:
             _upsert_market_series(session, settings, payload)
         existing_series = _upsert_market_series(session, settings, evaluation_payload)
-        coverage_audit_data = {
-            "requested_start_date": str(normalized_start),
-            "requested_end_date": str(normalized_end),
-            "effective_start_date": str(normalized_start),
-            "effective_end_date": str(effective_end),
-            "evaluation_as_of": str(as_of),
-            "method_version": method_version,
-            "series_kind": series_kind,
-            "common_date_count": len(bars),
-            "unique_valid_date_count": len({bar.date for bar in bars}),
-            "selected_start_date": str(bars[0].date),
-            "selected_end_date": str(bars[-1].date),
-            "coverage_status": "ok",
-            "reason_code": None,
-            "common_date_rule": common_date_rule,
-            "basket_weights": basket_weights,
-            "mapping_hash": mapping_hash,
-            "input_series_hashes": input_series_hashes,
-            "evaluation_method_version": method_version,
-        }
+        coverage_audit_data = build_coverage_audit(
+            coverage_status="sufficient",
+            reason_code=None,
+            requested_start=normalized_start,
+            requested_end=normalized_end,
+            effective_start=normalized_start,
+            effective_end=effective_end,
+            evaluation_as_of=as_of,
+            method_version=method_version,
+            series_kind=series_kind,
+            selected_start=bars[0].date,
+            selected_end=bars[-1].date,
+            common_date_count=len(bars),
+            intersection_rule=common_date_rule,
+            mapping_hash=mapping_hash,
+            instruments=instrument_audits,
+            basket_weights=basket_weights,
+            input_series_hashes=input_series_hashes,
+        )
         common_date_count_val = len(bars)
         selected_start_date_val = bars[0].date
         selected_end_date_val = bars[-1].date
@@ -541,6 +655,213 @@ def evaluate_component(
 
     refresh_workflow(settings, resolved_run_id)
     return result
+
+
+def _audit_series_kind(series_kind: str) -> str:
+    if series_kind in {"raw", "single"}:
+        return "single"
+    if series_kind == "basket":
+        return "basket"
+    return series_kind
+
+
+def _coverage_reason_code(reason_text: str) -> str:
+    if reason_text.startswith("insufficient_common_dates"):
+        return "insufficient_common_dates"
+    if reason_text.startswith("insufficient_trading_dates"):
+        return "insufficient_trading_dates"
+    if reason_text.startswith("single_day_method_not_supported"):
+        return "single_day_method_not_supported"
+    if reason_text.startswith("invalid_market_rows"):
+        return "invalid_market_rows"
+    return "market_data_unavailable"
+
+
+def _count_invalid_bars(bars: tuple[MarketBar, ...] | list[MarketBar]) -> int:
+    invalid = 0
+    for bar in bars:
+        prices = (
+            bar.open,
+            bar.high,
+            bar.low,
+            bar.close,
+            bar.adjusted_open,
+            bar.adjusted_close,
+        )
+        if any(price <= 0 for price in prices) or bar.high < bar.low:
+            invalid += 1
+    return invalid
+
+
+def _is_valid_bar(bar: MarketBar) -> bool:
+    prices = (
+        bar.open,
+        bar.high,
+        bar.low,
+        bar.close,
+        bar.adjusted_open,
+        bar.adjusted_close,
+    )
+    return all(price > 0 for price in prices) and bar.high >= bar.low
+
+
+def _unique_valid_bars(
+    input_bars: list[MarketBar],
+    *,
+    requested_start: date,
+    requested_end: date,
+) -> list[MarketBar]:
+    seen_dates: set[date] = set()
+    unique_valid: list[MarketBar] = []
+    for bar in sorted(input_bars, key=lambda item: item.date):
+        if bar.date < requested_start or bar.date > requested_end:
+            continue
+        if bar.date in seen_dates or not _is_valid_bar(bar):
+            continue
+        seen_dates.add(bar.date)
+        unique_valid.append(bar)
+    return unique_valid
+
+
+def series_hash_for_audit(
+    *,
+    symbol: str,
+    currency: str,
+    bars: list[MarketBar],
+) -> str | None:
+    """SHA-256 of canonical JSON for valid bars sorted by date (order-invariant)."""
+    valid = [bar for bar in bars if _is_valid_bar(bar)]
+    if not valid:
+        return None
+    rows = [
+        {
+            "adjusted_close": str(bar.adjusted_close),
+            "adjusted_open": str(bar.adjusted_open),
+            "close": str(bar.close),
+            "currency": currency,
+            "date": bar.date.isoformat(),
+            "high": str(bar.high),
+            "low": str(bar.low),
+            "open": str(bar.open),
+            "symbol": symbol,
+        }
+        for bar in sorted(valid, key=lambda item: item.date)
+    ]
+    payload = json.dumps(rows, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def build_instrument_coverage_audit(
+    *,
+    symbol: str,
+    currency: str,
+    weight: float | None,
+    requested_start: date,
+    requested_end: date,
+    input_bars: list[MarketBar],
+    invalid_row_count: int = 0,
+) -> dict[str, object]:
+    """Build per-instrument coverage stats from the full input series.
+
+    Duplicate dates and invalid rows are counted and excluded from unique valid
+    dates / series_hash. Out-of-range rows contribute to input first/last and
+    dropped counts but not to evaluation candidates.
+    """
+    input_row_count = len(input_bars) + invalid_row_count
+    dated = [bar for bar in input_bars]
+    parseable_dates = [bar.date for bar in dated]
+    input_first = min(parseable_dates).isoformat() if parseable_dates else None
+    input_last = max(parseable_dates).isoformat() if parseable_dates else None
+
+    in_range_rows = [bar for bar in dated if requested_start <= bar.date <= requested_end]
+    out_of_range = [bar for bar in dated if not (requested_start <= bar.date <= requested_end)]
+    in_range_row_count = len(in_range_rows)
+
+    date_counts: dict[date, int] = {}
+    for bar in in_range_rows:
+        date_counts[bar.date] = date_counts.get(bar.date, 0) + 1
+    duplicate_date_count = sum(count - 1 for count in date_counts.values() if count > 1)
+
+    invalid_in_range = [bar for bar in in_range_rows if not _is_valid_bar(bar)]
+    total_invalid = invalid_row_count + len(invalid_in_range)
+
+    # First occurrence of each date that is valid; later duplicates are dropped.
+    seen_dates: set[date] = set()
+    unique_valid: list[MarketBar] = []
+    for bar in sorted(in_range_rows, key=lambda item: item.date):
+        if bar.date in seen_dates:
+            continue
+        if not _is_valid_bar(bar):
+            continue
+        seen_dates.add(bar.date)
+        unique_valid.append(bar)
+
+    dropped_out_of_range_count = len(out_of_range)
+    # dropped = everything not in unique_valid evaluation candidates
+    dropped_row_count = input_row_count - len(unique_valid)
+
+    return {
+        "symbol": symbol,
+        "currency": currency,
+        "weight": weight,
+        "requested_start_date": requested_start.isoformat(),
+        "requested_end_date": requested_end.isoformat(),
+        "input_row_count": input_row_count,
+        "input_first_date": input_first,
+        "input_last_date": input_last,
+        "in_range_row_count": in_range_row_count,
+        "unique_valid_date_count": len(unique_valid),
+        "duplicate_date_count": duplicate_date_count,
+        "invalid_row_count": total_invalid,
+        "dropped_out_of_range_count": dropped_out_of_range_count,
+        "dropped_row_count": dropped_row_count,
+        "series_hash": series_hash_for_audit(symbol=symbol, currency=currency, bars=unique_valid),
+    }
+
+
+def build_coverage_audit(
+    *,
+    coverage_status: str,
+    reason_code: str | None,
+    requested_start: date | None,
+    requested_end: date | None,
+    effective_start: date | None,
+    effective_end: date | None,
+    evaluation_as_of: date,
+    method_version: str,
+    series_kind: str,
+    selected_start: date | None,
+    selected_end: date | None,
+    common_date_count: int | None,
+    intersection_rule: str | None,
+    mapping_hash: str | None,
+    instruments: list[dict[str, object]],
+    basket_weights: list[float] | None = None,
+    input_series_hashes: list[str] | None = None,
+) -> dict[str, object]:
+    """Versioned coverage_audit contract shared by success and insufficient paths."""
+    return {
+        "schema_version": COVERAGE_AUDIT_SCHEMA_VERSION,
+        "coverage_status": coverage_status,
+        "reason_code": reason_code,
+        "requested_start_date": requested_start.isoformat() if requested_start else None,
+        "requested_end_date": requested_end.isoformat() if requested_end else None,
+        "effective_start_date": effective_start.isoformat() if effective_start else None,
+        "effective_end_date": effective_end.isoformat() if effective_end else None,
+        "evaluation_as_of": evaluation_as_of.isoformat(),
+        "method_version": method_version,
+        "series_kind": _audit_series_kind(series_kind),
+        "selected_start_date": selected_start.isoformat() if selected_start else None,
+        "selected_end_date": selected_end.isoformat() if selected_end else None,
+        "common_date_count": common_date_count,
+        "intersection_rule": intersection_rule,
+        "common_date_rule": intersection_rule,
+        "mapping_hash": mapping_hash,
+        "instruments": instruments,
+        "basket_weights": basket_weights,
+        "input_series_hashes": input_series_hashes,
+        "evaluation_method_version": method_version,
+    }
 
 
 def _validate_instruments(instruments: list[dict[str, object]]) -> str | None:

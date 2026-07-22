@@ -248,6 +248,10 @@ class ForecastCorrectionOperation(PipelineModel):
 
     @model_validator(mode="after")
     def validate_refs(self) -> ForecastCorrectionOperation:
+        trimmed = str(self.reason).strip() if self.reason is not None else ""
+        if not trimmed:
+            raise ValueError("operation.reasonはtrim後非空が必須です")
+        object.__setattr__(self, "reason", trimmed)
         if self.action == "update":
             if self.reviewed_forecast_ref is None or self.corrected_forecast_ref is None:
                 raise ValueError(
@@ -329,25 +333,32 @@ class P09Output(PipelineModel):
                 if self.reject_reason is not None:
                     raise ValueError("reject以外にreject_reasonは設定できません")
         else:
-            # Legacy 2.0.0 adapter
+            # Legacy 2.0.0: require reject_terminal; forbid reject_disposition;
+            # convert only after validation succeeds. Mixed old+new fields always invalid.
+            if self.reject_disposition is not None and self.reject_terminal is not None:
+                raise ValueError(
+                    "schema_version=2.0.0ではreject_dispositionとreject_terminalの混在は拒否されます"
+                )
+            if self.reject_disposition is not None:
+                raise ValueError("schema_version=2.0.0ではreject_dispositionは使用できません")
             if self.decision == "reject":
-                if self.reject_disposition is None and self.reject_terminal is True:
-                    object.__setattr__(self, "reject_disposition", "terminal")
-                elif (
-                    self.reject_disposition is None
-                    and self.reject_terminal is False
-                    and self.reject_reason
-                ):
-                    object.__setattr__(self, "reject_disposition", "retryable")
-                elif self.reject_disposition is None:
+                if self.reject_terminal is None:
                     raise ValueError(
-                        "legacy_reject_disposition_unknown: "
-                        "reject_dispositionもreject_terminal+reasonもありません"
+                        "legacy_reject_terminal_required: "
+                        "schema_version=2.0.0のrejectではreject_terminalが必須です"
                     )
                 if self.reject_reason is None or not str(self.reject_reason).strip():
                     raise ValueError("decision=rejectではreject_reasonが必須です")
-            elif self.reject_terminal:
-                raise ValueError("reject_terminalはdecision=rejectのときだけ設定できます")
+                object.__setattr__(
+                    self,
+                    "reject_disposition",
+                    "terminal" if self.reject_terminal else "retryable",
+                )
+            else:
+                if self.reject_terminal is not None:
+                    raise ValueError("reject_terminalはdecision=rejectのときだけ設定できます")
+                if self.reject_reason is not None:
+                    raise ValueError("reject以外にreject_reasonは設定できません")
         return self
 
     @property

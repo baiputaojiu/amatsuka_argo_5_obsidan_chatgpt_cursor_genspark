@@ -8,8 +8,6 @@ import sys
 import venv
 from pathlib import Path
 
-import pytest
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -35,7 +33,7 @@ def _run(cmd: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProc
 
 def test_r4_046_wheel_help(tmp_path: Path) -> None:
     """R4-046: build wheel, install into temp venv, run analyst-forecast --help."""
-    pytest.importorskip("build")
+    import build as _build  # noqa: F401 — fail loudly if missing (R6-044)
 
     dist_dir = tmp_path / "dist"
     dist_dir.mkdir()
