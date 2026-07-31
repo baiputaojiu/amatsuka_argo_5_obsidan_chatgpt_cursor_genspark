@@ -12,6 +12,15 @@ from onedrive_destination_recommender.terms import (
     searchable_attachment_names,
 )
 
+__all__ = [
+    "MsgAccessProbe",
+    "MsgSearchTerms",
+    "OutlookUnavailableError",
+    "build_msg_search_terms",
+    "is_msg_file",
+    "probe_msg_access",
+]
+
 
 class OutlookUnavailableError(RuntimeError):
     """Raised when Outlook COM cannot read a local MSG file."""
@@ -27,7 +36,7 @@ class MsgAccessProbe:
 
 
 @dataclass(frozen=True, slots=True)
-class MsgContent:
+class _MsgContent:
     """MSG fields kept in memory only for search-term generation."""
 
     subject: str
@@ -86,13 +95,13 @@ def _opened_msg_item(msg_path: str | Path) -> Iterator[Any]:
         outlook = win32com_client.Dispatch("Outlook.Application")
         namespace = outlook.GetNamespace("MAPI")
         item = namespace.OpenSharedItem(str(path.resolve()))
-        yield item
-    except OutlookUnavailableError:
-        raise
     except Exception as exc:
         raise OutlookUnavailableError(
             "Outlook COMでMSGを読み取れませんでした。MSGファイル名だけで処理を続けます。"
         ) from exc
+
+    try:
+        yield item
     finally:
         if item is not None:
             with suppress(Exception):
@@ -133,13 +142,13 @@ def _read_attachment_names(item: Any) -> tuple[tuple[str, ...], int, bool]:
     return tuple(names), count, complete
 
 
-def read_msg_content(msg_path: str | Path) -> MsgContent:
+def _read_msg_content(msg_path: str | Path) -> _MsgContent:
     """Read MSG fields through Outlook COM without saving attachments or message text."""
     with _opened_msg_item(msg_path) as item:
         subject, subject_available = _read_text_attribute(item, "Subject")
         body, body_available = _read_text_attribute(item, "Body")
         attachment_names, attachment_count, attachments_available = _read_attachment_names(item)
-        return MsgContent(
+        return _MsgContent(
             subject=subject,
             body=body,
             attachment_file_names=attachment_names,
@@ -152,7 +161,7 @@ def read_msg_content(msg_path: str | Path) -> MsgContent:
 
 def probe_msg_access(msg_path: str | Path) -> MsgAccessProbe:
     """Confirm read-only access to MSG fields without returning their contents."""
-    content = read_msg_content(msg_path)
+    content = _read_msg_content(msg_path)
     return MsgAccessProbe(
         subject_accessible=content.subject_available,
         body_accessible=content.body_available,
@@ -165,7 +174,7 @@ def build_msg_search_terms(msg_path: str | Path) -> MsgSearchTerms:
     path = _validated_msg_path(msg_path)
     fallback_primary = normalize_terms(path.name)
     try:
-        content = read_msg_content(path)
+        content = _read_msg_content(path)
     except OutlookUnavailableError:
         return MsgSearchTerms(
             primary_terms=fallback_primary,

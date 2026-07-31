@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from onedrive_destination_recommender import msg_reader
+from onedrive_destination_recommender import terms as terms_module
 
 
 def test_importing_msg_reader_does_not_load_pywin32() -> None:
@@ -16,6 +17,22 @@ def test_importing_msg_reader_does_not_load_pywin32() -> None:
     )
 
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+def test_public_api_does_not_expose_raw_message_content() -> None:
+    assert "MsgContent" not in msg_reader.__all__
+    assert "read_msg_content" not in msg_reader.__all__
+    assert "build_msg_search_terms" in msg_reader.__all__
+    assert "probe_msg_access" in msg_reader.__all__
+
+
+def test_msg_modules_have_no_file_or_log_write_path() -> None:
+    for module in (msg_reader, terms_module):
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        assert "write_text(" not in source
+        assert ".write(" not in source
+        assert "open(" not in source
+        assert "logging" not in source
 
 
 def test_pywin32_import_is_delayed_until_msg_access(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -92,7 +109,7 @@ def test_probe_closes_opened_outlook_item(tmp_path: Path, monkeypatch: pytest.Mo
     assert item.close_arguments == [1]
 
 
-def test_read_msg_content_reads_fields_and_attachment_names(
+def test_private_read_msg_content_reads_fields_and_attachment_names(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -140,7 +157,7 @@ def test_read_msg_content_reads_fields_and_attachment_names(
 
     monkeypatch.setattr(msg_reader, "_load_win32com_client", lambda: FakeClient())
 
-    content = msg_reader.read_msg_content(msg_path)
+    content = msg_reader._read_msg_content(msg_path)
 
     assert content.subject == "合成件名"
     assert content.body == "合成本文"
@@ -152,13 +169,48 @@ def test_read_msg_content_reads_fields_and_attachment_names(
     assert item.close_arguments == [1]
 
 
+def test_opened_msg_item_does_not_relabel_caller_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    msg_path = tmp_path / "sample.msg"
+    msg_path.write_bytes(b"")
+
+    class FakeItem:
+        def Close(self, _save_mode: int) -> None:
+            pass
+
+    class FakeNamespace:
+        @staticmethod
+        def OpenSharedItem(_path: str) -> FakeItem:
+            return FakeItem()
+
+    class FakeOutlook:
+        @staticmethod
+        def GetNamespace(_name: str) -> FakeNamespace:
+            return FakeNamespace()
+
+    class FakeClient:
+        @staticmethod
+        def Dispatch(_name: str) -> FakeOutlook:
+            return FakeOutlook()
+
+    monkeypatch.setattr(msg_reader, "_load_win32com_client", lambda: FakeClient())
+
+    with (
+        pytest.raises(RuntimeError, match="synthetic caller failure"),
+        msg_reader._opened_msg_item(msg_path),
+    ):
+        raise RuntimeError("synthetic caller failure")
+
+
 def test_build_msg_search_terms_uses_subject_attachments_and_cleaned_body(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     msg_path = tmp_path / "mail.msg"
     msg_path.write_bytes(b"")
-    content = msg_reader.MsgContent(
+    content = msg_reader._MsgContent(
         subject="設備 カメラ",
         body="秋田 2025 03\n-----Original Message-----\n過去本文",
         attachment_file_names=("image1.png", "Layout.pdf"),
@@ -167,7 +219,7 @@ def test_build_msg_search_terms_uses_subject_attachments_and_cleaned_body(
         body_available=True,
         attachments_available=True,
     )
-    monkeypatch.setattr(msg_reader, "read_msg_content", lambda _path: content)
+    monkeypatch.setattr(msg_reader, "_read_msg_content", lambda _path: content)
     before = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
 
     result = msg_reader.build_msg_search_terms(msg_path)
@@ -189,10 +241,10 @@ def test_build_msg_search_terms_falls_back_to_file_name_without_writing_body(
     msg_path.write_bytes(b"original")
     before = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
 
-    def unavailable_read(_path: Path) -> msg_reader.MsgContent:
+    def unavailable_read(_path: Path) -> msg_reader._MsgContent:
         raise msg_reader.OutlookUnavailableError("synthetic failure")
 
-    monkeypatch.setattr(msg_reader, "read_msg_content", unavailable_read)
+    monkeypatch.setattr(msg_reader, "_read_msg_content", unavailable_read)
 
     result = msg_reader.build_msg_search_terms(msg_path)
     after = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
@@ -211,7 +263,7 @@ def test_build_msg_search_terms_keeps_available_fields_on_partial_failure(
 ) -> None:
     msg_path = tmp_path / "mail.msg"
     msg_path.write_bytes(b"")
-    content = msg_reader.MsgContent(
+    content = msg_reader._MsgContent(
         subject="利用可能な件名",
         body="",
         attachment_file_names=("図面.pdf",),
@@ -220,7 +272,7 @@ def test_build_msg_search_terms_keeps_available_fields_on_partial_failure(
         body_available=False,
         attachments_available=True,
     )
-    monkeypatch.setattr(msg_reader, "read_msg_content", lambda _path: content)
+    monkeypatch.setattr(msg_reader, "_read_msg_content", lambda _path: content)
 
     result = msg_reader.build_msg_search_terms(msg_path)
 
