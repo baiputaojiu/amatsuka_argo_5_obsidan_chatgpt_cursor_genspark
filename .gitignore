@@ -1,0 +1,16 @@
+# Local email data must never be committed to this public repository.
+*.msg
+*.eml
+*.pst
+*.ost
+
+# Local secrets and project-local Python environments.
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+.pytest_cache/
+
+# Private integration-test inputs stay outside the repository.
+**/tests/fixtures/private/
