@@ -68,6 +68,44 @@ def test_load_settings_rejects_missing_and_unknown_keys(tmp_path: Path) -> None:
         load_settings(settings_path)
 
 
+@pytest.mark.parametrize(
+    ("current", "previous"),
+    [
+        ("year", "year"),
+        ("year", "year/previous"),
+        ("year/current", "year"),
+    ],
+)
+def test_load_settings_rejects_equal_or_nested_year_roots(
+    tmp_path: Path,
+    current: str,
+    previous: str,
+) -> None:
+    data = _valid_data(tmp_path)
+    data["current_year_root"] = str(tmp_path / current)
+    data["previous_year_root"] = str(tmp_path / previous)
+    settings_path = tmp_path / "config.json"
+    _write_settings(settings_path, data)
+
+    with pytest.raises(SettingsError, match="入れ子でない"):
+        load_settings(settings_path)
+
+
+def test_load_settings_compares_year_roots_with_platform_normalization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = _valid_data(tmp_path)
+    data["current_year_root"] = str(tmp_path / "YEAR")
+    data["previous_year_root"] = str(tmp_path / "year")
+    settings_path = tmp_path / "config.json"
+    _write_settings(settings_path, data)
+    monkeypatch.setattr("os.path.normcase", lambda value: str(value).casefold())
+
+    with pytest.raises(SettingsError, match="入れ子でない"):
+        load_settings(settings_path)
+
+
 def test_load_settings_rejects_invalid_json(tmp_path: Path) -> None:
     settings_path = tmp_path / "config.json"
     settings_path.write_text("{", encoding="utf-8")

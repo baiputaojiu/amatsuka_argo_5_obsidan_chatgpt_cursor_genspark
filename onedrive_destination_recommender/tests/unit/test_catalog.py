@@ -87,6 +87,30 @@ def test_scan_catalog_skips_inaccessible_subfolder_and_continues(
     assert result.skipped_count == 1
 
 
+def test_scan_catalog_does_not_follow_junctions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings(tmp_path)
+    junction = settings.current_year_root / "junction"
+    (junction / "outside-like-child").mkdir(parents=True)
+    included = settings.previous_year_root / "included"
+    included.mkdir()
+    real_isjunction = os.path.isjunction
+
+    def controlled_isjunction(path: str | os.PathLike[str]) -> bool:
+        return Path(path) == junction or real_isjunction(path)
+
+    monkeypatch.setattr(catalog.os.path, "isjunction", controlled_isjunction)
+
+    result = scan_catalog(settings)
+
+    assert str(junction) not in result.catalog.folders
+    assert str(junction / "outside-like-child") not in result.catalog.folders
+    assert str(included) in result.catalog.folders
+    assert result.skipped_count == 0
+
+
 def test_scan_catalog_stops_when_root_listing_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

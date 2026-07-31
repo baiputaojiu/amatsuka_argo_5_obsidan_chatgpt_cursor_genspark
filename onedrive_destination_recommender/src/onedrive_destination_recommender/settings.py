@@ -56,6 +56,22 @@ def _require_absolute_path(data: dict[str, Any], key: str) -> Path:
     return path
 
 
+def _normalized_absolute_path(path: Path) -> str:
+    """Return a platform-normalized absolute path without accessing the filesystem."""
+    return os.path.normcase(os.path.abspath(path))
+
+
+def _roots_overlap(first: Path, second: Path) -> bool:
+    """Return whether either root is equal to or contains the other."""
+    first_path = _normalized_absolute_path(first)
+    second_path = _normalized_absolute_path(second)
+    try:
+        common = os.path.commonpath((first_path, second_path))
+    except ValueError:
+        return False
+    return common in {first_path, second_path}
+
+
 def _validate_data(data: Any) -> Settings:
     if not isinstance(data, dict):
         raise SettingsError("settings.jsonのルートはJSONオブジェクトにしてください。")
@@ -71,8 +87,10 @@ def _validate_data(data: Any) -> Settings:
     current_year_root = _require_absolute_path(data, "current_year_root")
     previous_year_root = _require_absolute_path(data, "previous_year_root")
     pending_root = _require_absolute_path(data, "pending_root")
-    if current_year_root == previous_year_root:
-        raise SettingsError("今年度フォルダと昨年度フォルダには異なるパスを指定してください。")
+    if _roots_overlap(current_year_root, previous_year_root):
+        raise SettingsError(
+            "今年度フォルダと昨年度フォルダには、異なる入れ子でないパスを指定してください。"
+        )
 
     candidate_count = data["candidate_count"]
     if type(candidate_count) is not int or candidate_count <= 0:

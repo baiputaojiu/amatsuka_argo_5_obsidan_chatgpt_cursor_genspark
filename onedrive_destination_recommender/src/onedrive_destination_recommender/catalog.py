@@ -56,10 +56,11 @@ def _child_directories(parent: Path, excluded_names: frozenset[str]) -> tuple[li
         for entry in entries:
             try:
                 is_directory = entry.is_dir(follow_symlinks=False)
+                is_junction = is_directory and os.path.isjunction(entry.path)
             except OSError:
                 skipped_count += 1
                 continue
-            if not is_directory or entry.name in excluded_names:
+            if not is_directory or is_junction or entry.name in excluded_names:
                 continue
             children.append(Path(entry.path))
     return children, skipped_count
