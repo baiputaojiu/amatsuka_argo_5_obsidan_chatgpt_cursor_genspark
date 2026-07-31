@@ -92,6 +92,8 @@ onedrive_destination_recommender/
 
 TkinterはPython標準添付のものを使う。MVP 0のファイル投入はTkinter標準のファイル選択ダイアログだけとし、D&D用の依存関係や独自実装を追加しない。
 
+`pywin32`は`msg_reader`内で必要になった時点で遅延importする。未導入またはOutlookを利用できない場合はMSG解析失敗として扱い、MSGファイル名だけで候補検索を続ける。手動検索とファイル単体の経路は`pywin32`へ依存させない。
+
 ---
 
 ## 4. 最小データモデル
@@ -251,6 +253,7 @@ Tkinterのメイン画面1つに限定する。
 - Python 3.12の仮想環境を作る
 - `pywin32`と開発依存を導入する
 - Tkinter起動と、リポジトリ外のMSGを使ったOutlook COMの項目取得を個別に確認する
+- `pywin32`を読み込めない場合でもパッケージとTkinter画面を起動できることを確認する
 - 依存バージョンを`pyproject.toml`へ固定する
 
 完了条件：
@@ -287,6 +290,7 @@ Tkinterのメイン画面1つに限定する。
 ### Step 3：MSG読込
 
 - `.msg`を拡張子で自動判定する
+- `pywin32`は関数内で遅延importし、import失敗とOutlook COM失敗を通常のMSG解析失敗へ変換する
 - Outlook COMで件名、本文、添付ファイル名を読み取る
 - 本文の簡易整形と2,000文字制限を、文字列から文字列を返す純粋関数として実装する
 - `image`＋数字の画像添付を除外する

@@ -11,6 +11,15 @@
 .venv/
 __pycache__/
 .pytest_cache/
+.pytest-tmp/
+.ruff_cache/
+*.egg-info/
+pytest-cache-files-*/
 
 # Private integration-test inputs stay outside the repository.
 **/tests/fixtures/private/
+
+# Recommender runtime data contains business paths and file names.
+/onedrive_destination_recommender/settings.json
+/onedrive_destination_recommender/catalog.json
+/onedrive_destination_recommender/audit.jsonl
