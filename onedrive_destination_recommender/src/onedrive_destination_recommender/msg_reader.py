@@ -1,3 +1,4 @@
+from contextlib import suppress
 from dataclasses import dataclass
 from importlib import import_module
 from pathlib import Path
@@ -63,6 +64,9 @@ def probe_msg_access(msg_path: str | Path) -> MsgAccessProbe:
             "Outlook COMでMSGを読み取れませんでした。MSGファイル名だけで処理を続けます。"
         ) from exc
     finally:
+        if item is not None:
+            with suppress(Exception):
+                item.Close(1)
         item = None
         namespace = None
         outlook = None

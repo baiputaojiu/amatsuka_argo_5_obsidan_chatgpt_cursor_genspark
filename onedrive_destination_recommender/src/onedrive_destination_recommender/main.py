@@ -24,7 +24,7 @@ def create_main_window() -> tk.Tk:
     )
     ttk.Label(
         content,
-        text="Step 0：起動環境を確認しました。保存先候補の表示は次のStepで実装します。",
+        text="Step 1：設定とカタログの基盤を確認しました。画面操作は後続Stepで実装します。",
         wraplength=500,
     ).grid(row=1, column=0, sticky="w", pady=(20, 0))
 

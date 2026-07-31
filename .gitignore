@@ -20,6 +20,6 @@ pytest-cache-files-*/
 **/tests/fixtures/private/
 
 # Recommender runtime data contains business paths and file names.
-/onedrive_destination_recommender/settings.json
-/onedrive_destination_recommender/catalog.json
-/onedrive_destination_recommender/audit.jsonl
+settings.json
+catalog.json
+audit.jsonl

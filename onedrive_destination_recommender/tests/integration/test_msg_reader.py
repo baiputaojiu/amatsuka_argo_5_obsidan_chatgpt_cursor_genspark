@@ -17,4 +17,4 @@ def test_outlook_com_can_access_local_msg_fields() -> None:
 
     assert result.subject_accessible
     assert result.body_accessible
-    assert result.attachment_count >= 0
+    assert isinstance(result.attachment_count, int)

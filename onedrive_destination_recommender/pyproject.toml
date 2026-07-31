@@ -18,9 +18,6 @@ dev = [
     "ruff==0.15.22",
 ]
 
-[project.gui-scripts]
-onedrive-destination-recommender = "onedrive_destination_recommender.main:main"
-
 [tool.setuptools.packages.find]
 where = ["src"]
 

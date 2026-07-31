@@ -2,7 +2,7 @@
 
 OneDrive業務フォルダの保存先候補を表示する、個人用Windowsデスクトップアプリです。
 
-現在はMVP 0のStep 0です。独立したPython環境、Tkinter画面、Outlook COM疎通の土台だけを実装しており、カタログ作成と保存先候補の表示はまだ利用できません。
+現在はMVP 0のStep 1です。独立したPython環境、Tkinter画面、Outlook COM疎通に加え、設定検証とカタログ更新の土台を実装しています。画面からのカタログ更新と保存先候補の表示はまだ利用できません。
 
 ## 開発環境
 
@@ -21,7 +21,9 @@ py -3.12 -m venv .venv
 .\run_app.bat
 ```
 
-現時点ではStep 0確認用の最小画面だけが開く。
+現時点ではStep 1確認用の最小画面だけが開く。
+
+MVP 0では診断ログを作らないため、起動経路は`run_app.bat`に限定し、エラー確認用のコンソールを意図的に表示する。
 
 ## テスト
 
@@ -49,6 +51,8 @@ Remove-Item Env:ODR_TEST_MSG_PATH
 ```text
 %LOCALAPPDATA%\OneDriveDestinationRecommender\
 ```
+
+`settings.json`はアプリから作成・変更しない。`catalog.json`は、設定された今年度・昨年度フォルダを読み取り専用で完全走査できた場合だけ、同じランタイム領域で原子的に置き換える。
 
 ## データの扱い
 
