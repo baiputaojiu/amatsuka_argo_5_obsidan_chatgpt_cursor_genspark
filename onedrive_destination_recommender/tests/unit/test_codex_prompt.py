@@ -1,7 +1,5 @@
 from pathlib import Path
 
-import pytest
-
 from onedrive_destination_recommender.codex_prompt import (
     build_codex_consultation,
     copy_codex_consultation,
@@ -89,14 +87,20 @@ def test_consultation_limits_candidate_paths_to_top_ten(tmp_path: Path) -> None:
     assert str(candidates[10].resolve()) not in result.prompt
 
 
-def test_consultation_rejects_disappeared_input_file(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError):
-        build_codex_consultation(
-            input_files=[tmp_path / "missing.msg"],
-            settings=_settings(tmp_path),
-            search_text="案件",
-            candidate_paths=[],
-        )
+def test_consultation_keeps_disappeared_input_path_for_attachment_guidance(
+    tmp_path: Path,
+) -> None:
+    missing = tmp_path / "missing.msg"
+
+    result = build_codex_consultation(
+        input_files=[missing],
+        settings=_settings(tmp_path),
+        search_text="案件",
+        candidate_paths=[],
+    )
+
+    assert str(missing.resolve()) in result.attachment_guidance
+    assert str(missing.resolve()) in result.prompt
 
 
 def test_copy_consultation_replaces_clipboard_on_explicit_call(tmp_path: Path) -> None:
@@ -120,6 +124,5 @@ def test_copy_consultation_replaces_clipboard_on_explicit_call(tmp_path: Path) -
     clipboard = FakeClipboard()
     copy_codex_consultation(result, clipboard)
 
-    assert clipboard.text == result.clipboard_text
-    assert result.attachment_guidance in clipboard.text
-    assert result.prompt in clipboard.text
+    assert clipboard.text == result.prompt
+    assert result.attachment_guidance not in clipboard.text

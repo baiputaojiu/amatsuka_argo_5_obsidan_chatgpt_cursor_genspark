@@ -27,25 +27,14 @@ class CodexConsultation:
     attachment_guidance: str
     prompt: str
 
-    @property
-    def clipboard_text(self) -> str:
-        return f"{self.attachment_guidance}\n\n{self.prompt}"
 
-
-def _absolute_existing_files(input_files: Iterable[str | os.PathLike[str]]) -> tuple[str, ...]:
-    paths: list[str] = []
-    for value in input_files:
-        path = Path(value)
-        if not path.is_file():
-            raise FileNotFoundError(path)
-        paths.append(str(path.resolve()))
-    return tuple(paths)
+def _absolute_input_paths(input_files: Iterable[str | os.PathLike[str]]) -> tuple[str, ...]:
+    return tuple(str(Path(value).resolve()) for value in input_files)
 
 
 def _attachment_guidance(input_paths: tuple[str, ...]) -> str:
-    heading = "モードAの候補に納得できない場合は、次の案内に従ってCodexへ相談してください。"
     if not input_paths:
-        return f"{heading}\n添付ファイルはありません（手動検索のみ）。"
+        return "添付ファイルはありません（手動検索のみ）。"
 
     if len(input_paths) == 1 and is_msg_file(input_paths[0]):
         label = "元のMSGファイルを添付してください。"
@@ -54,7 +43,7 @@ def _attachment_guidance(input_paths: tuple[str, ...]) -> str:
     else:
         label = "入力した全ファイルを添付してください。"
     items = "\n".join(f"- {path}" for path in input_paths)
-    return f"{heading}\n{label}\n{items}"
+    return f"{label}\n{items}"
 
 
 def _path_list(paths: tuple[str, ...], *, empty_text: str) -> str:
@@ -71,7 +60,7 @@ def build_codex_consultation(
     candidate_paths: Iterable[str | os.PathLike[str]],
 ) -> CodexConsultation:
     """Generate guidance and a fixed prompt without saving or sending either one."""
-    input_paths = _absolute_existing_files(input_files)
+    input_paths = _absolute_input_paths(input_files)
     candidates = tuple(os.path.abspath(path) for path in candidate_paths)[:10]
     input_section = _path_list(input_paths, empty_text="なし（手動検索のみ）")
     candidate_section = _path_list(candidates, empty_text="該当候補なし")
@@ -106,6 +95,6 @@ def copy_codex_consultation(
     consultation: CodexConsultation,
     clipboard: _ClipboardTarget,
 ) -> None:
-    """Copy guidance and prompt only after an explicit UI action."""
+    """Copy only the fixed prompt after an explicit UI action."""
     clipboard.clipboard_clear()
-    clipboard.clipboard_append(consultation.clipboard_text)
+    clipboard.clipboard_append(consultation.prompt)
