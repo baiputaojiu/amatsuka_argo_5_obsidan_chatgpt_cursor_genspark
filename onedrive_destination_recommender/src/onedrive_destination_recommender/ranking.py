@@ -23,6 +23,16 @@ class YearScope(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class PreparedFolder:
+    """Catalog folder data that remains unchanged while the user edits search terms."""
+
+    year: YearScope
+    relative_path: str
+    absolute_path: str
+    normalized_path: str
+
+
+@dataclass(frozen=True, slots=True)
 class Candidate:
     """A displayable folder candidate and its ranking-only match counts."""
 
@@ -62,26 +72,43 @@ def _year_and_relative_path(folder: str | Path, settings: Settings) -> tuple[Yea
     raise RankingError("年度ルート外のフォルダがカタログに含まれています。")
 
 
+def prepare_folders(
+    folder_paths: Iterable[str | Path],
+    settings: Settings,
+) -> tuple[PreparedFolder, ...]:
+    """Resolve and normalize catalog folders once per catalog or settings update."""
+    prepared: list[PreparedFolder] = []
+    for folder in folder_paths:
+        absolute_path = os.path.abspath(folder)
+        year, relative_path = _year_and_relative_path(absolute_path, settings)
+        prepared.append(
+            PreparedFolder(
+                year=year,
+                relative_path=relative_path,
+                absolute_path=absolute_path,
+                normalized_path=normalize_path_for_matching(relative_path),
+            )
+        )
+    return tuple(prepared)
+
+
 def _matched_terms(normalized_path: str, terms: Sequence[str]) -> tuple[str, ...]:
     return tuple(term for term in terms if term in normalized_path)
 
 
 def _make_candidate(
     *,
-    year: YearScope,
-    relative_path: str,
-    absolute_path: str,
+    folder: PreparedFolder,
     primary_terms: Sequence[str],
     auxiliary_terms: Sequence[str],
     inherited_primary_count: int | None = None,
 ) -> Candidate:
-    normalized_path = normalize_path_for_matching(relative_path)
-    matched_primary = _matched_terms(normalized_path, primary_terms)
-    matched_auxiliary = _matched_terms(normalized_path, auxiliary_terms)
+    matched_primary = _matched_terms(folder.normalized_path, primary_terms)
+    matched_auxiliary = _matched_terms(folder.normalized_path, auxiliary_terms)
     return Candidate(
-        year=year,
-        relative_path=relative_path,
-        absolute_path=absolute_path,
+        year=folder.year,
+        relative_path=folder.relative_path,
+        absolute_path=folder.absolute_path,
         primary_match_count=(
             len(matched_primary) if inherited_primary_count is None else inherited_primary_count
         ),
@@ -145,9 +172,12 @@ def _fold_siblings(
         folded_members.update(siblings)
         replacements.append(
             _make_candidate(
-                year=first.year,
-                relative_path=parent_relative,
-                absolute_path=parent_absolute,
+                folder=PreparedFolder(
+                    year=first.year,
+                    relative_path=parent_relative,
+                    absolute_path=parent_absolute,
+                    normalized_path=normalize_path_for_matching(parent_relative),
+                ),
                 primary_terms=primary_terms,
                 auxiliary_terms=auxiliary_terms,
                 inherited_primary_count=first.primary_match_count,
@@ -184,7 +214,7 @@ def _sort_key(candidate: Candidate) -> tuple[int, int, int, str]:
 
 
 def rank_candidates(
-    folder_paths: Iterable[str | Path],
+    prepared_folders: Iterable[PreparedFolder],
     settings: Settings,
     primary_terms: Iterable[str],
     auxiliary_terms: Iterable[str] = (),
@@ -198,12 +228,9 @@ def rank_candidates(
         return ()
 
     candidates: list[Candidate] = []
-    for folder in folder_paths:
-        year, relative_path = _year_and_relative_path(folder, settings)
+    for folder in prepared_folders:
         candidate = _make_candidate(
-            year=year,
-            relative_path=relative_path,
-            absolute_path=os.path.abspath(folder),
+            folder=folder,
             primary_terms=normalized_primary,
             auxiliary_terms=normalized_auxiliary,
         )

@@ -24,7 +24,7 @@ def create_main_window() -> tk.Tk:
     )
     ttk.Label(
         content,
-        text="Step 2：検索語と候補判定の基盤を確認しました。画面操作は後続Stepで実装します。",
+        text="Step 3：MSG読込と検索語生成を確認しました。画面操作は後続Stepで実装します。",
         wraplength=500,
     ).grid(row=1, column=0, sticky="w", pady=(20, 0))
 
