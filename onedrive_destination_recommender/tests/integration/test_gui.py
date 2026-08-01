@@ -43,6 +43,12 @@ def _temporary_runtime(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     return settings_path, catalog_path, tmp_path / "audit.jsonl", destination
 
 
+def _change_setting(settings_path: Path, key: str, value: str) -> None:
+    data = json.loads(settings_path.read_text(encoding="utf-8"))
+    data[key] = value
+    settings_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Tkinter Windows GUI test")
 def test_step5_window_connects_search_confirmation_audit_and_codex(
     tmp_path: Path,
@@ -100,11 +106,58 @@ def test_step5_window_connects_search_confirmation_audit_and_codex(
             "showwarning",
             lambda _title, message, **_kwargs: messages.append(message),
         )
-        missing_settings = tmp_path / "missing" / "settings.json"
-        app_module.RecommenderApp(root, settings_path=missing_settings)
-        root.update()
-        assert len(messages) == 1
-        assert str(missing_settings) in messages[0]
-        assert "README.md" in messages[0]
+        original_widgets = set(root.winfo_children())
+        cases = (
+            ("missing_settings", "settings.jsonを利用できません"),
+            ("invalid_settings", "settings.jsonを利用できません"),
+            ("missing_current", "今年度フォルダが存在しません"),
+            ("missing_previous", "昨年度フォルダが存在しません"),
+            ("missing_pending", "保存先未定フォルダが存在しません"),
+            ("missing_catalog", "カタログを利用できません"),
+        )
+        for case, expected_message in cases:
+            case_root = tmp_path / case
+            settings_path, catalog_path, audit_path, _destination = _temporary_runtime(case_root)
+            if case == "missing_settings":
+                settings_path.unlink()
+            elif case == "invalid_settings":
+                settings_path.write_text("{", encoding="utf-8")
+            elif case == "missing_current":
+                _change_setting(
+                    settings_path,
+                    "current_year_root",
+                    str(case_root / "missing-current"),
+                )
+            elif case == "missing_previous":
+                _change_setting(
+                    settings_path,
+                    "previous_year_root",
+                    str(case_root / "missing-previous"),
+                )
+            elif case == "missing_pending":
+                _change_setting(
+                    settings_path,
+                    "pending_root",
+                    str(case_root / "missing-pending"),
+                )
+            elif case == "missing_catalog":
+                catalog_path.unlink()
+
+            messages.clear()
+            app_module.RecommenderApp(
+                root,
+                settings_path=settings_path,
+                catalog_path=catalog_path,
+                audit_path=audit_path,
+            )
+            root.update()
+
+            assert len(messages) == 1, case
+            assert expected_message in messages[0], case
+            assert str(settings_path) in messages[0], case
+            assert "README.md" in messages[0], case
+            for widget in root.winfo_children():
+                if widget not in original_widgets:
+                    widget.destroy()
     finally:
         root.destroy()
