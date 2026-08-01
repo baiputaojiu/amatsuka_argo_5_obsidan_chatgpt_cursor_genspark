@@ -140,6 +140,18 @@ def test_catalog_replacement_reranks_current_input(tmp_path: Path) -> None:
     assert session.candidates[0].relative_path == "設備"
 
 
+def test_catalog_replacement_preserves_initial_zero_measurement(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    session = RecommenderSession(settings, _catalog(settings, "週報"))
+    session.select_files([tmp_path / "設備.pdf"])
+    assert session.input_state.automatic_terms_zero_candidates is True
+
+    session.replace_catalog(_catalog(settings, "設備"))
+
+    assert len(session.candidates) == 1
+    assert session.input_state.automatic_terms_zero_candidates is True
+
+
 def test_decision_writes_audit_from_single_session_state(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     audit_path = tmp_path / "audit.jsonl"

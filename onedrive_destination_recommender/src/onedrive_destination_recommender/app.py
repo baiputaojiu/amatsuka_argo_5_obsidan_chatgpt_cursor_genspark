@@ -522,6 +522,7 @@ class RecommenderApp:
             )
             self._clear_candidates()
             return
+        self.confirmed_path_var.set("")
         self._render_candidates()
         self._render_auxiliary_status()
         self._render_consultation()

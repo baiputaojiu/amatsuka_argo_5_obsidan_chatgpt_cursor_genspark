@@ -193,21 +193,8 @@ class RecommenderSession:
             self.input_state.auxiliary_terms,
             prepared_folders=prepared,
         )
-        new_input_state = self.input_state
-        if self.input_state.kind is not InputKind.MANUAL:
-            initial_candidates = self._rank(
-                self.input_state.initial_primary_terms,
-                self.input_state.auxiliary_terms,
-                prepared_folders=prepared,
-            )
-            new_input_state = replace(
-                self.input_state,
-                automatic_terms_zero_candidates=not bool(initial_candidates),
-            )
-
         self.catalog = catalog
         self.prepared_folders = prepared
-        self.input_state = new_input_state
         self.candidates = candidates
 
     def build_consultation(self) -> CodexConsultation:

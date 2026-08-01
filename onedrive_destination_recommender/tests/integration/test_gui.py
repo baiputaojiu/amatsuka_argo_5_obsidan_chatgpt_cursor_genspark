@@ -83,6 +83,9 @@ def test_step5_window_connects_search_confirmation_audit_and_codex(
         assert audit_path.read_text(encoding="utf-8").count("\n") == 1
         assert app.confirmed_path_var.get() == str(destination)
 
+        app.search_var.set("設備 追加")
+        assert app.confirmed_path_var.get() == ""
+
         clipboard.clear()
         app._copy_codex_prompt()
         assert app.consultation is not None
