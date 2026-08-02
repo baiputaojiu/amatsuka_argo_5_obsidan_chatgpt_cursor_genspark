@@ -37,6 +37,7 @@ from onedrive_destination_recommender.settings import (
 
 APP_TITLE = "OneDrive保存先レコメンダー"
 README_PATH = Path(__file__).resolve().parents[2] / "README.md"
+SELECTED_CANDIDATE_PATH_GUIDANCE = "候補を選択すると絶対パスを全文表示します。"
 
 
 class RecommenderApp:
@@ -247,6 +248,10 @@ class RecommenderApp:
         )
         self.candidate_tree.bind("<Double-1>", self._open_candidate_by_click)
         self.candidate_tree.bind("<Return>", self._open_selected_candidate)
+        self.candidate_tree.bind(
+            "<<TreeviewSelect>>",
+            self._candidate_selection_changed,
+        )
 
         self.candidate_status_var = tk.StringVar(value="検索語を入力してください。")
         ttk.Label(area, textvariable=self.candidate_status_var).grid(
@@ -255,6 +260,25 @@ class RecommenderApp:
             sticky="w",
             pady=(4, 0),
         )
+
+        selected_path_area = ttk.Frame(area)
+        selected_path_area.grid(row=3, column=0, sticky="ew", pady=(2, 0))
+        selected_path_area.columnconfigure(1, weight=1)
+        ttk.Label(selected_path_area, text="選択中の絶対パス：").grid(
+            row=0,
+            column=0,
+            sticky="nw",
+        )
+        self.selected_candidate_path_var = tk.StringVar(value=SELECTED_CANDIDATE_PATH_GUIDANCE)
+        self.selected_candidate_path_label = ttk.Label(
+            selected_path_area,
+            textvariable=self.selected_candidate_path_var,
+            wraplength=620,
+            justify="left",
+            anchor="w",
+        )
+        self.selected_candidate_path_label.grid(row=0, column=1, sticky="ew")
+
         ttk.Label(
             area,
             text=(
@@ -262,7 +286,7 @@ class RecommenderApp:
                 "開くだけでは保存先は確定されません。"
             ),
             wraplength=760,
-        ).grid(row=3, column=0, sticky="w", pady=(2, 0))
+        ).grid(row=4, column=0, sticky="w", pady=(2, 0))
 
     def _build_action_area(self, parent: ttk.Frame) -> None:
         area = ttk.Frame(parent)
@@ -594,6 +618,7 @@ class RecommenderApp:
 
     def _render_candidates(self) -> None:
         assert self.session is not None
+        self.selected_candidate_path_var.set(SELECTED_CANDIDATE_PATH_GUIDANCE)
         self._clear_candidates()
         for index, candidate in enumerate(self.session.candidates):
             self.candidate_tree.insert(
@@ -659,6 +684,12 @@ class RecommenderApp:
         except (ValueError, IndexError):
             return None
 
+    def _candidate_selection_changed(self, _event: tk.Event | None = None) -> None:
+        path = self._selected_candidate_path()
+        self.selected_candidate_path_var.set(
+            path if path is not None else SELECTED_CANDIDATE_PATH_GUIDANCE
+        )
+
     def _open_candidate_by_click(self, event: tk.Event) -> None:
         if self.candidate_tree.identify_region(event.x, event.y) != "cell":
             return
@@ -666,6 +697,7 @@ class RecommenderApp:
         if not row:
             return
         self.candidate_tree.selection_set(row)
+        self._candidate_selection_changed()
         self._open_selected_candidate()
 
     def _open_selected_candidate(self, _event: tk.Event | None = None) -> None:

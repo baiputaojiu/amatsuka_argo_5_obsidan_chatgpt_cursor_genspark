@@ -15,7 +15,7 @@ def _temporary_runtime(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     current = tmp_path / "020_FY_CURRENT"
     previous = tmp_path / "010_FY_PREVIOUS"
     pending = current / "（Pending）未分類"
-    destination = current / "設備"
+    destination = current / "設備_絶対パス全文表示を確認するための長い候補フォルダ名"
     pending.mkdir(parents=True)
     previous.mkdir()
     destination.mkdir()
@@ -72,7 +72,11 @@ def test_step5_window_connects_search_confirmation_audit_and_codex(
     shared_tk_root,
 ) -> None:
     from onedrive_destination_recommender import app as app_module
-    from onedrive_destination_recommender.app import APP_TITLE, RecommenderApp
+    from onedrive_destination_recommender.app import (
+        APP_TITLE,
+        SELECTED_CANDIDATE_PATH_GUIDANCE,
+        RecommenderApp,
+    )
 
     settings_path, catalog_path, audit_path, destination = _temporary_runtime(tmp_path)
     root = shared_tk_root
@@ -97,7 +101,29 @@ def test_step5_window_connects_search_confirmation_audit_and_codex(
 
         app.search_var.set("設備")
         assert len(app.session.candidates) == 1
+        assert app.selected_candidate_path_var.get() == SELECTED_CANDIDATE_PATH_GUIDANCE
+        before_path_display = (
+            audit_path.read_bytes() if audit_path.exists() else None,
+            tuple(clipboard),
+            app.confirmed_path_var.get(),
+            app.search_var.get(),
+            app.session.input_state,
+            app.session.candidates,
+            tuple(app.candidate_tree.get_children()),
+        )
         app.candidate_tree.selection_set("0")
+        app._candidate_selection_changed()
+        assert app.selected_candidate_path_var.get() == str(destination)
+        assert int(app.selected_candidate_path_label.cget("wraplength")) == 620
+        assert (
+            audit_path.read_bytes() if audit_path.exists() else None,
+            tuple(clipboard),
+            app.confirmed_path_var.get(),
+            app.search_var.get(),
+            app.session.input_state,
+            app.session.candidates,
+            tuple(app.candidate_tree.get_children()),
+        ) == before_path_display
 
         opened: list[str] = []
         monkeypatch.setattr(app_module, "open_folder", opened.append)
@@ -120,12 +146,15 @@ def test_step5_window_connects_search_confirmation_audit_and_codex(
             app.session.input_state,
             app.session.candidates,
             tuple(app.candidate_tree.get_children()),
+            app.selected_candidate_path_var.get(),
         )
 
         assert app.candidate_tree.bind("<Double-1>")
         assert app.candidate_tree.bind("<Return>")
+        assert app.candidate_tree.bind("<<TreeviewSelect>>")
         app._open_candidate_by_click(SimpleNamespace(x=1, y=1))
         assert opened == [str(destination)]
+        assert app.selected_candidate_path_var.get() == str(destination)
         assert (
             audit_path.read_bytes() if audit_path.exists() else None,
             tuple(clipboard),
@@ -134,6 +163,7 @@ def test_step5_window_connects_search_confirmation_audit_and_codex(
             app.session.input_state,
             app.session.candidates,
             tuple(app.candidate_tree.get_children()),
+            app.selected_candidate_path_var.get(),
         ) == before_preview
 
         app._open_selected_candidate()
@@ -144,10 +174,13 @@ def test_step5_window_connects_search_confirmation_audit_and_codex(
         hit.update(region="cell", row="")
         app._open_candidate_by_click(SimpleNamespace(x=1, y=1))
         app.candidate_tree.selection_remove("0")
+        app._candidate_selection_changed()
+        assert app.selected_candidate_path_var.get() == SELECTED_CANDIDATE_PATH_GUIDANCE
         app._open_selected_candidate()
         assert opened == [str(destination), str(destination)]
 
         app.candidate_tree.selection_set("0")
+        app._candidate_selection_changed()
         app._confirm_candidate()
 
         assert clipboard == [str(destination)]
@@ -156,6 +189,7 @@ def test_step5_window_connects_search_confirmation_audit_and_codex(
 
         app.search_var.set("設備 追加")
         assert app.confirmed_path_var.get() == ""
+        assert app.selected_candidate_path_var.get() == SELECTED_CANDIDATE_PATH_GUIDANCE
 
         clipboard.clear()
         app._copy_codex_prompt()
