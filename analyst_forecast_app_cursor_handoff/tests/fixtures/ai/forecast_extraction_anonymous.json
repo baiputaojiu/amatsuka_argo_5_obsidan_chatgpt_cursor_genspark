@@ -1,0 +1,60 @@
+{
+  "schema_version": "1.0.0",
+  "run_id": "RUN-20260720-001",
+  "source_id": "SRC-000001",
+  "prompt_execution": {
+    "prompt_id": "P08",
+    "prompt_version": "1.0.0",
+    "environment": "cursor",
+    "model": "high-performance-fixture"
+  },
+  "forecasts": [
+    {
+      "forecast_ref": "forecast-1",
+      "forecast_group_ref": "group-1",
+      "made_at": "2026-01-10T09:00:00+00:00",
+      "publicly_available_at": "2026-01-10T10:00:00+00:00",
+      "forecast_type": "directional",
+      "commitment_strength": "explicit",
+      "evidence_level": "A",
+      "extraction_confidence": 0.95,
+      "human_readable_summary": "日経平均は今後上昇する",
+      "relation_to_previous": "initial",
+      "evidence": [
+        {
+          "source_id": "SRC-000001",
+          "quote": "日経平均は今後上昇する",
+          "start_offset": 0,
+          "end_offset": 11,
+          "role": "prediction"
+        }
+      ],
+      "components": [
+        {
+          "component_ref": "component-1",
+          "sequence_number": 1,
+          "prediction_form": "period_direction",
+          "direction": "up",
+          "time_expression_raw": "今後3か月",
+          "time_source": "explicit",
+          "normalized_start": "2026-01-13",
+          "normalized_end": "2026-04-13",
+          "target": {
+            "raw_label": "日経平均",
+            "canonical_name": "日経平均株価",
+            "target_type": "index",
+            "symbol": "^N225",
+            "exchange": "JPX",
+            "currency": "JPY",
+            "mapping_method": "explicit",
+            "knowledge_cutoff": "2026-01-10T09:00:00+00:00",
+            "source_evidence": "原文で予測対象として明示",
+            "proposal_model": "high-performance-fixture",
+            "mapping_status": "verified",
+            "review_result": "別の高性能AIが原文・時点・symbolを確認済み"
+          }
+        }
+      ]
+    }
+  ]
+}

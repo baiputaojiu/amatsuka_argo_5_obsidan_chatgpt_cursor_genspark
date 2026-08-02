@@ -1,0 +1,7 @@
+{
+  "current_year_root": "C:\\...\\020_FY_CURRENT",
+  "previous_year_root": "C:\\...\\010_FY_PREVIOUS",
+  "pending_root": "C:\\...\\020_FY_CURRENT\\（Pending）未分類",
+  "candidate_count": 10,
+  "excluded_folder_names": ["除外サンプル"]
+}

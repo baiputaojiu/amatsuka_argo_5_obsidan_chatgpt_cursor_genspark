@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools==83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "onedrive-destination-recommender"
+version = "0.1.0"
+description = "OneDrive業務フォルダの保存先候補を表示する個人用Windowsアプリ"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pywin32==311; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "ruff==0.15.22",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --import-mode=importlib -p no:cacheprovider --basetemp=.pytest-tmp -m 'not integration'"
+testpaths = ["tests"]
+markers = [
+    "integration: Outlook COM等、ローカル環境へ依存する明示実行テスト",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003"]

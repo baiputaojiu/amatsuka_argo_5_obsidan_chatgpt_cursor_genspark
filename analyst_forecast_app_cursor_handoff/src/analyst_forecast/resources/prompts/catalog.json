@@ -1,0 +1,54 @@
+{
+  "schema_version": "1.0.0",
+  "template_version": "2.0.0",
+  "prompts": {
+    "P05": {
+      "title": "YouTube原文整理・話者推定",
+      "purpose": "raw文字起こしを発言単位に整理し、話者候補、確信度、根拠を出力する。",
+      "warning": "予想抽出を同時に行わず、判断不能を許容してください。後発情報や市場結果を使わないでください。",
+      "input_path": "02_sources/youtube/raw/<SOURCE_ID>__*.txt"
+    },
+    "P06": {
+      "title": "話者・著者帰属レビュー",
+      "purpose": "P05またはP07の低確信度・高重要度segmentを別AIが独立に再検証する。",
+      "warning": "市場結果を入力せず、原文とreviewed artifactだけを根拠にしてください。",
+      "input_path": "03_ai_outputs/needs_review/<P05_or_P07>.json"
+    },
+    "P07": {
+      "title": "テキスト原文整理",
+      "purpose": "ブログ・X・Webの原文をsegment化し、本人執筆・直接引用・第三者要約を区別する。",
+      "warning": "rawを改変せず、第三者要約だけを本人の正式予想にしないでください。",
+      "input_path": "02_sources/{blog|x|web}/raw/<SOURCE_ID>__*.txt"
+    },
+    "P08": {
+      "title": "予想抽出・構造化",
+      "purpose": "受理済みP05またはP07から予想表明を抽出し、対象解決前の固定JSON Schemaで出力する。",
+      "warning": "原文にない情報を補完せず、symbolやverified状態を決めないでください。上流はupstream_artifact_idで指定します。",
+      "input_path": "02_sources/*/processed/P05-*.json または P07-*.json"
+    },
+    "P09": {
+      "title": "予想抽出レビュー",
+      "purpose": "低確信度または高重要度のP08を別AIが再検証し、accept/correct/reject/unresolvedを返す。",
+      "warning": "否定誤読、条件欠落、本命誤認、時期・程度の捏造を重点確認してください。",
+      "input_path": "03_ai_outputs/needs_review/<P08>.json"
+    },
+    "P11": {
+      "title": "予測対象解決",
+      "purpose": "原文で明示された対象を優先し、不明な場合だけ発言時点情報で候補を提案する。",
+      "warning": "knowledge_cutoffより後の情報や市場結果を入力に含めないでください。",
+      "input_path": "03_ai_outputs/accepted/<P08_OUTPUT>.json"
+    },
+    "P12": {
+      "title": "予測対象解決レビュー",
+      "purpose": "P11とは独立に、原文上の役割、当時の存在、symbol、通貨、後知恵を検証する。",
+      "warning": "一次提案を前提として肯定せず、不一致と評価不能を許容してください。市場結果を入力しないでください。",
+      "input_path": "03_ai_outputs/accepted/<P11_OUTPUT>.json"
+    },
+    "P13": {
+      "title": "予測対象解決の不一致裁定",
+      "purpose": "P11とP12が不一致のときだけ、根拠を比較して最終候補またはunresolvableを裁定する。",
+      "warning": "市場結果を入力せず、P11/P12の出力と原文根拠だけを使ってください。",
+      "input_path": "03_ai_outputs/accepted/<P11_OUTPUT>.json と <P12_OUTPUT>.json"
+    }
+  }
+}

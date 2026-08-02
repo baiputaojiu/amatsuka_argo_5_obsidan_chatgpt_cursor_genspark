@@ -1,0 +1,37 @@
+# Python runtimes and environments
+.python/
+.venv/
+__pycache__/
+*.py[cod]
+*.pyd
+
+# Build and test output
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+config.local.yaml
+.analyst-forecast-data/
+
+# Generated user data
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+_system/market_cache/
+_system/backups/
+analysts/
+
+# Editor and OS files
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store

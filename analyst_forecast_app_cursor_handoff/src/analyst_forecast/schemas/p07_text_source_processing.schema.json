@@ -1,0 +1,249 @@
+{
+  "$defs": {
+    "P07PromptExecution": {
+      "additionalProperties": false,
+      "properties": {
+        "prompt_id": {
+          "const": "P07",
+          "title": "Prompt Id",
+          "type": "string"
+        },
+        "prompt_version": {
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "title": "Prompt Version",
+          "type": "string"
+        },
+        "environment": {
+          "enum": [
+            "cursor",
+            "chatgpt"
+          ],
+          "title": "Environment",
+          "type": "string"
+        },
+        "model": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "executed_at": {
+          "format": "date-time",
+          "title": "Executed At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "prompt_id",
+        "prompt_version",
+        "environment",
+        "model",
+        "executed_at"
+      ],
+      "title": "P07PromptExecution",
+      "type": "object"
+    },
+    "TextSegmentOutput": {
+      "additionalProperties": false,
+      "description": "ブログ・X・Web向けの原文整理segment。",
+      "properties": {
+        "segment_ref": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
+          "title": "Segment Ref",
+          "type": "string"
+        },
+        "sequence_number": {
+          "minimum": 1,
+          "title": "Sequence Number",
+          "type": "integer"
+        },
+        "raw_start_offset": {
+          "minimum": 0,
+          "title": "Raw Start Offset",
+          "type": "integer"
+        },
+        "raw_end_offset": {
+          "exclusiveMinimum": 0,
+          "title": "Raw End Offset",
+          "type": "integer"
+        },
+        "raw_text": {
+          "minLength": 1,
+          "title": "Raw Text",
+          "type": "string"
+        },
+        "normalized_text": {
+          "minLength": 1,
+          "title": "Normalized Text",
+          "type": "string"
+        },
+        "author_status": {
+          "enum": [
+            "identified",
+            "unknown"
+          ],
+          "title": "Author Status",
+          "type": "string"
+        },
+        "author_candidate": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Author Candidate"
+        },
+        "content_author": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content Author"
+        },
+        "statement_speaker": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Statement Speaker"
+        },
+        "author_confidence": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Author Confidence",
+          "type": "number"
+        },
+        "statement_kind": {
+          "enum": [
+            "author_own",
+            "direct_quote",
+            "third_party_summary",
+            "repost",
+            "reply"
+          ],
+          "title": "Statement Kind",
+          "type": "string"
+        },
+        "attribution_basis": {
+          "minLength": 1,
+          "title": "Attribution Basis",
+          "type": "string"
+        },
+        "review_status": {
+          "enum": [
+            "accepted",
+            "needs_review",
+            "reviewed"
+          ],
+          "title": "Review Status",
+          "type": "string"
+        },
+        "importance": {
+          "default": "normal",
+          "enum": [
+            "normal",
+            "high"
+          ],
+          "title": "Importance",
+          "type": "string"
+        },
+        "high_importance_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "High Importance Reason"
+        }
+      },
+      "required": [
+        "segment_ref",
+        "sequence_number",
+        "raw_start_offset",
+        "raw_end_offset",
+        "raw_text",
+        "normalized_text",
+        "author_status",
+        "author_confidence",
+        "statement_kind",
+        "attribution_basis",
+        "review_status"
+      ],
+      "title": "TextSegmentOutput",
+      "type": "object"
+    }
+  },
+  "$id": "https://local.invalid/schemas/p07-text-source-processing-2.0.0.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "2.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "run_id": {
+      "pattern": "^RUN-\\d{8}-\\d{3}$",
+      "title": "Run Id",
+      "type": "string"
+    },
+    "source_id": {
+      "pattern": "^SRC-\\d{6}$",
+      "title": "Source Id",
+      "type": "string"
+    },
+    "prompt_execution": {
+      "$ref": "#/$defs/P07PromptExecution"
+    },
+    "input_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Input Hash",
+      "type": "string"
+    },
+    "knowledge_cutoff": {
+      "format": "date-time",
+      "title": "Knowledge Cutoff",
+      "type": "string"
+    },
+    "segments": {
+      "items": {
+        "$ref": "#/$defs/TextSegmentOutput"
+      },
+      "minItems": 1,
+      "title": "Segments",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "source_id",
+    "prompt_execution",
+    "input_hash",
+    "knowledge_cutoff",
+    "segments"
+  ],
+  "title": "P07TextSourceProcessingOutput",
+  "type": "object"
+}
