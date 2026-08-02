@@ -1,4 +1,5 @@
-from collections.abc import Iterable
+import os
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, tzinfo
 from enum import StrEnum
@@ -40,6 +41,7 @@ __all__ = [
     "InputState",
     "RecommenderSession",
     "format_scanned_at",
+    "open_folder",
 ]
 
 
@@ -92,6 +94,24 @@ def format_scanned_at(value: str, target_timezone: tzinfo | None = None) -> str:
         timestamp = timestamp.replace(tzinfo=UTC)
     localized = timestamp.astimezone(target_timezone)
     return localized.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def open_folder(
+    path: str | Path,
+    *,
+    launcher: Callable[[str], None] | None = None,
+) -> None:
+    """Open one existing folder with the Windows shell."""
+    folder = Path(path)
+    if not folder.is_dir():
+        raise FileNotFoundError(folder)
+
+    if launcher is None:
+        try:
+            launcher = os.startfile
+        except AttributeError as exc:
+            raise OSError("WindowsのExplorer起動機能を利用できません。") from exc
+    launcher(str(folder))
 
 
 def _msg_status(result: MsgSearchTerms) -> str:

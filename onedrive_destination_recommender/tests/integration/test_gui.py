@@ -1,6 +1,7 @@
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -56,6 +57,7 @@ def test_step5_window_connects_search_confirmation_audit_and_codex(
 ) -> None:
     import tkinter as tk
 
+    from onedrive_destination_recommender import app as app_module
     from onedrive_destination_recommender.app import APP_TITLE, RecommenderApp
 
     settings_path, catalog_path, audit_path, destination = _temporary_runtime(tmp_path)
@@ -83,6 +85,56 @@ def test_step5_window_connects_search_confirmation_audit_and_codex(
         app.search_var.set("設備")
         assert len(app.session.candidates) == 1
         app.candidate_tree.selection_set("0")
+
+        opened: list[str] = []
+        monkeypatch.setattr(app_module, "open_folder", opened.append)
+        hit = {"region": "cell", "row": "0"}
+        monkeypatch.setattr(
+            app.candidate_tree,
+            "identify_region",
+            lambda _x, _y: hit["region"],
+        )
+        monkeypatch.setattr(
+            app.candidate_tree,
+            "identify_row",
+            lambda _y: hit["row"],
+        )
+        before_preview = (
+            audit_path.read_bytes() if audit_path.exists() else None,
+            tuple(clipboard),
+            app.confirmed_path_var.get(),
+            app.search_var.get(),
+            app.session.input_state,
+            app.session.candidates,
+            tuple(app.candidate_tree.get_children()),
+        )
+
+        assert app.candidate_tree.bind("<Double-1>")
+        assert app.candidate_tree.bind("<Return>")
+        app._open_candidate_by_click(SimpleNamespace(x=1, y=1))
+        assert opened == [str(destination)]
+        assert (
+            audit_path.read_bytes() if audit_path.exists() else None,
+            tuple(clipboard),
+            app.confirmed_path_var.get(),
+            app.search_var.get(),
+            app.session.input_state,
+            app.session.candidates,
+            tuple(app.candidate_tree.get_children()),
+        ) == before_preview
+
+        app._open_selected_candidate()
+        assert opened == [str(destination), str(destination)]
+
+        hit["region"] = "heading"
+        app._open_candidate_by_click(SimpleNamespace(x=1, y=1))
+        hit.update(region="cell", row="")
+        app._open_candidate_by_click(SimpleNamespace(x=1, y=1))
+        app.candidate_tree.selection_remove("0")
+        app._open_selected_candidate()
+        assert opened == [str(destination), str(destination)]
+
+        app.candidate_tree.selection_set("0")
         app._confirm_candidate()
 
         assert clipboard == [str(destination)]
@@ -97,8 +149,6 @@ def test_step5_window_connects_search_confirmation_audit_and_codex(
         assert app.consultation is not None
         assert clipboard == [app.consultation.prompt]
         assert app.consultation.attachment_guidance not in clipboard[0]
-
-        from onedrive_destination_recommender import app as app_module
 
         messages: list[str] = []
         monkeypatch.setattr(

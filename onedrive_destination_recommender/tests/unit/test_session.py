@@ -189,3 +189,38 @@ def test_catalog_timestamp_is_converted_from_utc() -> None:
 
     assert format_scanned_at("2026-08-01T00:00:00+00:00", japan) == "2026-08-01 09:00:00"
     assert format_scanned_at("not-a-timestamp", japan) == "not-a-timestamp"
+
+
+def test_open_folder_passes_exact_existing_path_to_launcher_once(tmp_path: Path) -> None:
+    folder = tmp_path / "（Output）定例成果物"
+    folder.mkdir()
+    launched: list[str] = []
+
+    session_module.open_folder(folder, launcher=launched.append)
+
+    assert launched == [str(folder)]
+
+
+def test_open_folder_rejects_missing_path_without_calling_launcher(
+    tmp_path: Path,
+) -> None:
+    launched: list[str] = []
+
+    with pytest.raises(FileNotFoundError):
+        session_module.open_folder(
+            tmp_path / "存在しない（候補）",
+            launcher=launched.append,
+        )
+
+    assert launched == []
+
+
+def test_open_folder_propagates_launcher_os_error(tmp_path: Path) -> None:
+    folder = tmp_path / "候補"
+    folder.mkdir()
+
+    def failing_launcher(_path: str) -> None:
+        raise OSError("synthetic Explorer failure")
+
+    with pytest.raises(OSError, match="synthetic Explorer failure"):
+        session_module.open_folder(folder, launcher=failing_launcher)

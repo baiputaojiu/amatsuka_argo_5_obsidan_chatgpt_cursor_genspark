@@ -23,6 +23,7 @@ from onedrive_destination_recommender.session import (
     InputSelectionError,
     RecommenderSession,
     format_scanned_at,
+    open_folder,
 )
 from onedrive_destination_recommender.settings import (
     SETTINGS_FILE_NAME,
@@ -237,6 +238,8 @@ class RecommenderApp:
             yscrollcommand=vertical.set,
             xscrollcommand=horizontal.set,
         )
+        self.candidate_tree.bind("<Double-1>", self._open_candidate_by_click)
+        self.candidate_tree.bind("<Return>", self._open_selected_candidate)
 
         self.candidate_status_var = tk.StringVar(value="検索語を入力してください。")
         ttk.Label(area, textvariable=self.candidate_status_var).grid(
@@ -245,6 +248,14 @@ class RecommenderApp:
             sticky="w",
             pady=(4, 0),
         )
+        ttk.Label(
+            area,
+            text=(
+                "候補をダブルクリックするとExplorerで確認できます。"
+                "開くだけでは保存先は確定されません。"
+            ),
+            wraplength=760,
+        ).grid(row=3, column=0, sticky="w", pady=(2, 0))
 
     def _build_action_area(self, parent: ttk.Frame) -> None:
         area = ttk.Frame(parent)
@@ -617,6 +628,30 @@ class RecommenderApp:
             return self.session.candidates[index].absolute_path
         except (ValueError, IndexError):
             return None
+
+    def _open_candidate_by_click(self, event: tk.Event) -> None:
+        if self.candidate_tree.identify_region(event.x, event.y) != "cell":
+            return
+        row = self.candidate_tree.identify_row(event.y)
+        if not row:
+            return
+        self.candidate_tree.selection_set(row)
+        self._open_selected_candidate()
+
+    def _open_selected_candidate(self, _event: tk.Event | None = None) -> None:
+        path = self._selected_candidate_path()
+        if path is None:
+            return
+        try:
+            open_folder(path)
+        except FileNotFoundError:
+            self.operation_status_var.set(
+                "候補フォルダが見つかりません。フォルダ構成を更新してください。"
+            )
+        except OSError:
+            self.operation_status_var.set(
+                "候補フォルダをExplorerで開けませんでした。パスを確認して再度お試しください。"
+            )
 
     def _confirm_candidate(self) -> None:
         path = self._selected_candidate_path()
