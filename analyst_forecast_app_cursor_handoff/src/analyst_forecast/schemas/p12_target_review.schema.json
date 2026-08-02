@@ -1,0 +1,343 @@
+{
+  "$defs": {
+    "CandidateReview": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_ref": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
+          "title": "Candidate Ref",
+          "type": "string"
+        },
+        "decision": {
+          "enum": [
+            "accept",
+            "correct",
+            "reject",
+            "unresolved"
+          ],
+          "title": "Decision",
+          "type": "string"
+        },
+        "confidence": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "rationale": {
+          "minLength": 1,
+          "title": "Rationale",
+          "type": "string"
+        },
+        "corrected_candidate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TargetResolutionCandidate"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "candidate_ref",
+        "decision",
+        "confidence",
+        "rationale"
+      ],
+      "title": "CandidateReview",
+      "type": "object"
+    },
+    "P12PromptExecution": {
+      "additionalProperties": false,
+      "properties": {
+        "prompt_id": {
+          "const": "P12",
+          "title": "Prompt Id",
+          "type": "string"
+        },
+        "prompt_version": {
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "title": "Prompt Version",
+          "type": "string"
+        },
+        "environment": {
+          "enum": [
+            "cursor",
+            "chatgpt"
+          ],
+          "title": "Environment",
+          "type": "string"
+        },
+        "model": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "executed_at": {
+          "format": "date-time",
+          "title": "Executed At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "prompt_id",
+        "prompt_version",
+        "environment",
+        "model",
+        "executed_at"
+      ],
+      "title": "P12PromptExecution",
+      "type": "object"
+    },
+    "ResolutionInstrument": {
+      "additionalProperties": false,
+      "properties": {
+        "symbol": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Symbol",
+          "type": "string"
+        },
+        "exchange": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exchange"
+        },
+        "currency": {
+          "maxLength": 20,
+          "minLength": 1,
+          "title": "Currency",
+          "type": "string"
+        },
+        "weight": {
+          "exclusiveMinimum": 0.0,
+          "maximum": 1.0,
+          "title": "Weight",
+          "type": "number"
+        }
+      },
+      "required": [
+        "symbol",
+        "currency",
+        "weight"
+      ],
+      "title": "ResolutionInstrument",
+      "type": "object"
+    },
+    "TargetResolutionCandidate": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_ref": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
+          "title": "Candidate Ref",
+          "type": "string"
+        },
+        "rank": {
+          "maximum": 3,
+          "minimum": 1,
+          "title": "Rank",
+          "type": "integer"
+        },
+        "canonical_name": {
+          "minLength": 1,
+          "title": "Canonical Name",
+          "type": "string"
+        },
+        "target_type": {
+          "enum": [
+            "stock",
+            "index",
+            "etf",
+            "fx",
+            "commodity",
+            "industry",
+            "theme",
+            "economic_indicator"
+          ],
+          "title": "Target Type",
+          "type": "string"
+        },
+        "mapping_method": {
+          "enum": [
+            "explicit",
+            "constituent_example",
+            "official_index",
+            "etf_proxy",
+            "fixed_basket"
+          ],
+          "title": "Mapping Method",
+          "type": "string"
+        },
+        "instruments": {
+          "items": {
+            "$ref": "#/$defs/ResolutionInstrument"
+          },
+          "minItems": 1,
+          "title": "Instruments",
+          "type": "array"
+        },
+        "existed_at": {
+          "format": "date",
+          "title": "Existed At",
+          "type": "string"
+        },
+        "knowledge_cutoff": {
+          "format": "date-time",
+          "title": "Knowledge Cutoff",
+          "type": "string"
+        },
+        "source_evidence": {
+          "minLength": 1,
+          "title": "Source Evidence",
+          "type": "string"
+        },
+        "confidence": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        }
+      },
+      "required": [
+        "candidate_ref",
+        "rank",
+        "canonical_name",
+        "target_type",
+        "mapping_method",
+        "instruments",
+        "existed_at",
+        "knowledge_cutoff",
+        "source_evidence",
+        "confidence"
+      ],
+      "title": "TargetResolutionCandidate",
+      "type": "object"
+    }
+  },
+  "$id": "https://local.invalid/schemas/p12-target-review-2.0.0.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "2.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "run_id": {
+      "pattern": "^RUN-\\d{8}-\\d{3}$",
+      "title": "Run Id",
+      "type": "string"
+    },
+    "source_id": {
+      "pattern": "^SRC-\\d{6}$",
+      "title": "Source Id",
+      "type": "string"
+    },
+    "forecast_component_id": {
+      "pattern": "^FCC-\\d{6}$",
+      "title": "Forecast Component Id",
+      "type": "string"
+    },
+    "proposal_artifact_id": {
+      "pattern": "^AIF-\\d{6}$",
+      "title": "Proposal Artifact Id",
+      "type": "string"
+    },
+    "prompt_execution": {
+      "$ref": "#/$defs/P12PromptExecution"
+    },
+    "input_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Input Hash",
+      "type": "string"
+    },
+    "knowledge_cutoff": {
+      "format": "date-time",
+      "title": "Knowledge Cutoff",
+      "type": "string"
+    },
+    "resolution_status": {
+      "enum": [
+        "agreed",
+        "disagreed",
+        "unresolved"
+      ],
+      "title": "Resolution Status",
+      "type": "string"
+    },
+    "reviews": {
+      "items": {
+        "$ref": "#/$defs/CandidateReview"
+      },
+      "title": "Reviews",
+      "type": "array"
+    },
+    "recommended_candidate_ref": {
+      "anyOf": [
+        {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Recommended Candidate Ref"
+    },
+    "recommended_candidate_origin": {
+      "anyOf": [
+        {
+          "enum": [
+            "p11_proposal",
+            "p12_correction"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Recommended Candidate Origin"
+    },
+    "unevaluable_reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Unevaluable Reason"
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "source_id",
+    "forecast_component_id",
+    "proposal_artifact_id",
+    "prompt_execution",
+    "input_hash",
+    "knowledge_cutoff",
+    "resolution_status",
+    "reviews"
+  ],
+  "title": "P12TargetResolutionReviewOutput",
+  "type": "object"
+}

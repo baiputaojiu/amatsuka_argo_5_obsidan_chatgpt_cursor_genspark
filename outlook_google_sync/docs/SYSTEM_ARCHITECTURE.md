@@ -13,9 +13,10 @@
 ## 1.1 実行場所（運用ルール）
 
 - **初回**: `scripts/setup_env.bat` で **`outlook_google_sync/.venv/`** を作成し依存を入れる（**他の手順より先**）。
-- `scripts/run_gui.bat` は **`.venv` があればその `python.exe` で起動** する。
+- `scripts/run_gui.bat` はプロジェクトルートへ移動し、**`.venv` の `python.exe` のみで起動** する（未作成ならエラー）。
 - `scripts/setup_env.bat`、`scripts/run_gui.bat`、`python -m pytest` などのコマンドは、**`outlook_google_sync/` で Cursor ターミナル（PowerShell）から実行**する。
-- GUI 起動後の操作（同期・プレビュー・接続テスト・重複修復・設定）は、**アプリ画面のボタン操作**で実行する。
+- GUI 起動後の操作（同期・プレビュー・重複修復・設定）は、**アプリ画面のボタン操作**で実行する。
+- **接続テスト**はセットアップ完了時に **起動直後に自動実行**し、手動ボタンでも再実行できる。
 - エクスプローラから `.bat` を直接実行する方法は補助的な手段とし、標準運用はターミナル実行とする。
 
 ---

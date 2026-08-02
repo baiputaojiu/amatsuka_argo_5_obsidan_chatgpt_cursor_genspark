@@ -1,0 +1,39 @@
+# {{prompt_id}} {{title}} — {{environment}}
+
+## メタデータ
+- template_version: {{template_version}}
+- template_hash: {{template_hash}}
+- run_id: {{run_id}}
+- schema: {{schema_name}}
+
+## 目的
+{{purpose}}
+
+## 使用タイミング
+P12 disagreed のときだけ。P11/P12 の artifact ID を実値で埋める。
+
+## 推奨AI環境
+{{environment}}
+
+## 使用モデル
+{{model_text}}
+
+## 入力ファイル
+{{input_instruction}}
+
+## 出力ファイル・Schema
+`03_ai_outputs/inbox/{{output_name}}`。`01_prompts/schemas/{{schema_name}}` に厳密に従う。
+
+## 判定基準（必須）
+- P11 proposal と P12 review が同じ component を指すこと。
+- P12 修正候補を採用する場合は selected_candidate_origin=p12_correction。
+- 別component参照禁止。市場結果禁止。後知恵禁止。
+
+## 禁止事項・注意事項
+{{warning}}
+
+## 完了条件
+verified または unresolvable と rationale が揃う。
+
+## コピペ用依頼文
+この案件の{{title}}を実行してください。上記の禁止事項と出力先を厳守してください。

@@ -1,0 +1,165 @@
+{
+  "$defs": {
+    "P06PromptExecution": {
+      "additionalProperties": false,
+      "properties": {
+        "prompt_id": {
+          "const": "P06",
+          "title": "Prompt Id",
+          "type": "string"
+        },
+        "prompt_version": {
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "title": "Prompt Version",
+          "type": "string"
+        },
+        "environment": {
+          "enum": [
+            "cursor",
+            "chatgpt"
+          ],
+          "title": "Environment",
+          "type": "string"
+        },
+        "model": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "executed_at": {
+          "format": "date-time",
+          "title": "Executed At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "prompt_id",
+        "prompt_version",
+        "environment",
+        "model",
+        "executed_at"
+      ],
+      "title": "P06PromptExecution",
+      "type": "object"
+    },
+    "ReviewFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "finding_ref": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
+          "title": "Finding Ref",
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "warning",
+            "error"
+          ],
+          "title": "Severity",
+          "type": "string"
+        },
+        "message": {
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "evidence": {
+          "minLength": 1,
+          "title": "Evidence",
+          "type": "string"
+        }
+      },
+      "required": [
+        "finding_ref",
+        "severity",
+        "message",
+        "evidence"
+      ],
+      "title": "ReviewFinding",
+      "type": "object"
+    }
+  },
+  "$id": "https://local.invalid/schemas/p06-speaker-review-2.0.0.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "話者・著者帰属レビュー（P05/P07共通）。",
+  "properties": {
+    "schema_version": {
+      "const": "2.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "run_id": {
+      "pattern": "^RUN-\\d{8}-\\d{3}$",
+      "title": "Run Id",
+      "type": "string"
+    },
+    "source_id": {
+      "pattern": "^SRC-\\d{6}$",
+      "title": "Source Id",
+      "type": "string"
+    },
+    "reviewed_artifact_id": {
+      "pattern": "^AIF-\\d{6}$",
+      "title": "Reviewed Artifact Id",
+      "type": "string"
+    },
+    "prompt_execution": {
+      "$ref": "#/$defs/P06PromptExecution"
+    },
+    "input_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Input Hash",
+      "type": "string"
+    },
+    "decision": {
+      "enum": [
+        "accept",
+        "correct",
+        "reject",
+        "unresolved"
+      ],
+      "title": "Decision",
+      "type": "string"
+    },
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/ReviewFinding"
+      },
+      "title": "Findings",
+      "type": "array"
+    },
+    "corrected_payload": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Corrected Payload"
+    },
+    "knowledge_cutoff": {
+      "format": "date-time",
+      "title": "Knowledge Cutoff",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "source_id",
+    "reviewed_artifact_id",
+    "prompt_execution",
+    "input_hash",
+    "decision",
+    "knowledge_cutoff"
+  ],
+  "title": "P06SpeakerAttributionReviewOutput",
+  "type": "object"
+}

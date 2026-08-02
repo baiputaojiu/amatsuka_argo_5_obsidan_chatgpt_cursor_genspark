@@ -11,6 +11,7 @@
 - Windows PowerShell（単体）でも同等に実行可能。
 - エクスプローラから `.bat` のダブルクリック実行も可能だが、エラー追跡性の観点で非推奨。
 - GUI ボタン操作（通常同期、フル同期、プレビュー、接続テスト、重複修復）はアプリ画面上で実行する。
+- **接続テスト**はセットアップ完了時に起動直後も自動実行する（手動ボタンでも再実行可）。
 
 ---
 
@@ -71,11 +72,21 @@ flowchart LR
 
 その後、メインウィンドウが `runtime_state` を `state_data` にマージ（入力方法・詳細度・カレンダー ID 等）。
 
+続けて:
+
+6. **標準期間の適用**: 開始日＝今日−1ヶ月、終了日＝今日＋2ヶ月を DateEntry に設定（前回の `last_D_*` は復元しない）。
+7. **起動後分岐**（`_on_startup`、遅延実行）:
+   - セットアップ未完: チェックリストダイアログのみ（接続テストは自動実行しない）。
+   - セットアップ完了: `worker(connection_test)` で接続テストを自動実行。
+8. **セットアップ・チェックリスト**: `credentials.json` または `token.json` が無いときだけダイアログを出し、フォルダ開放・Google 認証・設定への導線を提供する。「後で」で閉じられる。
+
+**参照（追記）:** `utils/datetime_utils.py`（`default_sync_range`）、`services/setup_checklist.py`、`gui/setup_checklist.py`
+
 ---
 
 ## 2. 接続テスト（COM / ICS / Google 2 段階）
 
-**トリガー:** 「接続テスト」→ `connection_test()`
+**トリガー:** (1) 起動時・セットアップ完了時に自動 → `worker(connection_test)` (2) 「接続テスト」ボタン → 同じく `connection_test()`
 
 **順序:** 入力方法に応じ **Outlook 側 → Google 側**（Google は常に最後）。
 

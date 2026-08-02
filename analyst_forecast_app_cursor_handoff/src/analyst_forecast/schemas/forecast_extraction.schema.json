@@ -1,0 +1,565 @@
+{
+  "$defs": {
+    "Direction": {
+      "enum": [
+        "up",
+        "down",
+        "flat"
+      ],
+      "title": "Direction",
+      "type": "string"
+    },
+    "EvidenceQuote": {
+      "additionalProperties": false,
+      "properties": {
+        "source_id": {
+          "pattern": "^SRC-\\d{6}$",
+          "title": "Source Id",
+          "type": "string"
+        },
+        "quote": {
+          "minLength": 1,
+          "title": "Quote",
+          "type": "string"
+        },
+        "start_offset": {
+          "minimum": 0,
+          "title": "Start Offset",
+          "type": "integer"
+        },
+        "end_offset": {
+          "exclusiveMinimum": 0,
+          "title": "End Offset",
+          "type": "integer"
+        },
+        "role": {
+          "enum": [
+            "prediction",
+            "condition",
+            "target",
+            "timing",
+            "magnitude",
+            "context"
+          ],
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_id",
+        "quote",
+        "start_offset",
+        "end_offset",
+        "role"
+      ],
+      "title": "EvidenceQuote",
+      "type": "object"
+    },
+    "ForecastComponentOutput": {
+      "additionalProperties": false,
+      "properties": {
+        "component_ref": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
+          "title": "Component Ref",
+          "type": "string"
+        },
+        "parent_component_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Component Ref"
+        },
+        "sequence_number": {
+          "minimum": 1,
+          "title": "Sequence Number",
+          "type": "integer"
+        },
+        "prediction_form": {
+          "enum": [
+            "deadline_target",
+            "point_in_time",
+            "period_direction",
+            "period_state",
+            "turning_point",
+            "relative",
+            "range",
+            "event"
+          ],
+          "title": "Prediction Form",
+          "type": "string"
+        },
+        "direction": {
+          "$ref": "#/$defs/Direction"
+        },
+        "time_expression_raw": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Time Expression Raw"
+        },
+        "time_source": {
+          "$ref": "#/$defs/TimeSource"
+        },
+        "normalized_start": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Normalized Start"
+        },
+        "normalized_end": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Normalized End"
+        },
+        "time_precision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Time Precision"
+        },
+        "magnitude_value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Magnitude Value"
+        },
+        "magnitude_unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Magnitude Unit"
+        },
+        "magnitude_operator": {
+          "anyOf": [
+            {
+              "enum": [
+                "approximate",
+                "minimum",
+                "maximum",
+                "range",
+                "exact_target",
+                "threshold"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Magnitude Operator"
+        },
+        "scenario_probability": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scenario Probability"
+        },
+        "target": {
+          "$ref": "#/$defs/TargetMappingOutput"
+        }
+      },
+      "required": [
+        "component_ref",
+        "sequence_number",
+        "prediction_form",
+        "direction",
+        "time_source",
+        "target"
+      ],
+      "title": "ForecastComponentOutput",
+      "type": "object"
+    },
+    "ForecastIssuanceOutput": {
+      "additionalProperties": false,
+      "properties": {
+        "forecast_ref": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
+          "title": "Forecast Ref",
+          "type": "string"
+        },
+        "forecast_group_ref": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
+          "title": "Forecast Group Ref",
+          "type": "string"
+        },
+        "existing_forecast_group_id": {
+          "anyOf": [
+            {
+              "pattern": "^FCG-\\d{6}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Existing Forecast Group Id"
+        },
+        "made_at": {
+          "format": "date-time",
+          "title": "Made At",
+          "type": "string"
+        },
+        "publicly_available_at": {
+          "format": "date-time",
+          "title": "Publicly Available At",
+          "type": "string"
+        },
+        "forecast_type": {
+          "enum": [
+            "directional",
+            "numeric",
+            "conditional",
+            "recommendation",
+            "scenario"
+          ],
+          "title": "Forecast Type",
+          "type": "string"
+        },
+        "commitment_strength": {
+          "enum": [
+            "explicit",
+            "directional",
+            "weak",
+            "recommendation"
+          ],
+          "title": "Commitment Strength",
+          "type": "string"
+        },
+        "evidence_level": {
+          "enum": [
+            "A",
+            "B",
+            "C",
+            "D",
+            "E",
+            "F"
+          ],
+          "title": "Evidence Level",
+          "type": "string"
+        },
+        "extraction_confidence": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Extraction Confidence",
+          "type": "number"
+        },
+        "human_readable_summary": {
+          "minLength": 1,
+          "title": "Human Readable Summary",
+          "type": "string"
+        },
+        "relation_to_previous": {
+          "enum": [
+            "initial",
+            "reaffirmation",
+            "strengthened",
+            "weakened",
+            "numeric_revision",
+            "timing_revision",
+            "condition_added",
+            "reversal",
+            "withdrawal"
+          ],
+          "title": "Relation To Previous",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/EvidenceQuote"
+          },
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        },
+        "components": {
+          "items": {
+            "$ref": "#/$defs/ForecastComponentOutput"
+          },
+          "minItems": 1,
+          "title": "Components",
+          "type": "array"
+        }
+      },
+      "required": [
+        "forecast_ref",
+        "forecast_group_ref",
+        "made_at",
+        "publicly_available_at",
+        "forecast_type",
+        "commitment_strength",
+        "evidence_level",
+        "extraction_confidence",
+        "human_readable_summary",
+        "relation_to_previous",
+        "evidence",
+        "components"
+      ],
+      "title": "ForecastIssuanceOutput",
+      "type": "object"
+    },
+    "MappingStatus": {
+      "enum": [
+        "unresolved",
+        "proposed",
+        "verified",
+        "corrected",
+        "multiple_proxies",
+        "unresolvable"
+      ],
+      "title": "MappingStatus",
+      "type": "string"
+    },
+    "PromptExecution": {
+      "additionalProperties": false,
+      "properties": {
+        "prompt_id": {
+          "const": "P08",
+          "title": "Prompt Id",
+          "type": "string"
+        },
+        "prompt_version": {
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "title": "Prompt Version",
+          "type": "string"
+        },
+        "environment": {
+          "enum": [
+            "cursor",
+            "chatgpt"
+          ],
+          "title": "Environment",
+          "type": "string"
+        },
+        "model": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        }
+      },
+      "required": [
+        "prompt_id",
+        "prompt_version",
+        "environment",
+        "model"
+      ],
+      "title": "PromptExecution",
+      "type": "object"
+    },
+    "TargetMappingOutput": {
+      "additionalProperties": false,
+      "properties": {
+        "raw_label": {
+          "minLength": 1,
+          "title": "Raw Label",
+          "type": "string"
+        },
+        "canonical_name": {
+          "minLength": 1,
+          "title": "Canonical Name",
+          "type": "string"
+        },
+        "target_type": {
+          "enum": [
+            "stock",
+            "index",
+            "etf",
+            "fx",
+            "commodity",
+            "industry",
+            "theme",
+            "economic_indicator"
+          ],
+          "title": "Target Type",
+          "type": "string"
+        },
+        "symbol": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Symbol",
+          "type": "string"
+        },
+        "exchange": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exchange"
+        },
+        "currency": {
+          "maxLength": 20,
+          "minLength": 1,
+          "title": "Currency",
+          "type": "string"
+        },
+        "mapping_method": {
+          "enum": [
+            "explicit",
+            "constituent_example",
+            "official_index",
+            "etf_proxy",
+            "fixed_basket"
+          ],
+          "title": "Mapping Method",
+          "type": "string"
+        },
+        "knowledge_cutoff": {
+          "format": "date-time",
+          "title": "Knowledge Cutoff",
+          "type": "string"
+        },
+        "source_evidence": {
+          "minLength": 1,
+          "title": "Source Evidence",
+          "type": "string"
+        },
+        "proposal_model": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Proposal Model",
+          "type": "string"
+        },
+        "mapping_status": {
+          "$ref": "#/$defs/MappingStatus"
+        },
+        "review_result": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Review Result"
+        }
+      },
+      "required": [
+        "raw_label",
+        "canonical_name",
+        "target_type",
+        "symbol",
+        "currency",
+        "mapping_method",
+        "knowledge_cutoff",
+        "source_evidence",
+        "proposal_model",
+        "mapping_status"
+      ],
+      "title": "TargetMappingOutput",
+      "type": "object"
+    },
+    "TimeSource": {
+      "enum": [
+        "explicit",
+        "inferred",
+        "system_default",
+        "none"
+      ],
+      "title": "TimeSource",
+      "type": "string"
+    }
+  },
+  "$id": "https://local.invalid/schemas/forecast-extraction-1.0.0.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "run_id": {
+      "pattern": "^RUN-\\d{8}-\\d{3}$",
+      "title": "Run Id",
+      "type": "string"
+    },
+    "source_id": {
+      "pattern": "^SRC-\\d{6}$",
+      "title": "Source Id",
+      "type": "string"
+    },
+    "prompt_execution": {
+      "$ref": "#/$defs/PromptExecution"
+    },
+    "forecasts": {
+      "items": {
+        "$ref": "#/$defs/ForecastIssuanceOutput"
+      },
+      "minItems": 1,
+      "title": "Forecasts",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "source_id",
+    "prompt_execution",
+    "forecasts"
+  ],
+  "title": "ForecastExtractionOutput",
+  "type": "object"
+}
