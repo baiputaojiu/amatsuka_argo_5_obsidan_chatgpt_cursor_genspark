@@ -46,8 +46,10 @@ def test_manual_search_updates_candidates_without_file_input(tmp_path: Path) -> 
 def test_file_input_uses_names_and_preserves_initial_zero_measurement(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     session = RecommenderSession(settings, _catalog(settings, "設備", "週報"))
+    input_path = tmp_path / "未知案件.pdf"
+    input_path.touch()
 
-    state = session.select_files([tmp_path / "未知案件.pdf"])
+    state = session.select_files([input_path])
     assert state.kind is InputKind.FILES
     assert state.file_names == ("未知案件.pdf",)
     assert state.automatic_terms_zero_candidates is True
@@ -62,8 +64,11 @@ def test_file_input_uses_names_and_preserves_initial_zero_measurement(tmp_path: 
 def test_multiple_regular_files_form_one_input(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     session = RecommenderSession(settings, _catalog(settings, "設備_カメラ"))
+    input_paths = (tmp_path / "設備.pdf", tmp_path / "カメラ仕様書.docx")
+    for path in input_paths:
+        path.touch()
 
-    state = session.select_files([tmp_path / "設備.pdf", tmp_path / "カメラ仕様書.docx"])
+    state = session.select_files(input_paths)
 
     assert state.kind is InputKind.FILES
     assert state.file_names == ("設備.pdf", "カメラ仕様書.docx")
@@ -76,9 +81,12 @@ def test_msg_mixed_selection_is_rejected_without_replacing_current_input(
     settings = _settings(tmp_path)
     session = RecommenderSession(settings, _catalog(settings, "設備"))
     session.apply_search_text("設備")
+    input_paths = (tmp_path / "mail.msg", tmp_path / "設備.pdf")
+    for path in input_paths:
+        path.touch()
 
     with pytest.raises(InputSelectionError, match="MSGは1件ずつ"):
-        session.select_files([tmp_path / "mail.msg", tmp_path / "設備.pdf"])
+        session.select_files(input_paths)
 
     assert session.input_state.kind is InputKind.MANUAL
     assert session.search_text == "設備"
@@ -98,8 +106,10 @@ def test_msg_input_keeps_body_terms_hidden_from_search_text(
         warning=None,
     )
     monkeypatch.setattr(session_module, "build_msg_search_terms", lambda _path: result)
+    input_path = tmp_path / "mail.msg"
+    input_path.touch()
 
-    state = session.select_files([tmp_path / "mail.msg"])
+    state = session.select_files([input_path])
 
     assert state.kind is InputKind.MSG
     assert session.search_text == "設備"
@@ -110,22 +120,32 @@ def test_msg_input_keeps_body_terms_hidden_from_search_text(
 
 def test_missing_msg_error_does_not_replace_current_input(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     settings = _settings(tmp_path)
     session = RecommenderSession(settings, _catalog(settings, "設備"))
     session.apply_search_text("設備")
 
-    def missing(_path: Path) -> MsgSearchTerms:
-        raise FileNotFoundError("synthetic")
-
-    monkeypatch.setattr(session_module, "build_msg_search_terms", missing)
-
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(InputSelectionError, match="存在しないファイル"):
         session.select_files([tmp_path / "missing.msg"])
 
     assert session.input_state.kind is InputKind.MANUAL
     assert session.search_text == "設備"
+
+
+def test_folder_input_is_rejected_without_replacing_current_input(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    session = RecommenderSession(settings, _catalog(settings, "設備"))
+    session.apply_search_text("設備")
+    previous = (session.input_state, session.search_text, session.candidates)
+    input_path = tmp_path / "カメラ.pdf"
+    input_path.touch()
+    folder = tmp_path / "図面フォルダ"
+    folder.mkdir()
+
+    with pytest.raises(InputSelectionError, match="フォルダや存在しないファイル"):
+        session.select_files([input_path, folder])
+
+    assert (session.input_state, session.search_text, session.candidates) == previous
 
 
 def test_catalog_replacement_reranks_current_input(tmp_path: Path) -> None:
@@ -143,7 +163,9 @@ def test_catalog_replacement_reranks_current_input(tmp_path: Path) -> None:
 def test_catalog_replacement_preserves_initial_zero_measurement(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     session = RecommenderSession(settings, _catalog(settings, "週報"))
-    session.select_files([tmp_path / "設備.pdf"])
+    input_path = tmp_path / "設備.pdf"
+    input_path.touch()
+    session.select_files([input_path])
     assert session.input_state.automatic_terms_zero_candidates is True
 
     session.replace_catalog(_catalog(settings, "設備"))
@@ -176,7 +198,9 @@ def test_consultation_remains_available_after_regular_file_disappears(tmp_path: 
     settings = _settings(tmp_path)
     session = RecommenderSession(settings, _catalog(settings, "設備"))
     missing = tmp_path / "設備.pdf"
+    missing.touch()
     session.select_files([missing])
+    missing.unlink()
 
     consultation = session.build_consultation()
 

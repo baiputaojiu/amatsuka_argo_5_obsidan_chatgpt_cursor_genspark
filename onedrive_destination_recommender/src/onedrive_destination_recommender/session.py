@@ -158,6 +158,10 @@ class RecommenderSession:
         paths = tuple(Path(path).resolve() for path in selected_paths)
         if not paths:
             raise InputSelectionError("ファイルを1件以上選択してください。")
+        if any(not path.is_file() for path in paths):
+            raise InputSelectionError(
+                "フォルダや存在しないファイルは投入できません。ファイルだけを選択してください。"
+            )
 
         msg_count = sum(is_msg_file(path) for path in paths)
         if msg_count and len(paths) != 1:

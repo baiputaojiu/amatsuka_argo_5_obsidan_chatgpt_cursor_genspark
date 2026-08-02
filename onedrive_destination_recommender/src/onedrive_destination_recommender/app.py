@@ -1,4 +1,6 @@
+import sys
 import tkinter as tk
+from collections.abc import Iterable
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -61,6 +63,7 @@ class RecommenderApp:
         self._changing_search = False
 
         self._build_widgets()
+        self._initialize_dnd()
         self._load_runtime()
 
     def _build_widgets(self) -> None:
@@ -177,6 +180,10 @@ class RecommenderApp:
         )
         input_scrollbar.grid(row=0, column=1, sticky="ns")
         self.input_list.configure(yscrollcommand=input_scrollbar.set)
+        ttk.Label(
+            list_frame,
+            text="デスクトップまたはExplorerからファイルをここへドロップできます",
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         self.msg_status_var = tk.StringVar(value="手動検索のみ")
         ttk.Label(area, textvariable=self.msg_status_var).grid(
@@ -473,6 +480,18 @@ class RecommenderApp:
         finally:
             self.update_button.state(["!disabled"])
 
+    def _initialize_dnd(self) -> None:
+        if sys.platform != "win32":
+            return
+        try:
+            from tkinterdnd2 import DND_FILES, TkinterDnD
+
+            TkinterDnD.require(self.root)
+            self.input_list.drop_target_register(DND_FILES)
+            self.input_list.dnd_bind("<<Drop>>", self._on_drop)
+        except Exception:
+            return
+
     def _select_files(self) -> None:
         if self.session is None:
             return
@@ -482,6 +501,17 @@ class RecommenderApp:
             filetypes=(("すべてのファイル", "*.*"), ("Outlook MSG", "*.msg")),
         )
         if not selected:
+            return
+        self._accept_files(selected)
+
+    def _on_drop(self, event: tk.Event) -> None:
+        selected = self.root.tk.splitlist(event.data)
+        if not selected:
+            return
+        self._accept_files(selected)
+
+    def _accept_files(self, selected: Iterable[str | Path]) -> None:
+        if self.session is None:
             return
         try:
             self.session.select_files(selected)

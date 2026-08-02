@@ -1,3 +1,4 @@
+import builtins
 import json
 import sys
 from pathlib import Path
@@ -50,19 +51,31 @@ def _change_setting(settings_path: Path, key: str, value: str) -> None:
     settings_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
 
+@pytest.fixture(scope="module")
+def shared_tk_root():
+    if sys.platform != "win32":
+        pytest.skip("Tkinter Windows GUI test")
+    import tkinter as tk
+
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        yield root
+    finally:
+        root.destroy()
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Tkinter Windows GUI test")
 def test_step5_window_connects_search_confirmation_audit_and_codex(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    shared_tk_root,
 ) -> None:
-    import tkinter as tk
-
     from onedrive_destination_recommender import app as app_module
     from onedrive_destination_recommender.app import APP_TITLE, RecommenderApp
 
     settings_path, catalog_path, audit_path, destination = _temporary_runtime(tmp_path)
-    root = tk.Tk()
-    root.withdraw()
+    root = shared_tk_root
     clipboard: list[str] = []
     root.clipboard_clear = clipboard.clear  # type: ignore[method-assign]
     root.clipboard_append = clipboard.append  # type: ignore[method-assign]
@@ -209,5 +222,164 @@ def test_step5_window_connects_search_confirmation_audit_and_codex(
             for widget in root.winfo_children():
                 if widget not in original_widgets:
                     widget.destroy()
+    finally:
+        for widget in root.winfo_children():
+            widget.destroy()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Tkinter Windows GUI test")
+def test_drop_splits_single_and_multiple_paths_without_changing_them(
+    tmp_path: Path,
+    shared_tk_root,
+) -> None:
+    import tkinter as tk
+
+    from onedrive_destination_recommender.app import RecommenderApp
+
+    settings_path, catalog_path, audit_path, _destination = _temporary_runtime(tmp_path)
+    root = tk.Toplevel(shared_tk_root)
+    root.withdraw()
+    app = RecommenderApp(
+        root,
+        settings_path=settings_path,
+        catalog_path=catalog_path,
+        audit_path=audit_path,
+    )
+    single = (tmp_path / "カメラ 仕様書（秋田）.docx",)
+    multiple = (tmp_path / "図面 [Rev1].pdf", tmp_path / "設備 写真（正面）.png")
+    for path in (*single, *multiple):
+        path.touch()
+    accepted: list[tuple[str, ...]] = []
+    app._accept_files = lambda paths: accepted.append(tuple(paths))
+
+    try:
+        assert app.input_list.dnd_bind("<<Drop>>")
+        for expected in (single, multiple):
+            event_data = root.tk.call("list", *(str(path) for path in expected))
+            app._on_drop(SimpleNamespace(data=event_data))
+
+        assert accepted == [
+            tuple(str(path) for path in single),
+            tuple(str(path) for path in multiple),
+        ]
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Tkinter Windows GUI test")
+def test_drop_and_file_selection_produce_the_same_result_without_finalizing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    shared_tk_root,
+) -> None:
+    import tkinter as tk
+
+    from onedrive_destination_recommender import app as app_module
+    from onedrive_destination_recommender.app import RecommenderApp
+
+    settings_path, catalog_path, audit_path, _destination = _temporary_runtime(tmp_path)
+    input_paths = (tmp_path / "設備 仕様書（秋田）.pdf", tmp_path / "設備 [Rev1].docx")
+    for path in input_paths:
+        path.touch()
+    root = tk.Toplevel(shared_tk_root)
+    root.withdraw()
+    clipboard: list[str] = []
+    root.clipboard_clear = clipboard.clear  # type: ignore[method-assign]
+    root.clipboard_append = clipboard.append  # type: ignore[method-assign]
+    app = RecommenderApp(
+        root,
+        settings_path=settings_path,
+        catalog_path=catalog_path,
+        audit_path=audit_path,
+    )
+    monkeypatch.setattr(
+        app_module.filedialog,
+        "askopenfilenames",
+        lambda **_kwargs: tuple(str(path) for path in input_paths),
+    )
+
+    try:
+        app._select_files()
+        assert app.session is not None
+        selected_result = (
+            app.session.input_state,
+            app.session.search_text,
+            app.session.candidates,
+        )
+
+        app._reset_manual()
+        before_drop_effects = (
+            audit_path.read_bytes() if audit_path.exists() else None,
+            tuple(clipboard),
+            app.confirmed_path_var.get(),
+        )
+        event_data = root.tk.call("list", *(str(path) for path in input_paths))
+        app._on_drop(SimpleNamespace(data=event_data))
+
+        assert (
+            app.session.input_state,
+            app.session.search_text,
+            app.session.candidates,
+        ) == selected_result
+        assert (
+            audit_path.read_bytes() if audit_path.exists() else None,
+            tuple(clipboard),
+            app.confirmed_path_var.get(),
+        ) == before_drop_effects
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Tkinter Windows GUI test")
+def test_dnd_initialization_failure_keeps_file_selection_available(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    shared_tk_root,
+) -> None:
+    import tkinter as tk
+
+    from onedrive_destination_recommender import app as app_module
+    from onedrive_destination_recommender.app import RecommenderApp
+
+    settings_path, catalog_path, audit_path, _destination = _temporary_runtime(tmp_path)
+    input_path = tmp_path / "設備.pdf"
+    input_path.touch()
+    root = tk.Toplevel(shared_tk_root)
+    root.withdraw()
+    attempted_imports: list[str] = []
+    real_import = builtins.__import__
+
+    def reject_dnd_import(
+        name: str,
+        globals: dict[str, object] | None = None,
+        locals: dict[str, object] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> object:
+        if name == "tkinterdnd2":
+            attempted_imports.append(name)
+            raise ImportError("synthetic tkinterdnd2 failure")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", reject_dnd_import)
+    try:
+        app = RecommenderApp(
+            root,
+            settings_path=settings_path,
+            catalog_path=catalog_path,
+            audit_path=audit_path,
+        )
+        assert attempted_imports == ["tkinterdnd2"]
+        monkeypatch.setattr(builtins, "__import__", real_import)
+        monkeypatch.setattr(
+            app_module.filedialog,
+            "askopenfilenames",
+            lambda **_kwargs: (str(input_path),),
+        )
+
+        app._select_files()
+
+        assert app.session is not None
+        assert app.session.input_state.file_paths == (input_path.resolve(),)
     finally:
         root.destroy()
