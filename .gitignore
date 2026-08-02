@@ -1,0 +1,25 @@
+# Local email data must never be committed to this public repository.
+*.msg
+*.eml
+*.pst
+*.ost
+
+# Local secrets and project-local Python environments.
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+.pytest_cache/
+.pytest-tmp/
+.ruff_cache/
+*.egg-info/
+pytest-cache-files-*/
+
+# Private integration-test inputs stay outside the repository.
+**/tests/fixtures/private/
+
+# Recommender runtime data contains business paths and file names.
+settings.json
+catalog.json
+audit.jsonl
