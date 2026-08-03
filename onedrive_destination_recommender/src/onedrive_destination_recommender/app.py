@@ -613,12 +613,12 @@ class RecommenderApp:
         self.msg_status_var.set(state.msg_status)
 
     def _clear_candidates(self) -> None:
+        self.selected_candidate_path_var.set(SELECTED_CANDIDATE_PATH_GUIDANCE)
         for item in self.candidate_tree.get_children():
             self.candidate_tree.delete(item)
 
     def _render_candidates(self) -> None:
         assert self.session is not None
-        self.selected_candidate_path_var.set(SELECTED_CANDIDATE_PATH_GUIDANCE)
         self._clear_candidates()
         for index, candidate in enumerate(self.session.candidates):
             self.candidate_tree.insert(

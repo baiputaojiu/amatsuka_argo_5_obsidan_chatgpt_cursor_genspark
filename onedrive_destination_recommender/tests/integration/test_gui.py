@@ -77,6 +77,7 @@ def test_step5_window_connects_search_confirmation_audit_and_codex(
         SELECTED_CANDIDATE_PATH_GUIDANCE,
         RecommenderApp,
     )
+    from onedrive_destination_recommender.ranking import RankingError
 
     settings_path, catalog_path, audit_path, destination = _temporary_runtime(tmp_path)
     root = shared_tk_root
@@ -124,6 +125,20 @@ def test_step5_window_connects_search_confirmation_audit_and_codex(
             app.session.candidates,
             tuple(app.candidate_tree.get_children()),
         ) == before_path_display
+
+        def reject_search(_text: str) -> None:
+            raise RankingError("synthetic catalog mismatch")
+
+        with monkeypatch.context() as catalog_mismatch:
+            catalog_mismatch.setattr(app.session, "apply_search_text", reject_search)
+            app.search_var.set("設備 不一致")
+            assert app.candidate_tree.get_children() == ()
+            assert app.selected_candidate_path_var.get() == SELECTED_CANDIDATE_PATH_GUIDANCE
+
+        app.search_var.set("設備")
+        assert len(app.session.candidates) == 1
+        app.candidate_tree.selection_set("0")
+        app._candidate_selection_changed()
 
         opened: list[str] = []
         monkeypatch.setattr(app_module, "open_folder", opened.append)
