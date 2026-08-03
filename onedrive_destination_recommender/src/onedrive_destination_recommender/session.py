@@ -17,6 +17,10 @@ from onedrive_destination_recommender.codex_prompt import (
     CodexConsultation,
     build_codex_consultation,
 )
+from onedrive_destination_recommender.document_reader import (
+    DocumentSearchTerms,
+    build_document_terms,
+)
 from onedrive_destination_recommender.msg_reader import (
     MsgSearchTerms,
     build_msg_search_terms,
@@ -100,6 +104,15 @@ def _msg_status(result: MsgSearchTerms) -> str:
     return "MSG解析完了"
 
 
+def _document_status(result: DocumentSearchTerms) -> str:
+    if result.target_count == 0:
+        return "ファイル名のみ使用（本文解析なし）"
+    status = f"本文を利用：{result.parsed_count}/{result.target_count}件"
+    if result.warning:
+        return f"{status}（{result.warning}）"
+    return status
+
+
 class RecommenderSession:
     """Coordinate one input with the existing catalog, ranking, and Audit functions."""
 
@@ -156,13 +169,14 @@ class RecommenderSession:
             )
         else:
             primary_terms = initial_terms_from_file_names(path.name for path in paths)
+            document_result = build_document_terms(paths)
             state = InputState(
                 kind=InputKind.FILES,
                 file_paths=paths,
                 initial_primary_terms=primary_terms,
                 current_primary_terms=primary_terms,
-                auxiliary_terms=(),
-                msg_status="ファイル名のみ使用（本文解析なし）",
+                auxiliary_terms=document_result.auxiliary_terms,
+                msg_status=_document_status(document_result),
                 automatic_terms_zero_candidates=None,
             )
 
@@ -217,7 +231,7 @@ class RecommenderSession:
             raise ValueError("候補選択または保存先未定には確定パスが必要です。")
 
         auxiliary_changed = None
-        if self.input_state.kind is InputKind.MSG:
+        if self.input_state.kind is not InputKind.MANUAL:
             auxiliary_changed = did_auxiliary_change_top_ten(
                 self.prepared_folders,
                 self.settings,

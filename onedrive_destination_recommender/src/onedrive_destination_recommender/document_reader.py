@@ -1,11 +1,17 @@
 import zipfile
+from collections.abc import Iterable
+from dataclasses import dataclass
 from importlib import import_module
 from pathlib import Path
 from types import ModuleType
 from xml.etree import ElementTree
 
+from onedrive_destination_recommender.terms import clean_document_text, normalize_terms
+
 __all__ = [
+    "DocumentSearchTerms",
     "DocumentUnavailableError",
+    "build_document_terms",
     "is_supported_document",
     "supported_document_extensions",
 ]
@@ -13,6 +19,16 @@ __all__ = [
 
 class DocumentUnavailableError(RuntimeError):
     """Raised when a supported document's text cannot be read on this machine."""
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentSearchTerms:
+    """Normalized document terms without retaining any extracted text."""
+
+    auxiliary_terms: tuple[str, ...]
+    parsed_count: int
+    target_count: int
+    warning: str | None
 
 
 _EXCEL_EXTENSIONS = frozenset({".xlsx", ".xlsm"})
@@ -171,3 +187,38 @@ def _read_document_text(path: str | Path) -> str:
         raise DocumentUnavailableError(
             "ファイルの本文を読み取れませんでした。ファイル名だけで処理を続けます。"
         ) from exc
+
+
+def build_document_terms(paths: Iterable[str | Path]) -> DocumentSearchTerms:
+    """Build auxiliary terms from supported inputs, keeping no extracted text."""
+    target_paths = [Path(path) for path in paths if is_supported_document(path)]
+    if not target_paths:
+        return DocumentSearchTerms(
+            auxiliary_terms=(),
+            parsed_count=0,
+            target_count=0,
+            warning=None,
+        )
+
+    cleaned_texts: list[str] = []
+    for document_path in target_paths:
+        try:
+            text = _read_document_text(document_path)
+        except (DocumentUnavailableError, FileNotFoundError, ValueError):
+            continue
+        cleaned_texts.append(clean_document_text(text))
+
+    parsed_count = len(cleaned_texts)
+    if parsed_count == 0:
+        warning = "選択したファイルの本文を利用できませんでした。"
+    elif parsed_count < len(target_paths):
+        warning = "一部のファイルの本文を利用できませんでした。"
+    else:
+        warning = None
+
+    return DocumentSearchTerms(
+        auxiliary_terms=normalize_terms("\n".join(cleaned_texts), auxiliary=True),
+        parsed_count=parsed_count,
+        target_count=len(target_paths),
+        warning=warning,
+    )

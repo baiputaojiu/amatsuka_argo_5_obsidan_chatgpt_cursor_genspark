@@ -1,4 +1,5 @@
 import json
+import zipfile
 from datetime import timedelta, timezone
 from pathlib import Path
 
@@ -7,6 +8,7 @@ import pytest
 from onedrive_destination_recommender import session as session_module
 from onedrive_destination_recommender.audit import DecisionType
 from onedrive_destination_recommender.catalog import Catalog
+from onedrive_destination_recommender.document_reader import DocumentSearchTerms
 from onedrive_destination_recommender.msg_reader import MsgSearchTerms
 from onedrive_destination_recommender.session import (
     InputKind,
@@ -182,6 +184,176 @@ def test_consultation_remains_available_after_regular_file_disappears(tmp_path: 
 
     assert str(missing.resolve()) in consultation.attachment_guidance
     assert str(missing.resolve()) in consultation.prompt
+
+
+def _document_result(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    auxiliary_terms: tuple[str, ...],
+    parsed_count: int,
+    target_count: int,
+    warning: str | None = None,
+) -> None:
+    result = DocumentSearchTerms(
+        auxiliary_terms=auxiliary_terms,
+        parsed_count=parsed_count,
+        target_count=target_count,
+        warning=warning,
+    )
+    monkeypatch.setattr(session_module, "build_document_terms", lambda _paths: result)
+
+
+def test_document_body_terms_stay_out_of_the_editable_search_text(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings(tmp_path)
+    session = RecommenderSession(settings, _catalog(settings, "設備_秋田"))
+    _document_result(monkeypatch, auxiliary_terms=("秋田",), parsed_count=1, target_count=1)
+
+    state = session.select_files([tmp_path / "設備.xlsx"])
+
+    assert state.kind is InputKind.FILES
+    assert session.search_text == "設備"
+    assert "秋田" not in session.search_text
+    assert state.auxiliary_terms == ("秋田",)
+    assert state.msg_status == "本文を利用：1/1件"
+
+
+def test_document_status_reports_partial_and_failed_extraction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings(tmp_path)
+    session = RecommenderSession(settings, _catalog(settings, "設備"))
+    _document_result(
+        monkeypatch,
+        auxiliary_terms=(),
+        parsed_count=1,
+        target_count=2,
+        warning="一部のファイルの本文を利用できませんでした。",
+    )
+
+    state = session.select_files([tmp_path / "設備.xlsx", tmp_path / "図面.pdf"])
+
+    assert state.msg_status == "本文を利用：1/2件（一部のファイルの本文を利用できませんでした。）"
+
+
+def test_unsupported_files_keep_the_mvp0_name_only_behaviour(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    session = RecommenderSession(settings, _catalog(settings, "設備", "週報"))
+
+    state = session.select_files([tmp_path / "設備.txt", tmp_path / "メモ.md"])
+
+    assert state.auxiliary_terms == ()
+    assert state.msg_status == "ファイル名のみ使用（本文解析なし）"
+    assert [candidate.relative_path for candidate in session.candidates] == ["設備"]
+
+
+def test_extraction_outcome_changes_neither_primary_terms_nor_candidate_set(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings(tmp_path)
+    selected = [tmp_path / "設備.xlsx"]
+
+    failed_session = RecommenderSession(settings, _catalog(settings, "設備", "設備_秋田"))
+    _document_result(monkeypatch, auxiliary_terms=(), parsed_count=0, target_count=1)
+    failed_state = failed_session.select_files(selected)
+
+    parsed_session = RecommenderSession(settings, _catalog(settings, "設備", "設備_秋田"))
+    _document_result(monkeypatch, auxiliary_terms=("秋田",), parsed_count=1, target_count=1)
+    parsed_state = parsed_session.select_files(selected)
+
+    assert parsed_state.current_primary_terms == failed_state.current_primary_terms
+    assert {candidate.absolute_path for candidate in parsed_session.candidates} == {
+        candidate.absolute_path for candidate in failed_session.candidates
+    }
+
+
+def test_audit_records_auxiliary_effect_for_document_inputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings(tmp_path)
+    audit_path = tmp_path / "audit.jsonl"
+    session = RecommenderSession(
+        settings,
+        _catalog(settings, "設備", "設備_秋田"),
+        audit_path=audit_path,
+    )
+    _document_result(monkeypatch, auxiliary_terms=("秋田",), parsed_count=1, target_count=1)
+    session.select_files([tmp_path / "設備.xlsx"])
+
+    record = session.record_decision(
+        DecisionType.CANDIDATE,
+        session.candidates[0].absolute_path,
+    )
+
+    assert record.auxiliary_changed_top_ten is not None
+    persisted = json.loads(audit_path.read_text(encoding="utf-8"))
+    assert set(persisted) == {
+        "recorded_at",
+        "input_file_names",
+        "top_ranked_path",
+        "decision_type",
+        "confirmed_path",
+        "catalog_scanned_at",
+        "manual_terms_used",
+        "automatic_terms_zero_candidates",
+        "auxiliary_changed_top_ten",
+    }
+
+
+def test_manual_input_still_records_no_auxiliary_comparison(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    session = RecommenderSession(
+        settings,
+        _catalog(settings, "設備"),
+        audit_path=tmp_path / "audit.jsonl",
+    )
+    session.apply_search_text("設備")
+
+    record = session.record_decision(
+        DecisionType.CANDIDATE,
+        session.candidates[0].absolute_path,
+    )
+
+    assert record.auxiliary_changed_top_ten is None
+
+
+def test_extracted_document_text_never_reaches_any_runtime_file(tmp_path: Path) -> None:
+    from onedrive_destination_recommender.catalog import write_catalog_atomic
+
+    secret = "zzqqsecretmarker"
+    document_xml = (
+        '<?xml version="1.0"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        f"<w:body><w:p><w:r><w:t>設備 {secret}</w:t></w:r></w:p></w:body></w:document>"
+    )
+    document_path = tmp_path / "設備仕様.docx"
+    with zipfile.ZipFile(document_path, "w") as archive:
+        archive.writestr("word/document.xml", document_xml)
+
+    settings = _settings(tmp_path)
+    catalog = _catalog(settings, "設備")
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir()
+    write_catalog_atomic(catalog, runtime_dir / "catalog.json")
+    audit_path = runtime_dir / "audit.jsonl"
+
+    session = RecommenderSession(settings, catalog, audit_path=audit_path)
+    session.select_files([document_path])
+    assert secret in str(session.input_state.auxiliary_terms)
+
+    session.apply_search_text("設備")
+    session.record_decision(DecisionType.CANDIDATE, session.candidates[0].absolute_path)
+    session.build_consultation()
+
+    written = list(runtime_dir.iterdir())
+    assert {path.name for path in written} == {"catalog.json", "audit.jsonl"}
+    for path in written:
+        assert secret not in path.read_text(encoding="utf-8"), path.name
 
 
 def test_catalog_timestamp_is_converted_from_utc() -> None:

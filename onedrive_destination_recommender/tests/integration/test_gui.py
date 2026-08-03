@@ -1,10 +1,36 @@
 import json
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
 
 pytestmark = pytest.mark.integration
+
+_DOCX_DOCUMENT_XML = (
+    '<?xml version="1.0"?>'
+    '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+    "<w:body><w:p><w:r><w:t>設備 秋田</w:t></w:r></w:p></w:body></w:document>"
+)
+
+
+def _write_docx(path: Path) -> Path:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("word/document.xml", _DOCX_DOCUMENT_XML)
+    return path
+
+
+@pytest.fixture(scope="module")
+def tk_root():
+    """Share one Tk interpreter, because repeated create-and-destroy cycles are unreliable."""
+    import tkinter as tk
+
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        yield root
+    finally:
+        root.destroy()
 
 
 def _temporary_runtime(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
@@ -50,20 +76,65 @@ def _change_setting(settings_path: Path, key: str, value: str) -> None:
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Tkinter Windows GUI test")
+def test_document_input_reports_status_without_adding_screen_elements(
+    tmp_path: Path,
+    tk_root,
+) -> None:
+    from onedrive_destination_recommender.app import RecommenderApp
+
+    settings_path, catalog_path, audit_path, _destination = _temporary_runtime(tmp_path)
+    root = tk_root
+    existing_widgets = set(root.winfo_children())
+    app = RecommenderApp(
+        root,
+        settings_path=settings_path,
+        catalog_path=catalog_path,
+        audit_path=audit_path,
+    )
+
+    try:
+        root.update_idletasks()
+        assert app.session is not None
+        widgets_before = len(root.winfo_children())
+        columns_before = len(app.candidate_tree["columns"])
+
+        app.session.select_files([_write_docx(tmp_path / "設備仕様.docx")])
+        app._render_all()
+        root.update_idletasks()
+
+        assert app.msg_status_var.get() == "本文を利用：1/1件"
+        assert app.auxiliary_status_var.get().startswith("ファイル本文の補助照合")
+        assert "秋田" in str(app.session.input_state.auxiliary_terms)
+        assert "秋田" not in app.search_var.get()
+
+        app.session.select_files([tmp_path / "メモ.txt"])
+        app._render_all()
+        root.update_idletasks()
+
+        assert app.msg_status_var.get() == "ファイル名のみ使用（本文解析なし）"
+        assert app.auxiliary_status_var.get() == "ファイル本文の補助検索語：なし"
+
+        assert len(root.winfo_children()) == widgets_before
+        assert len(app.candidate_tree["columns"]) == columns_before
+    finally:
+        for widget in root.winfo_children():
+            if widget not in existing_widgets:
+                widget.destroy()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Tkinter Windows GUI test")
 def test_step5_window_connects_search_confirmation_audit_and_codex(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    tk_root,
 ) -> None:
-    import tkinter as tk
-
     from onedrive_destination_recommender.app import APP_TITLE, RecommenderApp
 
     settings_path, catalog_path, audit_path, destination = _temporary_runtime(tmp_path)
-    root = tk.Tk()
-    root.withdraw()
+    root = tk_root
     clipboard: list[str] = []
-    root.clipboard_clear = clipboard.clear  # type: ignore[method-assign]
-    root.clipboard_append = clipboard.append  # type: ignore[method-assign]
+    monkeypatch.setattr(root, "clipboard_clear", clipboard.clear)
+    monkeypatch.setattr(root, "clipboard_append", clipboard.append)
     app = RecommenderApp(
         root,
         settings_path=settings_path,
@@ -160,4 +231,5 @@ def test_step5_window_connects_search_confirmation_audit_and_codex(
                 if widget not in original_widgets:
                     widget.destroy()
     finally:
-        root.destroy()
+        for widget in root.winfo_children():
+            widget.destroy()

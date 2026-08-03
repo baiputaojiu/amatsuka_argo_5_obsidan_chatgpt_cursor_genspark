@@ -126,8 +126,16 @@ def test_importing_document_reader_does_not_load_optional_dependencies() -> None
 def test_public_api_does_not_expose_raw_document_content() -> None:
     assert "is_supported_document" in document_reader.__all__
     assert "supported_document_extensions" in document_reader.__all__
+    assert "build_document_terms" in document_reader.__all__
     for hidden in ("DocumentContent", "read_document_text", "_read_document_text"):
         assert hidden not in document_reader.__all__
+
+    assert set(document_reader.DocumentSearchTerms.__dataclass_fields__) == {
+        "auxiliary_terms",
+        "parsed_count",
+        "target_count",
+        "warning",
+    }
 
 
 def test_document_reader_has_no_file_or_log_write_path() -> None:
@@ -311,6 +319,75 @@ def test_sheet_scan_stops_once_the_character_budget_is_reached(
     text = document_reader._read_document_text(workbook_path)
 
     assert "末尾シート" not in text
+
+
+def test_build_document_terms_ignores_inputs_without_a_supported_extension(
+    tmp_path: Path,
+) -> None:
+    result = document_reader.build_document_terms([tmp_path / "note.txt", tmp_path / "mail.msg"])
+
+    assert result == document_reader.DocumentSearchTerms(
+        auxiliary_terms=(),
+        parsed_count=0,
+        target_count=0,
+        warning=None,
+    )
+
+
+def test_build_document_terms_merges_every_supported_input(tmp_path: Path) -> None:
+    document_path = _write_docx(tmp_path / "memo.docx")
+    deck_path = _write_pptx(tmp_path / "deck.pptx")
+
+    result = document_reader.build_document_terms([document_path, deck_path])
+
+    assert result.parsed_count == 2
+    assert result.target_count == 2
+    assert result.warning is None
+    assert "週報" in result.auxiliary_terms
+    assert "巻き取りカメラ" in result.auxiliary_terms
+
+
+def test_build_document_terms_drops_contact_noise_and_short_numbers(tmp_path: Path) -> None:
+    noisy_xml = (
+        '<?xml version="1.0"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        "<w:body><w:p><w:r><w:t>週報 12 1234 user@example.com 03-1234-5678</w:t></w:r></w:p>"
+        "</w:body></w:document>"
+    )
+    document_path = _write_ooxml(tmp_path / "noisy.docx", "word/document.xml", noisy_xml)
+
+    terms = document_reader.build_document_terms([document_path]).auxiliary_terms
+
+    assert "週報" in terms
+    assert "1234" in terms
+    assert "12" not in terms
+    assert "example" not in terms
+
+
+def test_build_document_terms_reports_partial_failure(tmp_path: Path) -> None:
+    document_path = _write_docx(tmp_path / "memo.docx")
+    broken_path = tmp_path / "broken.docx"
+    broken_path.write_bytes(b"not a real document")
+
+    result = document_reader.build_document_terms([document_path, broken_path])
+
+    assert result.parsed_count == 1
+    assert result.target_count == 2
+    assert result.warning == "一部のファイルの本文を利用できませんでした。"
+    assert "週報" in result.auxiliary_terms
+
+
+def test_build_document_terms_reports_total_failure_without_raising(tmp_path: Path) -> None:
+    missing_path = tmp_path / "missing.pptx"
+    broken_path = tmp_path / "broken.docx"
+    broken_path.write_bytes(b"not a real document")
+
+    result = document_reader.build_document_terms([missing_path, broken_path])
+
+    assert result.auxiliary_terms == ()
+    assert result.parsed_count == 0
+    assert result.target_count == 2
+    assert result.warning == "選択したファイルの本文を利用できませんでした。"
 
 
 def test_oversized_package_part_is_skipped(
