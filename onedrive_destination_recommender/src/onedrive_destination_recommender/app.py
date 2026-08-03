@@ -38,6 +38,8 @@ from onedrive_destination_recommender.settings import (
 APP_TITLE = "OneDrive保存先レコメンダー"
 README_PATH = Path(__file__).resolve().parents[2] / "README.md"
 SELECTED_CANDIDATE_PATH_GUIDANCE = "候補を選択すると絶対パスを全文表示します。"
+CANDIDATE_PATH_MIN_WIDTH = 480
+CANDIDATE_PATH_HORIZONTAL_PADDING = 24
 
 
 class RecommenderApp:
@@ -231,7 +233,12 @@ class RecommenderApp:
         self.candidate_tree.heading("path", text="絶対パス")
         self.candidate_tree.column("primary", width=145, stretch=False)
         self.candidate_tree.column("auxiliary", width=145, stretch=False)
-        self.candidate_tree.column("path", width=480, stretch=True)
+        self.candidate_tree.column(
+            "path",
+            width=CANDIDATE_PATH_MIN_WIDTH,
+            minwidth=CANDIDATE_PATH_MIN_WIDTH,
+            stretch=False,
+        )
         self.candidate_tree.grid(row=0, column=0, sticky="nsew")
 
         vertical = ttk.Scrollbar(area, orient="vertical", command=self.candidate_tree.yview)
@@ -614,12 +621,36 @@ class RecommenderApp:
 
     def _clear_candidates(self) -> None:
         self.selected_candidate_path_var.set(SELECTED_CANDIDATE_PATH_GUIDANCE)
+        self.candidate_tree.column("path", width=CANDIDATE_PATH_MIN_WIDTH)
         for item in self.candidate_tree.get_children():
             self.candidate_tree.delete(item)
+
+    def _candidate_path_column_width(self) -> int:
+        assert self.session is not None
+        tree_font = ttk.Style(self.root).lookup("Treeview", "font") or "TkDefaultFont"
+        longest_path_width = max(
+            (
+                int(
+                    self.root.tk.call(
+                        "font",
+                        "measure",
+                        tree_font,
+                        candidate.absolute_path,
+                    )
+                )
+                for candidate in self.session.candidates
+            ),
+            default=0,
+        )
+        return max(
+            CANDIDATE_PATH_MIN_WIDTH,
+            longest_path_width + CANDIDATE_PATH_HORIZONTAL_PADDING,
+        )
 
     def _render_candidates(self) -> None:
         assert self.session is not None
         self._clear_candidates()
+        self.candidate_tree.column("path", width=self._candidate_path_column_width())
         for index, candidate in enumerate(self.session.candidates):
             self.candidate_tree.insert(
                 "",

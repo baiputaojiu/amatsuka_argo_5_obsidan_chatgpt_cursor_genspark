@@ -74,6 +74,8 @@ def test_step5_window_connects_search_confirmation_audit_and_codex(
     from onedrive_destination_recommender import app as app_module
     from onedrive_destination_recommender.app import (
         APP_TITLE,
+        CANDIDATE_PATH_HORIZONTAL_PADDING,
+        CANDIDATE_PATH_MIN_WIDTH,
         SELECTED_CANDIDATE_PATH_GUIDANCE,
         RecommenderApp,
     )
@@ -116,6 +118,12 @@ def test_step5_window_connects_search_confirmation_audit_and_codex(
         app._candidate_selection_changed()
         assert app.selected_candidate_path_var.get() == str(destination)
         assert int(app.selected_candidate_path_label.cget("wraplength")) == 620
+        tree_font = app_module.ttk.Style(root).lookup("Treeview", "font") or "TkDefaultFont"
+        measured_path_width = int(root.tk.call("font", "measure", tree_font, str(destination)))
+        assert int(app.candidate_tree.column("path", "width")) >= (
+            measured_path_width + CANDIDATE_PATH_HORIZONTAL_PADDING
+        )
+        assert app.candidate_tree.column("path", "stretch") in (False, 0, "0")
         assert (
             audit_path.read_bytes() if audit_path.exists() else None,
             tuple(clipboard),
@@ -134,6 +142,7 @@ def test_step5_window_connects_search_confirmation_audit_and_codex(
             app.search_var.set("設備 不一致")
             assert app.candidate_tree.get_children() == ()
             assert app.selected_candidate_path_var.get() == SELECTED_CANDIDATE_PATH_GUIDANCE
+            assert int(app.candidate_tree.column("path", "width")) == CANDIDATE_PATH_MIN_WIDTH
 
         app.search_var.set("設備")
         assert len(app.session.candidates) == 1
