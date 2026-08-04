@@ -1,0 +1,436 @@
+# 実装計画：GitHub公開履歴からの私用フォルダ資料削除
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to execute this plan with stop gates. Use `superpowers:verification-before-completion` before the force-push and before declaring the cleanup complete.
+
+**Goal:** PublicのGitHubリポジトリから私用フォルダ構造・詳細資料を全ブランチ・タグの履歴ごと除去し、ローカル資料は保持したまま再混入を防止する。
+
+**Architecture:** 現在の作業ツリーでは削除対象を未追跡化してignoreし、存続文書から具体的な構造情報を除去する準備コミットを作る。履歴書き換えは作業ツリーではなく新しい使い捨てmirror cloneに対して`git-filter-repo>=2.47`で行い、削除パスと非公開語句を全refから除去する。ローカル検証、リモート無変更確認、ユーザーの最終承認を通過した場合だけ`git push --force --mirror`を実行し、旧cloneは再利用せず隔離する。
+
+**Tech Stack:** Git、GitHub、GitHub CLI、`git-filter-repo>=2.47`、PowerShell 7。
+
+## Global Constraints
+
+- リポジトリはPublicのまま維持し、Privateへ変更しない。
+- フォルダ構造一覧、生成詳細ページ、生成目次、生成スクリプトを全履歴から除去する。
+- 存続文書に含まれる実際のフォルダ名・階層・詳細内容・削除対象への参照も全履歴から除去または一般表現へ置換する。
+- 「全階層を検索する」等、実構造を明かさない一般要件とプログラム本体は残す。
+- ローカルの私用資料は削除せず、元の配置で未追跡・ignore状態として保持する。
+- 現在の未コミット変更を上書き、破棄、履歴書き換え対象へ混入させない。
+- force-push前に全remote refsのスナップショットを保存し、開始後のリモート更新を検知した場合は中止する。
+- 対象外パス、コミット作者、コミット日時、一般文書、プログラムコードは変更しない。
+- ブランチ保護を自動解除しない。保護によりpushできない場合は停止してユーザー判断を求める。
+- fork、第三者clone、GitHubのPR参照・キャッシュはローカル履歴書き換えだけでは消去できないものとして別確認する。
+- 履歴書き換え後、旧cloneから`pull`や`push`を行わない。新しいclean cloneを正本とする。
+
+---
+
+## 1. 文書情報
+
+| 項目 | 値 |
+|---|---|
+| 対象リポジトリ | `baiputaojiu/amatsuka_argo_5_obsidan_chatgpt_cursor_genspark` |
+| 公開状態 | Publicを維持 |
+| 作成日 | 2026-08-04 |
+| 状態 | 実行前・Claude Codeレビュー待ち |
+| 履歴書き換え方式 | `git-filter-repo --sensitive-data-removal --invert-paths` |
+| リモート更新方式 | 最終承認後の`git push --force --mirror origin` |
+
+本計画のレビュー完了までは、追跡解除、`.gitignore`変更、履歴書き換え、force-push、GitHub設定変更を行わない。
+
+## 2. 削除範囲
+
+### 2.1 全履歴から削除するパス
+
+実行時にリポジトリ外の`private-removal-paths.txt`へ次の規則をUTF-8で保存する。
+
+```text
+literal:private/local-structure.txt
+glob:private/local-detail-*.md
+literal:private/local-file-management.md
+literal:private/local-page-generator.py
+```
+
+同じ資料が過去に別パス・別名で存在した場合は、`git log --all --name-status --follow`と`git filter-repo --analyze`の結果から旧パスを同ファイルへ追加する。旧パスが0件である場合は、その確認結果を実行記録へ残す。
+
+### 2.2 全履歴から置換する内容
+
+リポジトリ外の`private-replacements.txt`へ、次の2種類を記載する。
+
+1. 削除対象ファイル名・参照名を一般表現へ置換する規則。
+2. 存続文書に現れる実フォルダ名・階層断片・詳細説明を`***REMOVED***`へ置換する規則。
+
+固定規則は、行頭`/`を持つ`.gitignore`を壊さないよう、リポジトリ相対パスの直前が`/`ではない文書参照だけを対象にする。
+
+```text
+regex:(?<!/)private/local-structure\.txt==>***REMOVED***
+regex:(?<!/)private/local-file-management\.md==>***REMOVED***
+regex:(?<!/)private/local-page-generator\.py==>***REMOVED***
+regex:(?<!/)private/local-detail-[^\r\n`/]+\.md==>***REMOVED***
+```
+
+実フォルダ名の規則は、削除対象資料と存続文書の共通語をローカルで抽出して作る。ファイル自体はリポジトリ外に置き、内容を画面出力、Audit、コミットへ含めない。短い一般語、年度表現、製品名等まで過剰置換しないよう、各規則を`git grep`で事前確認する。書き換え後の`.gitignore`を期待ファイルとbyte比較し、固定規則または実フォルダ名規則がignore行を変更していないことをforce-push前に確認する。
+
+### 2.3 最新版から削除する参照
+
+準備コミットでは存続文書を手動で読み、実構造を前提とするリンク、件数、例示、詳細説明を一般化する。一般的な機能要件、テスト要件、設計判断は残す。
+
+## 3. 最新版の再混入防止
+
+`.gitignore`へ次を追加する。
+
+```gitignore
+# Private folder-map artifacts must remain local and untracked.
+/private/local-structure.txt
+/private/local-details/*.md
+/private/local-file-management.md
+/private/local-page-generator.py
+```
+
+`git rm --cached`を使用し、作業ツリーの実ファイルは残す。`git add -A`、`git commit -a`は使用しない。
+
+## 4. 実行前ストップゲート
+
+次のいずれかに該当する場合は履歴書き換えへ進まない。
+
+- `gh auth status`が失敗する。
+- `git filter-repo --version`が2.47未満、またはコマンドが存在しない。
+- open PR、fork、ブランチ保護、共同利用者の有無を確認できない。
+- 現在の未コミット変更をリポジトリ外へバックアップできない。
+- 削除パスまたは置換語句の一覧に未確認項目がある。
+- mirror cloneの検証で対象外ファイルのtree差分が発生する。
+- force-push直前のremote refsが開始時スナップショットと異なる。
+- ユーザーからforce-push直前の明示承認を得ていない。
+
+## 5. 実行タスク
+
+### Task 1: 対象と外部状態の棚卸し
+
+**Files:**
+- Read: Git refs、PR、fork、branch protection、追跡ファイル一覧
+- Create outside repository: `remote-refs-before.txt`
+- Create outside repository: `remote-refs-force-baseline.txt`
+- Create outside repository: `private-removal-paths.txt`
+- Create outside repository: `private-replacements.txt`
+- Create outside repository: `allowed-changed-paths.txt`
+
+- [ ] **Step 1: ツールと認証を確認する**
+
+```powershell
+git --version
+git filter-repo --version
+gh --version
+gh auth status
+```
+
+Expected: 全コマンド成功。`git-filter-repo`は2.47以上。
+
+- [ ] **Step 2: GitHub上の影響範囲を確認する**
+
+```powershell
+gh repo view baiputaojiu/amatsuka_argo_5_obsidan_chatgpt_cursor_genspark --json visibility,defaultBranchRef,url
+gh pr list --state open --limit 100
+gh api repos/baiputaojiu/amatsuka_argo_5_obsidan_chatgpt_cursor_genspark --jq '{forks_count,open_issues_count}'
+gh api repos/baiputaojiu/amatsuka_argo_5_obsidan_chatgpt_cursor_genspark/branches --paginate --jq '.[] | {name,protected}'
+```
+
+Expected: `visibility`は`PUBLIC`。open PR、fork、protected branchの実数を実行記録へ保存する。
+
+- [ ] **Step 3: 準備開始前のremote refsをリポジトリ外へ保存する**
+
+```powershell
+git ls-remote --heads --tags origin | Set-Content -LiteralPath $cleanupRemoteRefs -Encoding utf8
+```
+
+`$cleanupRemoteRefs`はタスク専用一時ディレクトリ内の絶対パスとし、リポジトリ内へ作らない。この一覧は監査用であり、Task 5の同時更新判定には準備push後の別一覧を使う。
+
+- [ ] **Step 4: 全履歴の対象パスを棚卸しする**
+
+```powershell
+git -c core.quotepath=false log --all --name-status -- "obsidan vault/30_Permanent/★業務/ファイル管理"
+git filter-repo --analyze
+```
+
+分析結果から改名・移動履歴を確認し、§2.1のmanifestを確定する。分析出力はコミットしない。
+
+- [ ] **Step 5: 存続文書の具体情報を棚卸しする**
+
+削除資料の名称と階層断片を存続文書へ照合し、`private-replacements.txt`を確定する。置換前後のヒット件数を記録し、一般語の誤置換が0件であることを人手確認する。パス削除、内容置換、`.gitignore`追加によりblob変更を許可するパスだけを`allowed-changed-paths.txt`へ列挙する。
+
+### Task 2: ローカル資料と未コミット変更の保護
+
+**Files:**
+- Copy outside repository: 私用資料4分類
+- Copy outside repository: `obsidan vault/.obsidian/plugins/editing-toolbar/data.json`
+- Copy outside repository: `obsidan vault/.obsidian/workspace.json`
+- Create outside repository: `working-tree-status.txt`
+
+- [ ] **Step 1: 状態を記録する**
+
+```powershell
+git status --short --branch | Set-Content -LiteralPath $cleanupStatusPath -Encoding utf8
+git diff --binary | Set-Content -LiteralPath $cleanupPatchPath -Encoding utf8
+git ls-files --others --exclude-standard | Set-Content -LiteralPath $cleanupUntrackedPath -Encoding utf8
+```
+
+- [ ] **Step 2: 対象資料とユーザー変更をリポジトリ外へコピーする**
+
+`Copy-Item -LiteralPath`を使い、タスク専用バックアップディレクトリへ1ファイルずつコピーする。コピー元とコピー先のSHA-256を`Get-FileHash`で比較する。
+
+- [ ] **Step 3: バックアップ検証を記録する**
+
+Expected: 全対象でコピー元とコピー先のSHA-256が一致する。不一致が1件でもあれば停止する。
+
+### Task 3: 最新版の追跡解除と文書一般化
+
+**Files:**
+- Modify: `.gitignore`
+- Modify: 実構造を参照する存続文書
+- Untrack, keep on disk: §2.1の4分類
+
+- [ ] **Step 1: `.gitignore`の失敗先行確認を行う**
+
+```powershell
+git check-ignore -v -- "private/local-structure.txt"
+```
+
+Expected before edit: ignore規則がないため非0終了。
+
+- [ ] **Step 2: §3のignore規則を追加する**
+
+- [ ] **Step 3: 私用資料をディスクに残して追跡だけ解除する**
+
+```powershell
+git rm --cached -- "private/local-structure.txt"
+git rm --cached -- "private/local-file-management.md"
+git rm --cached -- "private/local-page-generator.py"
+$cleanupTrackedDetails = git -c core.quotepath=false ls-files -- "private/local-detail-*.md"
+foreach ($cleanupTrackedDetail in $cleanupTrackedDetails) {
+    git rm --cached -- $cleanupTrackedDetail
+}
+```
+
+PowerShellまたはGitのglob解釈に依存せず、実行時は`git ls-files`で得た各パスを個別に`git rm --cached -- <exact-path>`へ渡す。
+
+- [ ] **Step 4: 存続文書から実構造情報を一般化する**
+
+- [ ] **Step 5: 最新treeを検証する**
+
+```powershell
+git check-ignore -v --no-index -- "private/local-structure.txt"
+git diff --cached --name-status
+git diff --cached --check
+```
+
+Expected: 私用資料は削除予定としてstageされるがローカルには存在し、無関係なユーザー変更はstageされない。
+
+- [ ] **Step 6: 準備コミットを作成して通常pushする**
+
+```powershell
+git commit -m "privacy: 私用フォルダ資料を公開対象から除外"
+git push origin codex/outlook-direct-dnd-plan
+```
+
+このpushは最新版を先に非公開化する準備であり、過去履歴はまだ残る。force-pushはTask 6まで行わない。
+
+- [ ] **Step 7: 準備push後の全remote refsをforce-push基準として保存する**
+
+```powershell
+git ls-remote --heads --tags origin | Set-Content -LiteralPath $cleanupRemoteRefsForceBaseline -Encoding utf8
+```
+
+以後、Task 6完了まで通常pushを含む全リモート更新を凍結する。
+
+### Task 4: 使い捨てmirror cloneの履歴書き換え
+
+**Files:**
+- Create outside repository: fresh mirror clone
+- Consume outside repository: `private-removal-paths.txt`、`private-replacements.txt`
+
+- [ ] **Step 1: 新しい空ディレクトリへmirror cloneする**
+
+```powershell
+git clone --mirror https://github.com/baiputaojiu/amatsuka_argo_5_obsidan_chatgpt_cursor_genspark.git $cleanupMirrorPath
+```
+
+- [ ] **Step 2: mirror内で分析し、ref数・object数・対象外tree基準を記録する**
+
+```powershell
+git show-ref
+git count-objects -vH
+git filter-repo --analyze
+```
+
+各head/tagのtip SHAごとに`git ls-tree -r`を実行し、`allowed-changed-paths.txt`に含まれるパスを除いた`mode type object path`をリポジトリ外の`before-trees/<ref>.txt`へ保存する。ref名と旧tip SHAの対応も保存する。
+
+- [ ] **Step 3: パス除去と内容置換を1回の書き換えで実行する**
+
+```powershell
+git filter-repo --sensitive-data-removal --invert-paths --paths-from-file $cleanupRemovalPaths --replace-text $cleanupReplacements
+```
+
+- [ ] **Step 4: filter-repoが削除した`origin`を検証付きで戻す**
+
+```powershell
+$cleanupExpectedRemote = "https://github.com/baiputaojiu/amatsuka_argo_5_obsidan_chatgpt_cursor_genspark.git"
+if (-not (git remote)) {
+    git remote add origin $cleanupExpectedRemote
+}
+if ((git remote get-url origin) -ne $cleanupExpectedRemote) {
+    throw "Unexpected origin URL after history rewrite."
+}
+```
+
+- [ ] **Step 5: `changed-refs`とfirst changed commitを保存する**
+
+`git rev-parse --git-path filter-repo/changed-refs`で得たファイル、first changed commit、LFS orphan報告の有無をリポジトリ外の実行記録へコピーする。bare mirrorと通常cloneの`.git`配置差をハードコードしない。
+
+### Task 5: force-push前の完全性検証
+
+- [ ] **Step 1: 削除パスが全refから消えたことを確認する**
+
+```powershell
+git rev-list --objects --all | Select-String -Pattern 'private-structure|/private-detail-|private-file-management|private-page-generator'
+```
+
+Expected: 0件。
+
+- [ ] **Step 2: 置換対象が全refから消えたことを確認する**
+
+全heads/tagsへ`git grep -I`を実行し、`private-replacements.txt`の左辺が0件であることを確認する。`***REMOVED***`の出現は許容する。
+
+- [ ] **Step 3: 対象外treeの一致を機械比較する**
+
+commit mapの実パスを`git rev-parse --git-path filter-repo/commit-map`で取得し、旧tip SHAに対応する新tip SHAを求める。書き換え前に保存した`before-trees/<ref>.txt`と、新tipの`git ls-tree -r`から`allowed-changed-paths.txt`を除いた結果を比較する。差分が1件でもあればforce-pushしない。
+
+- [ ] **Step 4: アプリの基準検査をclean work cloneで行う**
+
+mirrorから別のclean work cloneを作り、次を実行する。
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -m pytest
+.\.venv\Scripts\python.exe -m pytest -m integration
+.\.venv\Scripts\python.exe -m ruff check src tests
+.\.venv\Scripts\python.exe -m ruff format --check src tests
+```
+
+依存環境を作れない場合はコードtree一致検証を必須とし、テスト未実行理由を明記する。
+
+- [ ] **Step 5: force-push直前にremote無変更を確認する**
+
+```powershell
+git ls-remote --heads --tags origin | Set-Content -LiteralPath $cleanupRemoteRefsNow -Encoding utf8
+Compare-Object (Get-Content -LiteralPath $cleanupRemoteRefsForceBaseline) (Get-Content -LiteralPath $cleanupRemoteRefsNow)
+```
+
+Expected: 0件。差分があれば停止してmirror cloneからやり直す。
+
+- [ ] **Step 6: 検証結果と影響ref数を提示し、ユーザーの最終承認を得る**
+
+提示項目は変更branch数、tag数、PR影響数、fork数、first changed commit、検証結果、復旧方法とする。
+
+### Task 6: 全refのforce-push
+
+- [ ] **Step 1: 承認後にmirrorをforce-pushする**
+
+```powershell
+git push --force --mirror origin
+```
+
+Expected: `refs/pull/*`以外の予定refが更新される。branch protection等で他refが失敗した場合は停止し、部分成功状態を報告する。
+
+- [ ] **Step 2: remote refsを再取得して予定値と比較する**
+
+```powershell
+git ls-remote --heads --tags origin
+```
+
+- [ ] **Step 3: GitHub上のdefault branchと主要branchを確認する**
+
+`gh api`で各tip SHAを取得し、mirrorの対応SHAと一致することを確認する。
+
+### Task 7: clean cloneへの移行と再混入防止
+
+- [ ] **Step 1: 新しいディレクトリへfresh cloneする**
+
+旧cloneは削除せず、ネットワーク操作を行わない隔離対象とする。
+
+- [ ] **Step 2: 私用資料と未コミット変更を復元する**
+
+私用資料はignore対象の元パスへ戻す。ユーザー変更はバックアップと新cloneの対象ファイルを比較し、競合がない場合だけ復元する。
+
+- [ ] **Step 3: 再混入防止を確認する**
+
+```powershell
+git status --short
+git check-ignore -v --no-index -- "private/local-structure.txt"
+git log --all -- "private/local-structure.txt"
+```
+
+Expected: 私用資料はstatusへ現れず、履歴は0件。復元したユーザー変更だけが意図どおり表示される。
+
+- [ ] **Step 4: 旧cloneを再利用しない旨を記録する**
+
+共同利用者がいる場合は全員へ再cloneを依頼する。旧履歴をmergeまたはpushしない。
+
+### Task 8: GitHub残存参照の確認
+
+- [ ] **Step 1: forkとPR参照を再確認する**
+
+forkが存在する場合は所有者へ削除または履歴書き換えを依頼する。影響PRが存在する場合はPR番号を記録する。
+
+- [ ] **Step 2: GitHub Support対象を判断する**
+
+cached view、PR ref、LFS orphanが残り、GitHubが機密情報と判断し得る場合はSupportへowner/repository、影響PR数、first changed commit、LFS報告を添えて依頼する。Supportが非機密データとして対応しない場合は、その結果を残存リスクとして記録する。
+
+- [ ] **Step 3: 最終結果を記録する**
+
+削除対象0件、remote SHA一致、fork/PR/cache状態、clean clone移行、再混入防止、未解決リスクを事実ベースで記録する。
+
+## 6. 受け入れ条件
+
+1. リポジトリはPublicのまま維持される。
+2. §2.1の対象パスが全remote heads/tagsから消える。
+3. 存続文書の実フォルダ名・階層断片・詳細説明が全remote heads/tagsから消える。
+4. 一般的な要件、実装計画、プログラム、テストは対象外差分なく残る。
+5. ローカル私用資料は削除されず、未追跡・ignore状態で利用できる。
+6. 現在のユーザー未コミット変更が保持される。
+7. force-push前後のremote refsと書き換え予定refsが一致する。
+8. clean cloneで削除対象の`git log --all -- <path>`が0件になる。
+9. 古いcloneからの再混入防止手順が記録される。
+10. fork、PR ref、cache、第三者cloneの残存可能性が確認・記録される。
+
+## 7. ロールバックと限界
+
+- force-push前は使い捨てmirrorを破棄すればリモートへ影響しない。
+- force-push後の復旧には、リポジトリ外へ保存した開始時ref一覧と隔離した旧cloneを使用する。復旧自体も全refのforce-pushになるため、別途明示承認を必要とする。
+- 第三者clone内のデータは削除できない。
+- forkの履歴はfork所有者の対応が必要である。
+- GitHubのPR参照とcached viewはSupport対応が必要な場合があり、非機密データでは対応されない可能性がある。
+- 履歴書き換え後はコミットSHA、署名、PR差分、SHA依存のリンクや自動化が変わる。
+
+## 8. Claude Codeレビューで確認してほしい点
+
+1. `--paths-from-file`と`--replace-text`を同時使用する方式で削除範囲が過不足なく適用されるか。
+2. path rename、全branch/tag、PR refs、fork、cacheの確認に漏れがないか。
+3. 最新版の追跡解除、履歴書き換え、clean clone移行の順序が再混入を防げるか。
+4. 対象外tree一致検証が誤削除を検知するのに十分か。
+5. 現在の未コミット変更とローカル私用資料を保護する手順が十分か。
+6. Public維持という制約下で、force-push前のストップゲートが十分か。
+7. Windows・非ASCIIパスでコマンド例に実行不能または曖昧な箇所がないか。
+8. GitHub Supportへ依頼できない場合の残存リスク表現が正確か。
+
+## 9. 実行開始条件
+
+- Claude CodeレビューのBlockerとHighを解消している。
+- `gh auth status`が成功する。
+- `git-filter-repo>=2.47`を利用できる。
+- private path manifestとreplacement manifestをリポジトリ外で確定している。
+- バックアップのSHA-256一致を確認している。
+- force-push直前に改めてユーザーの明示承認を得る手順が合意されている。
+
+## 10. 参考資料
+
+- GitHub Docs: [Removing sensitive data from a repository](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository)
+- git-filter-repo: [Official documentation](https://github.com/newren/git-filter-repo/blob/master/Documentation/git-filter-repo.txt)
