@@ -112,10 +112,28 @@ def _is_meeting_line(line: str) -> bool:
     return any(marker in normalized for marker in _MEETING_LINE_MARKERS)
 
 
-def clean_msg_body(body: str, *, limit: int = 2000) -> str:
-    """Remove common reply, signature, quote, meeting, and contact noise in memory."""
+def _without_contact_noise(line: str) -> str:
+    without_contacts = _URL.sub(" ", line)
+    without_contacts = _EMAIL_ADDRESS.sub(" ", without_contacts)
+    return _PHONE_NUMBER.sub(" ", without_contacts)
+
+
+def _validated_limit(limit: int) -> int:
     if limit <= 0:
         raise ValueError("limitには1以上の整数を指定してください。")
+    return limit
+
+
+def clean_document_text(text: str, *, limit: int = 2000) -> str:
+    """Remove contact noise from document text without applying email-specific rules."""
+    _validated_limit(limit)
+    cleaned_lines = [_without_contact_noise(line).rstrip() for line in text.splitlines()]
+    return "\n".join(cleaned_lines).strip()[:limit]
+
+
+def clean_msg_body(body: str, *, limit: int = 2000) -> str:
+    """Remove common reply, signature, quote, meeting, and contact noise in memory."""
+    _validated_limit(limit)
 
     lines = body.splitlines()
     cutoff = len(lines)
@@ -133,10 +151,7 @@ def clean_msg_body(body: str, *, limit: int = 2000) -> str:
             continue
         if _SIGNATURE_SEPARATOR.fullmatch(stripped):
             break
-        without_contacts = _URL.sub(" ", line)
-        without_contacts = _EMAIL_ADDRESS.sub(" ", without_contacts)
-        without_contacts = _PHONE_NUMBER.sub(" ", without_contacts)
-        cleaned_lines.append(without_contacts.rstrip())
+        cleaned_lines.append(_without_contact_noise(line).rstrip())
 
     return "\n".join(cleaned_lines).strip()[:limit]
 

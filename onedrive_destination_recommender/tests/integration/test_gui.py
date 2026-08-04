@@ -1,12 +1,25 @@
 import builtins
 import json
 import sys
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 pytestmark = pytest.mark.integration
+
+_DOCX_DOCUMENT_XML = (
+    '<?xml version="1.0"?>'
+    '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+    "<w:body><w:p><w:r><w:t>設備 秋田</w:t></w:r></w:p></w:body></w:document>"
+)
+
+
+def _write_docx(path: Path) -> Path:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("word/document.xml", _DOCX_DOCUMENT_XML)
+    return path
 
 
 def _temporary_runtime(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
@@ -66,6 +79,55 @@ def shared_tk_root():
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Tkinter Windows GUI test")
+def test_document_input_reports_status_without_adding_screen_elements(
+    tmp_path: Path,
+    shared_tk_root,
+) -> None:
+    from onedrive_destination_recommender.app import RecommenderApp
+
+    settings_path, catalog_path, audit_path, _destination = _temporary_runtime(tmp_path)
+    root = shared_tk_root
+    existing_widgets = set(root.winfo_children())
+    app = RecommenderApp(
+        root,
+        settings_path=settings_path,
+        catalog_path=catalog_path,
+        audit_path=audit_path,
+    )
+
+    try:
+        root.update_idletasks()
+        assert app.session is not None
+        widgets_before = len(root.winfo_children())
+        columns_before = len(app.candidate_tree["columns"])
+
+        app.session.select_files([_write_docx(tmp_path / "設備仕様.docx")])
+        app._render_all()
+        root.update_idletasks()
+
+        assert app.msg_status_var.get() == "本文を利用：1/1件"
+        assert app.auxiliary_status_var.get().startswith("ファイル本文の補助照合")
+        assert "秋田" in str(app.session.input_state.auxiliary_terms)
+        assert "秋田" not in app.search_var.get()
+
+        text_path = tmp_path / "メモ.txt"
+        text_path.touch()
+        app.session.select_files([text_path])
+        app._render_all()
+        root.update_idletasks()
+
+        assert app.msg_status_var.get() == "ファイル名のみ使用（本文解析なし）"
+        assert app.auxiliary_status_var.get() == "ファイル本文の補助検索語：なし"
+
+        assert len(root.winfo_children()) == widgets_before
+        assert len(app.candidate_tree["columns"]) == columns_before
+    finally:
+        for widget in root.winfo_children():
+            if widget not in existing_widgets:
+                widget.destroy()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Tkinter Windows GUI test")
 def test_step5_window_connects_search_confirmation_audit_and_codex(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -84,8 +146,8 @@ def test_step5_window_connects_search_confirmation_audit_and_codex(
     settings_path, catalog_path, audit_path, destination = _temporary_runtime(tmp_path)
     root = shared_tk_root
     clipboard: list[str] = []
-    root.clipboard_clear = clipboard.clear  # type: ignore[method-assign]
-    root.clipboard_append = clipboard.append  # type: ignore[method-assign]
+    monkeypatch.setattr(root, "clipboard_clear", clipboard.clear)
+    monkeypatch.setattr(root, "clipboard_append", clipboard.append)
     app = RecommenderApp(
         root,
         settings_path=settings_path,

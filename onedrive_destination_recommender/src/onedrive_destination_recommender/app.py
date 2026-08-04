@@ -675,20 +675,21 @@ class RecommenderApp:
     def _render_auxiliary_status(self) -> None:
         assert self.session is not None
         state = self.session.input_state
-        if state.kind is not InputKind.MSG:
+        if state.kind is InputKind.MANUAL:
             self.auxiliary_status_var.set("補助照合：使用なし")
             return
+        source = "MSG本文" if state.kind is InputKind.MSG else "ファイル本文"
         if not state.auxiliary_terms:
-            self.auxiliary_status_var.set("MSG本文の補助検索語：なし")
+            self.auxiliary_status_var.set(f"{source}の補助検索語：なし")
             return
         matched = any(candidate.auxiliary_match_count for candidate in self.session.candidates)
         if matched:
             self.auxiliary_status_var.set(
-                f"MSG本文の補助照合：使用（{len(state.auxiliary_terms)}語、候補に一致あり）"
+                f"{source}の補助照合：使用（{len(state.auxiliary_terms)}語、候補に一致あり）"
             )
         else:
             self.auxiliary_status_var.set(
-                f"MSG本文の補助照合：{len(state.auxiliary_terms)}語生成、候補への一致なし"
+                f"{source}の補助照合：{len(state.auxiliary_terms)}語生成、候補への一致なし"
             )
 
     def _set_prompt_text(self, text: str) -> None:
