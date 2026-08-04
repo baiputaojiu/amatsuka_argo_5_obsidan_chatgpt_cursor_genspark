@@ -1,16 +1,16 @@
-# Claude Code第5回レビュー依頼：GitHub公開履歴削除計画
+# Claude Code第6回レビュー依頼：GitHub公開履歴削除計画
 
 作成日：2026-08-04
 依頼先：Claude Code
-レビュー対象：第4回レビューのND-1・ND-3反映後の履歴削除計画
+レビュー対象：第5回レビューのNE-1〜NE-3反映後の履歴削除計画
 
 ---
 
 ## 1. Claude Codeへ渡す依頼文
 
-OneDrive年度別業務フォルダ向け「保存先レコメンダー」に関連する、Public GitHubリポジトリの履歴削除計画を第5回レビューしてください。
+OneDrive年度別業務フォルダ向け「保存先レコメンダー」に関連する、Public GitHubリポジトリの履歴削除計画を第6回レビューしてください。
 
-第4回レビューでOutlook直接D&D計画は「実装着手可」と判定済みで、今回その計画は変更していません。今回のレビュー対象は、履歴削除計画に残ったND-1（High）とND-3（Low）の反映だけです。
+第5回レビューでND-1とND-3は解消済みと判定され、NE-1（Medium）、NE-2（Low）、NE-3（Low）が新たに指摘されました。今回のレビュー対象は、この3件の反映だけです。Outlook直接D&D計画は第4回レビューで実装着手可となっており、変更していません。
 
 今回は**計画レビューだけ**が目的です。コード、文書、Git、GitHub、Outlook、OneDriveを変更しないでください。依存導入、テストデータ作成、commit、push、force-push、branch作成、worktree作成も禁止します。リポジトリ、依存ソース、Git履歴はread-onlyコマンドで確認して構いません。
 
@@ -20,15 +20,15 @@ OneDrive年度別業務フォルダ向け「保存先レコメンダー」に関
 |---|---|
 | リポジトリ | `https://github.com/baiputaojiu/amatsuka_argo_5_obsidan_chatgpt_cursor_genspark` |
 | ブランチ | `codex/outlook-direct-dnd-plan` |
-| 今回の比較元 | `d0332f9` |
+| 今回の比較元 | `6370494` |
 | レビュー対象 | `origin/codex/outlook-direct-dnd-plan`の最新tip |
 | 履歴削除計画 | `obsidan vault/30_Permanent/★業務/ファイル管理/実装計画_GitHub公開情報の履歴削除.md` |
 
 ```bash
 git fetch origin
 git rev-parse origin/codex/outlook-direct-dnd-plan
-git diff --stat d0332f9..origin/codex/outlook-direct-dnd-plan
-git diff d0332f9..origin/codex/outlook-direct-dnd-plan -- \
+git diff --stat 6370494..origin/codex/outlook-direct-dnd-plan
+git diff 6370494..origin/codex/outlook-direct-dnd-plan -- \
   "obsidan vault/30_Permanent/★業務/ファイル管理/実装計画_GitHub公開情報の履歴削除.md"
 ```
 
@@ -44,74 +44,55 @@ git diff d0332f9..origin/codex/outlook-direct-dnd-plan -- \
 
 ## 2. ユーザーが確定した境界
 
-次は変更提案の対象ではありません。計画内で矛盾なく実行・検証できるかだけを確認してください。
-
 - リポジトリはPublicのまま維持する。
 - 私用フォルダ構造・詳細資料は最新版と全branch/tag履歴から除去する。
 - ローカル資料と現在のユーザー未コミット変更を保持する。
+- ルート直下の`.gitignore`は、再混入防止のため削除対象のリポジトリ内パスとファイル名を公開状態で保持する。
+- ルート直下の`.gitignore` 1ファイルだけを固定文字列検査から除外し、各head/tag tipの期待SHA-256一致で検証する。
+- ネストした`.gitignore`は固定文字列検査の対象に残す。
+- 既定ブランチ準備用worktreeは自動削除せず、旧cloneと同じネットワーク操作禁止の隔離対象として記録する。
 - 履歴書き換えとforce-pushは、計画承認とforce-push直前の明示承認後に限る。
-- **`.gitignore`全体を、最新版および全commitの`private-verification-patterns.txt`による固定文字列検査から除外してよい。**
-- `.gitignore`の代替検証は、filter-repo実行前に作った期待ファイルと、書き換え後の各head/tag tipとのSHA-256比較とする。
-- 全commitの過去`.gitignore`本文を固定文字列検査しないことは、ユーザーが受容した境界である。完全一致行だけを例外にする代替案への変更提案は不要。
-- 既定ブランチ準備用worktreeは、ignore済みローカル資料を保護するため自動削除しない。旧cloneと同じネットワーク操作禁止の隔離対象として記録する。
 
-## 3. 第4回レビューからの修正
+## 3. 第5回レビューからの修正
 
-### 3.1 ND-1（High）
+### 3.1 NE-1（Medium）：受け入れ条件と公開残存情報
 
-第4回レビューでは、§3で追加する`.gitignore`行が`private-verification-patterns.txt`のリテラルを含むため、従来の`git grep -a -F -f`が必ず一致し、準備検査と全commit検査が必ず失敗すると指摘されました。
+次の3箇所を同じ境界へ統一しました。
 
-次の修正を行いました。
+1. §6 受け入れ条件3に、ルート直下の`.gitignore`が再混入防止規則として削除対象パスを意図的に保持する例外と、各head/tag tipの期待SHA-256一致を合格条件として追加。
+2. §7へ、ルート直下の`.gitignore`に残る削除対象のリポジトリ内パス・ファイル名は公開され続け、実際の業務フォルダ構造・詳細内容とは別の残存情報であることを追加。
+3. Task 8 Step 3の最終記録項目へ、ルート直下の`.gitignore`へ意図的に残す公開パス・名称を追加。
 
-1. §2.2へ、`.gitignore`を固定文字列検査から除外する理由と、期待SHA-256比較で担保する境界を追加。
-2. Task 3 Step 4の最新版検査を次のコマンドへ具体化。
+実際の業務フォルダ構造、詳細資料の本文、階層一覧を公開する変更ではありません。
 
-```powershell
-$cleanupLatestHits = git grep -a -n -F -f $cleanupVerificationPatterns -- . ':(exclude).gitignore'
-if ($LASTEXITCODE -gt 1) { throw "git grep failed for the prepared worktree." }
-if ($cleanupLatestHits) { throw "Residual private text in the prepared worktree." }
-```
+### 3.2 NE-2（Low）：既定ブランチ準備worktreeの検査対象
 
-3. Task 5 Step 2の全commit検査を次のコマンドへ変更。
+Task 3 Step 6へ、現在の作業ディレクトリに依存しない完全な検査コマンドを追加しました。
 
 ```powershell
-$cleanupAllCommits = git rev-list --all
-if (-not $cleanupAllCommits) { throw "No commits were found for verification." }
-foreach ($cleanupCommit in $cleanupAllCommits) {
-    $cleanupHits = git grep -a -n -F -f $cleanupVerificationPatterns $cleanupCommit -- . ':(exclude).gitignore'
-    if ($LASTEXITCODE -gt 1) { throw "git grep failed for commit $cleanupCommit" }
-    if ($cleanupHits) { throw "Residual private text in commit $cleanupCommit" }
-}
+$cleanupDefaultLatestHits = git -C $cleanupDefaultWorktree grep -a -n -F -f $cleanupVerificationPatterns -- . ':(exclude).gitignore'
+if ($LASTEXITCODE -gt 1) { throw "git grep failed for the default-branch preparation worktree." }
+if ($cleanupDefaultLatestHits) { throw "Residual private text in the default-branch preparation worktree." }
 ```
 
-4. Task 5 Step 2・3-2に、各head/tag tipの`.gitignore`を期待SHA-256と比較し、追加・欠落・変更を許可しないことを明記。
+### 3.3 NE-3（Low）：`.gitignore`除外範囲の表現
 
-### 3.2 ND-3（Low）
+§2.2、Task 3 Step 4、Task 5 Step 2の表現を、実測済みのpathspec挙動へ合わせました。
 
-既定ブランチ準備用worktreeと`codex/privacy-default-prep`の後処理が未定義だったため、Task 7 Step 4へ次を追加しました。
-
-- worktreeの絶対パス、旧commit SHA、作業ツリー状態を実行記録へ保存する。
-- ignore済みローカル資料が残り得るため自動削除しない。
-- 旧cloneと同じネットワーク操作禁止の隔離対象として扱う。
-- 将来削除するときは、バックアップと期待ファイルのSHA-256を再確認し、絶対パスを提示して別途明示承認を得る。
-
-### 3.3 対応不要とした指摘
-
-- ND-2はOutlook候補表の固定文言に関するLowで、第4回レビュー自身が「対応不要」と判定している。
-- Outlook直接D&D計画は第4回レビューで実装着手可となっており、今回変更していない。
+- `:(exclude).gitignore`で除外するのはルート直下の`.gitignore` 1ファイルだけ。
+- ネストした`.gitignore`は固定文字列検査の対象に残す。
+- 期待SHA-256比較で担保する対象もルート直下の`.gitignore`と明記。
 
 ## 4. 重点確認事項
 
-1. PowerShell 7、通常worktree、bare mirror cloneの各環境で、`git grep <commit> -- . ':(exclude).gitignore'`が意図どおり動作するか。
-2. Task 3 Step 4とTask 5 Step 2の両方で、`.gitignore`由来の必然的な一致を除外しつつ、grep自体のエラーを`$LASTEXITCODE -gt 1`で検出できるか。
-3. 各head/tag tipの`.gitignore`を期待SHA-256と比較するTask 5 Step 3-2が、ユーザー承認済みの除外境界と矛盾しないか。
-4. worktreeを自動削除せず、絶対パス・旧SHA・状態を記録して旧cloneとともに隔離する手順が、ローカル資料の保持と旧履歴の再混入防止を両立するか。
-5. ND-1・ND-3の修正により、NC-1〜NC-5、NB-1〜NB-8への既存対応が後退していないか。
-6. `gh auth status`失敗を実行前ストップゲートとして残していることに矛盾がないか。
+1. 受け入れ条件3、§7、Task 8 Step 3が、ルート直下の`.gitignore`へ公開状態で残るリポジトリ内パス・ファイル名を一貫して扱っているか。
+2. 実際の業務フォルダ構造・詳細内容と、再混入防止のため残すリポジトリ内パス・ファイル名の境界が明確か。
+3. `git -C $cleanupDefaultWorktree grep ...`が、既定ブランチ準備worktreeを確実に検査し、exit code 0・1・128を既存契約どおり扱えるか。
+4. `:(exclude).gitignore`の説明が、ルート直下だけを除外し、ネストした`.gitignore`を検査対象に残す実挙動と一致するか。
+5. NE-1〜NE-3の修正により、ND-1・ND-3、NC-1〜NC-5、NB-1〜NB-8への既存対応が後退していないか。
+6. `gh auth status`失敗が、実行開始条件として唯一残る外部環境ゲートであるという理解に漏れがないか。
 
 ## 5. 基準値と今回の変更範囲
-
-第4回レビューで、Outlook計画は実装着手可、履歴削除計画はND-1修正を条件として着手可と判定されています。
 
 今回の変更はMarkdown計画書とレビュー依頼文だけです。`onedrive_destination_recommender/`配下を変更していないため、次の既存基準値は再実行していません。
 
@@ -131,12 +112,13 @@ foreach ($cleanupCommit in $cleanupAllCommits) {
 - 条件付きで着手可
 - 計画修正後に再レビュー
 
-### 6.2 第4回指摘対応表
+### 6.2 第5回指摘対応表
 
 | ID | 判定 | 根拠 |
 |---|---|---|
-| ND-1 | 解消／一部解消／未解消／別問題を導入 |  |
-| ND-3 | 解消／一部解消／未解消／別問題を導入 |  |
+| NE-1 | 解消／一部解消／未解消／別問題を導入 |  |
+| NE-2 | 解消／一部解消／未解消／別問題を導入 |  |
+| NE-3 | 解消／一部解消／未解消／別問題を導入 |  |
 
 ### 6.3 新規指摘一覧
 
@@ -158,7 +140,7 @@ foreach ($cleanupCommit in $cleanupAllCommits) {
 ## Claude Codeへの渡し方
 
 1. 本文書の「Claude Codeへ渡す依頼文」をClaude Codeへ渡す。
-2. 第4回レビュー結果の原文も同時に渡す。
+2. 第5回レビュー結果の原文も同時に渡す。
 3. ブランチ`codex/outlook-direct-dnd-plan`の最新tipをread-onlyで参照させる。
 4. 実業務メール、添付、私用フォルダ資料は渡さない。
 5. 回答受領後、Blocker、High、Medium、Lowの順で採否を判断する。
