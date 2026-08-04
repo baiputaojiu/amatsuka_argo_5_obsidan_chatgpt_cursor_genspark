@@ -33,7 +33,7 @@
 | 対象リポジトリ | `baiputaojiu/amatsuka_argo_5_obsidan_chatgpt_cursor_genspark` |
 | 公開状態 | Publicを維持 |
 | 作成日 | 2026-08-04 |
-| 状態 | 実行前・Claude Code第4回レビュー待ち |
+| 状態 | 実行前・Claude Code第5回レビュー待ち |
 | 履歴書き換え方式 | `git-filter-repo --sensitive-data-removal --invert-paths` |
 | リモート更新方式 | 最終承認後の`git push --force --mirror origin` |
 
@@ -73,6 +73,8 @@ regex:(?<!/)private/local-detail-[^\r\n`/]+\.md==>***REMOVED***
 ```
 
 実フォルダ名の規則は、削除対象資料と存続文書の共通語をローカルで抽出して作る。ファイル自体はリポジトリ外に置き、内容を画面出力、Audit、コミットへ含めない。短い一般語、年度表現、製品名等まで過剰置換しないよう、各規則を`git grep`で事前確認する。書き換え後の`.gitignore`を期待ファイルとbyte比較し、固定規則または実フォルダ名規則がignore行を変更していないことをforce-push前に確認する。
+
+§3の再混入防止規則は、`private-verification-patterns.txt`に含まれる削除対象パスを`.gitignore`内へ意図的に保持する。固定文字列検査は行頭`/`の有無を区別できないため、最新版検査と全commit検査では`.gitignore`全体をパススペックで除外する。この除外はユーザーが明示的に承認した境界であり、`.gitignore`の正しさは既定・対象機能ブランチを含む各head/tag tipについて、filter-repo実行前に生成した期待ファイルとのSHA-256比較で担保する。
 
 ### 2.2.1 存続コード・テスト内の実名
 
@@ -248,7 +250,15 @@ PowerShellまたはGitのglob解釈に依存せず、実行時は`git ls-files`�
 
 - [ ] **Step 4: 存続ファイルから実構造情報を一般化する**
 
-一般文書は実名・具体階層・詳細だけを一般表現へ変更する。設定例とテストは実際の命名を示さない合成名へ変更し、期待値も同時に更新する。変更後、`private-verification-patterns.txt`の全リテラルが最新版の追跡ファイルで0件であり、`***REMOVED***`が設定値またはテスト入力へ入っていないことを確認する。
+一般文書は実名・具体階層・詳細だけを一般表現へ変更する。設定例とテストは実際の命名を示さない合成名へ変更し、期待値も同時に更新する。変更後、`.gitignore`を除く最新版の全追跡ファイルで`private-verification-patterns.txt`の全リテラルが0件であり、`***REMOVED***`が設定値またはテスト入力へ入っていないことを確認する。
+
+```powershell
+$cleanupLatestHits = git grep -a -n -F -f $cleanupVerificationPatterns -- . ':(exclude).gitignore'
+if ($LASTEXITCODE -gt 1) { throw "git grep failed for the prepared worktree." }
+if ($cleanupLatestHits) { throw "Residual private text in the prepared worktree." }
+```
+
+`.gitignore`はこのリテラル検査から全体を除外し、Step 5・6で保存する期待ファイルとのSHA-256一致で検証する。
 
 変更した存続ファイルと`.gitignore`は、`allowed-changed-paths.txt`に含まれることを確認してから、`git add -- <exact-path>`で1パスずつstageする。`git add -A`、`git commit -a`は使わない。私用資料のindex削除はStep 3の`git rm --cached`でstage済みの状態を維持する。
 
@@ -368,19 +378,19 @@ Expected: 0件。
 
 - [ ] **Step 2: 置換対象が全refから消えたことを確認する**
 
-`private-verification-patterns.txt`はregex式ではなく、消えるべきリテラルを1行1件で持つ。バイナリ判定による検査漏れを避けるため`-a`で全blobをテキストとして扱い、tip treeだけでなく`git rev-list --all`が返す全到達可能commitを検査する。
+`private-verification-patterns.txt`はregex式ではなく、消えるべきリテラルを1行1件で持つ。バイナリ判定による検査漏れを避けるため`-a`で全blobをテキストとして扱い、tip treeだけでなく`git rev-list --all`が返す全到達可能commitを検査する。§3の再混入防止規則を意図的に保持する`.gitignore`だけは、ユーザー承認済みの例外として全commitのリテラル検査から除外する。
 
 ```powershell
 $cleanupAllCommits = git rev-list --all
 if (-not $cleanupAllCommits) { throw "No commits were found for verification." }
 foreach ($cleanupCommit in $cleanupAllCommits) {
-    $cleanupHits = git grep -a -n -F -f $cleanupVerificationPatterns $cleanupCommit
+    $cleanupHits = git grep -a -n -F -f $cleanupVerificationPatterns $cleanupCommit -- . ':(exclude).gitignore'
     if ($LASTEXITCODE -gt 1) { throw "git grep failed for commit $cleanupCommit" }
     if ($cleanupHits) { throw "Residual private text in commit $cleanupCommit" }
 }
 ```
 
-`***REMOVED***`の出現は許容する。Task 1でコミットメッセージに該当があった場合は、書き換え後の`git log --all --format='%B'`にも同じリテラル検査を行う。
+`***REMOVED***`の出現は許容する。`.gitignore`は各head/tag tipの期待SHA-256比較をTask 5 Step 3-2で必須とし、期待側に存在しない追加・欠落・変更を許可しない。Task 1でコミットメッセージに該当があった場合は、書き換え後の`git log --all --format='%B'`にも同じリテラル検査を行う。
 
 - [ ] **Step 3: 対象外treeの一致を機械比較する**
 
@@ -462,6 +472,8 @@ Expected: 私用資料はstatusへ現れず、履歴は0件。復元したユー
 
 共同利用者がいる場合は全員へ再cloneを依頼する。旧履歴をmergeまたはpushしない。
 
+既定ブランチ準備用の`$cleanupDefaultWorktree`とローカルブランチ`codex/privacy-default-prep`について、絶対パス、旧commit SHA、作業ツリー状態を実行記録へ保存する。このworktreeにはignore済みのローカル資料が残り得るため自動削除せず、旧cloneと同じネットワーク操作禁止の隔離対象として扱う。将来削除する場合は、バックアップと期待ファイルのSHA-256一致を再確認し、削除対象の絶対パスを提示して別途ユーザーの明示承認を得る。
+
 ### Task 8: GitHub残存参照の確認
 
 - [ ] **Step 1: forkとPR参照を再確認する**
@@ -509,7 +521,14 @@ cached view、PR ref、LFS orphanが残り、GitHubが機密情報と判断し�
 | NC-4 全refの期待差分を人が確認する運用負荷 | 採用。人は規則・適用順・合成fixture・2つの最新版準備差分を確認し、その他refの期待内容はfilter-repo実行前に機械生成する。Task 4 Step 2へ反映 |
 | NC-5 `HEAD`行がref集計へ混入する | 採用。Task 1 Step 2で`refs/*`だけに絞ってから集計する |
 
-### 8.2 第4回レビューで確認してほしい点
+### 8.2 第4回レビュー指摘の反映
+
+| 指摘 | 判定・反映先 |
+|---|---|
+| ND-1 `.gitignore`が検証リテラルへ必ず一致する | Highとして採用。ユーザー判断により`.gitignore`全体を最新版・全commitの固定文字列検査から除外し、各head/tag tipの期待SHA-256比較で担保する。§2.2、Task 3 Step 4、Task 5 Step 2・3-2へ反映 |
+| ND-3 一時worktreeとブランチの後処理が未定義 | 採用。ignore済みローカル資料を保護するため自動削除せず、絶対パス・旧SHA・状態を記録して旧cloneとともに隔離する。削除はSHA再確認と別途承認を必須とする。Task 7 Step 4へ反映 |
+
+### 8.3 第5回レビューで確認してほしい点
 
 1. `--paths-from-file`と`--replace-text`を同時使用する方式で削除範囲が過不足なく適用されるか。
 2. path rename、全branch/tag、PR refs、fork、cacheの確認に漏れがないか。
@@ -521,7 +540,8 @@ cached view、PR ref、LFS orphanが残り、GitHubが機密情報と判断し�
 8. GitHub Supportへ依頼できない場合の残存リスク表現が正確か。
 9. 設定例・テストを合成名へ変更し、一般的な年度探索要件だけを残す境界が一貫しているか。
 10. 承認済み規則からfilter-repo実行前に期待内容を機械生成し、SHA-256比較する方式がtree比較の除外による検査穴を塞いでいるか。
-11. 全commitのblob、コミットメッセージ、バイナリ扱いblob、`refs/pull/*`の検査と停止条件が十分か。
+11. `.gitignore`全体を全commitのリテラル検査から除外し、各head/tag tipの期待SHA-256で担保するユーザー承認済み境界に実行上の矛盾がないか。
+12. 既定ブランチ準備用worktreeを自動削除せず、旧cloneと同じ隔離対象として記録する手順がローカル資料と旧履歴の再混入防止を両立するか。
 
 ## 9. 実行開始条件
 
