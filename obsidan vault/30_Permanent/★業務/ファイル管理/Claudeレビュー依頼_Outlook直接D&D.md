@@ -1,208 +1,246 @@
-# Claude Codeレビュー依頼：クラシックOutlook直接D&D実装計画
+# Claude Code再レビュー依頼：Outlook直接D&DとGitHub履歴削除の実装計画
 
 作成日：2026-08-04
 依頼先：Claude Code
-レビュー対象：実装前の計画書
+レビュー対象：実装前の計画書2件
 
 ---
 
 ## 1. Claude Codeへ渡す依頼文
 
-OneDrive年度別業務フォルダ向け「保存先レコメンダー」へ、クラシックOutlookからメールと添付ファイルを直接D&Dする機能の実装計画をレビューしてください。
+OneDrive年度別業務フォルダ向け「保存先レコメンダー」について、次の実装前計画2件を再レビューしてください。
 
-今回は**実装前レビューだけ**が目的です。コードや文書の編集、依存導入、テストデータ作成、コミット、push、ブランチ作成、Outlook・OneDrive上の操作は行わないでください。リポジトリと公開資料の読み取り、read-onlyのGit・検索コマンドは利用して構いません。
+1. クラシックOutlookからメール・添付ファイルを直接D&Dし、送信者表示名を推薦へ利用する計画
+2. PublicのGitHubリポジトリから私用フォルダ資料を全履歴ごと除去する計画
 
-### 対象リポジトリとコミット
+今回は**計画レビューだけ**が目的です。コード・文書・Git状態・GitHub設定を変更しないでください。依存導入、テストデータ作成、commit、push、force-push、branch作成、worktree作成、Outlook・OneDrive操作も禁止します。リポジトリ、依存ソース、Git履歴はread-onlyコマンドで確認して構いません。
+
+### 対象リポジトリとGit範囲
 
 | 項目 | 値 |
 |---|---|
 | リポジトリ | `https://github.com/baiputaojiu/amatsuka_argo_5_obsidan_chatgpt_cursor_genspark` |
 | ブランチ | `codex/outlook-direct-dnd-plan` |
-| 比較元コミット | `46563f9` |
-| レビュー対象コミット | `23107f5` |
+| 比較元 | `42a69f4` |
+| 計画コミット | `05cfc1a` |
 | 対象プロジェクト | `onedrive_destination_recommender/` |
-| レビュー対象文書 | `obsidan vault/30_Permanent/★業務/ファイル管理/実装計画_Outlook直接D&D.md` |
+| Outlook計画 | `obsidan vault/30_Permanent/★業務/ファイル管理/実装計画_Outlook直接D&D.md` |
+| 履歴削除計画 | `obsidan vault/30_Permanent/★業務/ファイル管理/実装計画_GitHub公開情報の履歴削除.md` |
 
 ```bash
 git fetch origin
-git show 23107f5:"obsidan vault/30_Permanent/★業務/ファイル管理/実装計画_Outlook直接D&D.md"
-git diff 46563f9..23107f5 -- "obsidan vault/30_Permanent/★業務/ファイル管理/実装計画_Outlook直接D&D.md"
+git show 05cfc1a:"obsidan vault/30_Permanent/★業務/ファイル管理/実装計画_Outlook直接D&D.md"
+git show 05cfc1a:"obsidan vault/30_Permanent/★業務/ファイル管理/実装計画_GitHub公開情報の履歴削除.md"
+git diff --stat 42a69f4..05cfc1a
+git diff 42a69f4..05cfc1a -- \
+  "obsidan vault/30_Permanent/★業務/ファイル管理/実装計画_Outlook直接D&D.md" \
+  "obsidan vault/30_Permanent/★業務/ファイル管理/実装計画_GitHub公開情報の履歴削除.md"
 ```
 
 別リポジトリの`baiputaojiu/myproject`ではありません。
 
+### 機密資料の取り扱い
+
+履歴削除計画§2.1が削除対象として定義する私用資料は、レビューのために開く必要がありません。次を守ってください。
+
+- 削除対象資料の本文を読まない。
+- 実フォルダ名、階層、件数、説明を回答へ引用しない。
+- 削除対象の存在確認は`git ls-files`、`git log --name-status`、`git filter-repo`仕様の検討に限定する。
+- 実メール、添付、ローカルruntime dataを探索しない。
+- 計画書に含まれる合成名だけを例示に使用する。
+
 ### 先に読む資料
 
-次の順で確認してください。
+1. `実装計画_Outlook直接D&D.md` — 再レビュー対象A
+2. `実装計画_GitHub公開情報の履歴削除.md` — レビュー対象B
+3. 初回レビュー結果として依頼者から渡すテキスト — 指摘IDの原文
+4. `onedrive_destination_recommender/README.md`
+5. `onedrive_destination_recommender/src/onedrive_destination_recommender/app.py`
+6. `onedrive_destination_recommender/src/onedrive_destination_recommender/session.py`
+7. `onedrive_destination_recommender/src/onedrive_destination_recommender/msg_reader.py`
+8. `onedrive_destination_recommender/src/onedrive_destination_recommender/terms.py`
+9. `onedrive_destination_recommender/src/onedrive_destination_recommender/ranking.py`
+10. 関連する`tests/unit/`と`tests/integration/test_gui.py`
+11. `.gitignore`
 
-1. `obsidan vault/30_Permanent/★業務/ファイル管理/実装計画_Outlook直接D&D.md` — レビュー対象
-2. `onedrive_destination_recommender/README.md` — 現在の操作・安全制約・確認状況
-3. `onedrive_destination_recommender/src/onedrive_destination_recommender/app.py` — 現行D&DとGUI接続
-4. `onedrive_destination_recommender/src/onedrive_destination_recommender/session.py` — 入力規則と状態更新
-5. `onedrive_destination_recommender/src/onedrive_destination_recommender/msg_reader.py` — MSG解析と現行の書込み禁止境界
-6. `onedrive_destination_recommender/src/onedrive_destination_recommender/document_reader.py` — Office・PDF本文抽出
-7. `onedrive_destination_recommender/tests/unit/test_msg_reader.py`
-8. `onedrive_destination_recommender/tests/unit/test_session.py`
-9. `onedrive_destination_recommender/tests/integration/test_gui.py`
-10. `obsidan vault/30_Permanent/★業務/ファイル管理/実装計画_ローカルファイルD&D.md` — 既存Explorer D&Dの設計・実測
-11. `obsidan vault/30_Permanent/★業務/ファイル管理/要件定義_OneDrive保存先レコメンダー.md` — 現行要件
+私用フォルダ地図、生成詳細ページ、生成目次は読まないでください。
 
-要件定義書にはOutlook直接D&Dを対象外とした過去の記録があります。今回の計画は、その対象外項目を新しい小改修として明示的に解除するものです。その他の安全制約は維持します。
+## 2. ユーザーと合意済みの前提
 
-### ユーザーと合意済みの前提
+次は要件として固定し、変更提案ではなく計画が満たすかを確認してください。
 
-次はレビューで変更提案の対象にせず、実装方法が満たしているかを確認してください。
+### 2.1 Outlook入力
 
 - 対象はクラシックOutlook for Windows
-- Outlookのメール本体と添付ファイルの両方を直接D&Dできるようにする
-- メール1通をドロップした場合、メールとその添付ファイル群を1案件として扱う
+- メール本体と添付ファイルの両方を直接D&Dできる
+- メール1通とその内部添付全体を1案件として扱う
 - 添付ファイルは0件でも1件以上でもよい
-- 今回のメールは1通ずつ。将来は複数メールD&Dへ拡張したい
+- 今回はメール1通ずつ。将来は複数メールD&Dへ拡張したい
 - 添付ファイルだけの単一・複数D&Dも受け付ける
-- 新しいOutlook for Windowsは今回の対象外
+- 新しいOutlook for Windowsは対象外
 
-### 変更しない安全制約
+### 2.2 送信者
 
-- OneDrive上のファイル・フォルダを変更、移動、削除、作成しない
-- D&Dだけで候補確定、クリップボード更新、Audit追記を行わない
-- メール本文、添付本文、検索語全文を設定・カタログ・Audit・ログへ残さない
-- 外部サービスやAIへ自動送信しない
-- 新しい入力が失敗したら直前の入力、検索語、候補、確定パスを維持する
-- ファイル選択、Explorer D&D、Explorer Preview、確定・コピーを回帰させない
+- 送信者情報を今回から推薦へ利用する
+- Outlookの送信者表示名を使う
+- 同じ表示名の別人をメールアドレスで区別しない
+- `山田 太郎`、`山田　太郎`、`山田太郎`のような空白差を同一送信者として扱う
+- 送信者を取得できなくても他の情報で処理を継続する
+- 送信者表示名をAudit、設定、カタログ、ログへ保存しない
 
-## 2. 最優先のレビュー観点
+### 2.3 GitHub公開履歴
 
-### 2.1 TkDND方式の実現性
+- リポジトリはPublicのまま維持する
+- 私用フォルダ構造・詳細資料は最新版だけでなく全branch/tagの履歴から除去する
+- ローカル資料は削除せず未追跡・ignore状態で保持する
+- 現在のユーザー未コミット変更を保持する
+- 履歴書き換えはレビュー承認後に実施する
+- force-push直前に影響範囲と検証結果を提示し、ユーザーの明示承認をもう一度得る
 
-計画では既存の`tkinterdnd2==0.6.2`が公開する次のタイプを明示登録します。
+## 3. 初回Outlook計画レビューの反映確認
 
-```python
-DND_FILES
-FileGroupDescriptorW  # "FileGroupDescriptorW - FileContents"
-FileGroupDescriptor   # "FileGroupDescriptor - FileContents"
-```
+初回レビューは「計画修正後に再レビュー」でした。指摘はB-1、B-2、H-1、H-2、M-1〜M-7、L-1〜L-3です。計画§8の反映表だけを信頼せず、本文・Task・コード例・受け入れ条件が実際に修正されているか確認してください。
 
-クラシックOutlookの仮想ファイルをTkDNDが一時領域へ実体化し、イベントへパスを返す前提です。次を確認してください。
+特に次を再検証してください。
 
-- `tkinterdnd2==0.6.2`同梱のTkDND 2.10.1で、このタイプ対がdrop targetとして実際に有効か
-- `drop_target_register()`へ3タイプを同時登録する呼び方が正しいか
-- `set_dropfile_tempdir()`をstaging切替ごとに再設定できるか
-- Unicode版とANSI版の順序に意味または副作用があるか
-- 現行`DND_FILES`のExplorer D&Dと競合しないか
-- 現行方式で不足する場合、Task 1のGo/No-Goで止める条件が十分か
+1. Tcl辞書補正後に`DND_FILES`だけを登録する方式が、TkDND 2.10.1の`generic::supported_type`、`GetWindowCommonTypes`、ネイティブ`GetData()`の動作と整合するか。
+2. `root.tk.eval()`失敗時にOutlookだけを無効化し、Explorer D&Dを維持できる接続になっているか。
+3. DragEnter時実体化に対する`discard_unreferenced(keep)`が、正しいイベントパス、外部パス、ディレクトリ、同名上書きを安全に扱えるか。
+4. `accept_staging()`失敗後も新stagingを返す契約が実装可能で、セッションが一時パスを参照したまま壊れる窓がないか。
+5. `PureWindowsPath.name`と`resolve().is_relative_to()`の順序、Windows予約名、空basename、末尾空白・ピリオドへの対策が十分か。
+6. 保存前target、文書解析後parsed、メールwarning、文書warningの定義が矛盾しないか。
+7. 一時MSG・添付の寿命案内が実際のCodex相談フローと一致するか。
+8. 公開動作のテストが私有関数や実装詳細だけを固定していないか。
 
-可能ならMicrosoftのShell仕様、TkDNDの公式ソースまたはマニュアル、`tkinterdnd2`の現行ソースを根拠にしてください。推測は推測と明記してください。
+## 4. 送信者推薦設計のレビュー
 
-### 2.2 一時領域の安全性
-
-`DropWorkspaceManager`は、受理済みの`current`と次の`staging`を別ディレクトリとして所有します。次を重点確認してください。
-
-- 成功時、失敗時、ファイル選択への置換、手動検索復帰、root破棄の全経路が閉じているか
-- セッション更新と`accept_staging()`の順序で、新旧どちらかの入力が壊れる窓がないか
-- 空イベント、ランタイム未読込、TkDND初期化失敗でも一時実体が残らないか
-- 外部ローカルファイルを誤削除できないAPI境界になっているか
-- TkDNDが同名ファイルをstaging内で上書きする可能性への対処が必要か
-- 正常終了だけを対象にし、異常終了後の古いtemp自動掃除を今回入れない判断が妥当か
-
-### 2.3 MSG添付の保存境界
-
-現行`msg_reader.py`は、添付ファイル名を読むだけで、添付実体を保存しません。現行テストも`open()`、`.write()`、`logging`等の書込み・診断経路を禁止しています。
-
-今回、対応文書本文を読むために、次の1経路だけを許可する計画です。
-
-```text
-Outlook Attachment.SaveAsFile
-  → TemporaryDirectory(prefix="odr-msg-attachments-")
-  → build_document_terms
-  → 関数終了時に削除
-```
+計画は送信者名を一般主検索語へ混ぜず、空白を除去した`sender_key`と`PreparedFolder.sender_key_path`を専用照合し、主検索語一致数へ最大1件加算します。
 
 次を確認してください。
 
-- `probe_msg_access()`では保存せず、`build_msg_search_terms()`だけが保存する境界が明確か
-- 対応拡張子だけを保存し、未対応添付は名前だけ使う方針が妥当か
-- basename化と添付index接頭辞で、パストラバーサル・予約名・同名衝突を十分防げるか
-- `Attachment.SaveAsFile()`の部分失敗をメール全体の失敗にしない実装が可能か
-- 添付本文由来語を補助検索語だけへ入れる判断が既存ランキングと整合するか
-- 生本文と一時パスが公開型、InputState、Audit、Codex相談プロンプトへ漏れないか
-- `MsgSearchTerms`へ追加する3件の集計値が最小か。より単純で矛盾しない型があるか
+- `NFKC + casefold + Unicode空白除去`が合意済みの空白差同一を満たすか
+- 同じ表示名の別人を区別しない要件にメールアドレス非使用が一貫しているか
+- 相対パス全体へのsubstring照合で階層境界をまたぐ誤一致が起きないか
+- 送信者一致を主一致1件とする重みが、既存の年度優先、主一致数、補助一致、折り畳みと矛盾しないか
+- 送信者一致だけの候補を表示する判断が要件から明確か
+- 検索語編集後も自動送信者キーを維持するUXが既存の本文補助語と整合するか
+- `sender_key`または生表示名がCandidate、InputState、Audit、Codex相談、例外、ログへ漏れないか
+- 将来の複数メール対応のための抽象化が過剰でないか
 
-### 2.4 将来の複数メール対応
+曖昧な仕様があれば、実装前にユーザーへ確認すべき質問として明記してください。
 
-今回は複数MSGを拒否し、`build_msg_search_terms()`を1通分の独立境界として保ちます。将来はこの関数をメールごとに反復する想定です。
+## 5. GitHub履歴削除計画のレビュー
 
-- 今回の型と責務で複数通へ自然に拡張できるか
-- 将来対応のためだけの不要な抽象化が混入していないか
-- 複数通対応時に問題になる一時領域、検索語量、重複、状態表示の論点を、今回のBlockerと将来課題に分けてください
+この計画は強い破壊的操作を含みます。コマンドを実行せず、次を厳密に確認してください。
 
-### 2.5 TDD計画と受け入れ条件
+### 5.1 削除範囲
 
-- 各Taskが失敗先行テスト→最小実装→合格確認の順になっているか
-- テストが実装詳細ではなく利用者に見える挙動と安全性を固定しているか
-- 実Outlookでしか確認できない事項と自動化できる事項の分離が妥当か
-- 添付なし、添付あり、添付だけ、部分失敗、複数メール拒否、既存Explorer回帰が揃っているか
-- テストコマンド、pytest marker、ファイルパス、型名、関数名に誤りがないか
-- 受け入れ条件13件に、削れる重複または重大な不足がないか
+- `--paths-from-file`の`literal:`と`glob:`が非ASCII・空白パスで意図どおり機能するか
+- `--replace-text`のregex構文とnegative lookbehindが`git-filter-repo>=2.47`で機能するか
+- 実フォルダ語句の置換が一般コード・テスト・`.gitignore`を壊す可能性を検知できるか
+- rename・移動された過去パスの発見方法が十分か
+- heads/tags以外の参照、PR refs、fork、cached view、LFS objectの扱いが正確か
 
-## 3. レビュー方針
+### 5.2 作業順序とデータ保護
 
-- 文体、命名の好み、将来あり得るだけの問題は指摘しないでください。
-- 実装開始前に直す価値のある、再現可能な欠陥・矛盾・未定義・安全性問題を優先してください。
-- 指摘には、該当する計画書の節または行、影響、発生条件、具体的修正案を含めてください。
-- 現行コードを読まずに計画書だけから推測しないでください。
-- 計画にない新規依存、Outlookアドイン、独自Win32 OLE実装を安易に追加しないでください。必要と判断する場合は、既存方式が成立しない根拠と追加コストを示してください。
-- 「将来複数メールに対応するから」という理由だけで、今回キュー、並列処理、複数案件UI、永続モデルを追加しないでください。
+- 現在のdirty worktreeを変更せず、使い捨てmirrorで書き換える方式が安全か
+- `git rm --cached`後もローカル資料を確実に保持できるか
+- ユーザー変更の外部バックアップとSHA-256検証が十分か
+- 準備push後にremote refs基準を取り直す順序が正しいか
+- `git-filter-repo`が`origin`を削除する場合の復元手順が安全か
+- bare mirrorで`filter-repo` metadataの場所を`git rev-parse --git-path`から得る方針が正しいか
+- commit mapを使う対象外tree比較が、誤削除・誤置換を検知できるか
+- default branch以外を含む全refへ再混入防止が行き渡るか
+- force-pushの部分成功時に追加操作をせず停止する方針が妥当か
+- fresh clone移行前に旧cloneを隔離する手順が十分か
+
+### 5.3 実行可能性
+
+現在の環境では、計画作成時点の`gh auth status`がinvalid tokenでした。計画はこれを実行前Blockerとして停止する方針です。ほかに必要なGitHub権限、branch protection、GitHub Support条件、共同利用者調整があれば指摘してください。
+
+GitHubが非機密データのcache削除を拒否し得る点と、第三者cloneを削除できない点を踏まえ、「完全削除」という表現が過大でないかも確認してください。
+
+## 6. テスト計画と基準値
+
+計画改訂後、プログラム本体を変更せず次を確認済みです。
+
+- 単体テスト：`146 passed, 7 deselected`
+- 結合テスト：`6 passed, 1 skipped, 146 deselected`
+- skip理由：`ODR_TEST_MSG_PATH`未設定
+- `ruff check src tests`：合格
+- `ruff format --check src tests`：25 files already formatted
+
+各Taskについて次を確認してください。
+
+- 失敗先行テスト、失敗理由、最小実装、合格確認、コミットの順序があるか
+- テスト名、対象ファイル、公開インターフェース、コマンドに誤りがないか
+- 実Outlookでしか確認できない項目と自動テストが分離されているか
+- Outlook計画の受け入れ条件16件、履歴削除計画の受け入れ条件10件がTaskへ対応するか
+- 重複、実装不能な例、重大な未検証経路がないか
+
+## 7. レビュー方針
+
 - 資料から確認できる事実、合理的な推論、提案を区別してください。
+- 現行コードと依存ソースを読まずに計画書だけから推測しないでください。
+- 文体、好み、今回の要件に影響しない将来論は指摘しないでください。
+- 実装開始前またはforce-push前に直す価値のある欠陥、矛盾、未定義、安全性問題を優先してください。
+- 指摘には計画書名、節または行、影響、発生条件、具体的修正案を含めてください。
+- 計画にないOutlookアドイン、独自Win32 OLE実装、別Gitホスティングへの移行を安易に追加しないでください。
+- 履歴削除について「バックアップがあるから安全」とせず、remote refs、対象外tree、部分push、再混入を個別に評価してください。
 
-## 4. 希望する回答形式
+## 8. 希望する回答形式
 
-### 4.1 総評
+### 8.1 総評
 
-- 実装着手可／条件付きで着手可／計画修正後に再レビュー、のいずれか
-- 最大の技術リスク3件
-- 計画が過剰または不足している箇所
+計画ごとに次のいずれかを判定してください。
 
-### 4.2 指摘一覧
+- 実装／実行着手可
+- 条件付きで着手可
+- 計画修正後に再レビュー
 
-重大度順に、次の表で示してください。
+各計画について最大のリスク3件を示してください。
 
-| ID | 重大度 | 計画書の節・行 | 指摘 | 影響・発生条件 | 具体的修正案 |
-|---|---|---|---|---|---|
+### 8.2 指摘一覧
+
+| ID | 対象計画 | 重大度 | 節・行 | 指摘 | 影響・発生条件 | 具体的修正案 |
+|---|---|---|---|---|---|---|
 
 重大度：
 
-- Blocker：方式が成立しない、データ損失・情報漏えい、実装開始不能
-- High：主要受け入れ条件違反または重大な回帰
-- Medium：特定条件での誤動作、テスト不足、計画の重要な曖昧さ
+- Blocker：方式不成立、情報漏えい・データ損失、実行開始不能
+- High：主要受け入れ条件違反、重大な回帰、復旧困難
+- Medium：特定条件の誤動作、重要な曖昧さ、テスト不足
 - Low：実装前に直す価値はあるが主要動作を妨げない
 
 指摘がない重大度は「なし」と明記してください。
 
-### 4.3 要件・Task対応表
+### 8.3 初回指摘対応表
 
-受け入れ条件13件について、実装Taskとテストが存在するかを確認してください。
+B-1〜L-3の各IDについて、`解消／一部解消／未解消／別問題を導入`を判定し、根拠となる節を示してください。
 
-| 受け入れ条件 | 実装Task | 自動テスト | 手動確認 | 判定 |
-|---|---|---|---|---|
+### 8.4 要件・Task対応表
 
-### 4.4 計画書へ反映する修正文
+Outlook 16件と履歴削除10件の各受け入れ条件について、Task、自動検証、手動検証、判定を示してください。
 
-採用を推奨する変更について、そのまま計画書へ反映できる具体的な日本語またはコード断片を提示してください。
+### 8.5 計画書へ反映する修正文
 
-### 4.5 実装開始前チェックリスト
+採用を推奨する変更は、そのまま貼り付けられる日本語、型定義、テスト例、PowerShellコマンドとして提示してください。
 
-未解決事項だけを、優先順に最大10件で示してください。未解決事項がなければ「なし」としてください。
+### 8.6 開始前チェックリスト
 
-## 5. 最後に
+未解決事項だけを計画ごとに優先順で最大10件示してください。なければ「なし」としてください。
 
-レビュー結果だけを返してください。コードやファイルは変更しないでください。
+## 9. 最後に
+
+レビュー結果だけを返してください。コード、計画書、Git、GitHub、Outlook、OneDriveを変更しないでください。
 
 ---
 
 ## Claude Codeへの渡し方
 
-1. 上記「Claude Codeへ渡す依頼文」をClaude Codeへ貼り付ける。
-2. Claude Codeにリポジトリ、ブランチ、比較元コミット、レビュー対象コミットを直接参照させる。
-3. 実業務メールや添付ファイルは渡さない。
-4. GitHubへアクセスできない場合だけ、本計画書と§1の参照資料をローカルから読ませる。
-5. 回答を受領したら、Blocker、High、Mediumの順に採否を判断し、本計画書へ反映する。
+1. 本文書の「Claude Codeへ渡す依頼文」をClaude Codeへ渡す。
+2. 初回レビュー結果の原文も同時に渡す。
+3. Claude Codeにブランチと計画コミット`05cfc1a`をread-onlyで参照させる。
+4. 実業務メール、添付、私用フォルダ資料は渡さない。
+5. 回答受領後、Blocker、High、Medium、Lowの順で採否を判断する。
+6. レビュー承認前に実装または履歴書き換えへ進まない。
