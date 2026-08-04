@@ -45,7 +45,7 @@
 | 初回レビュー対象 | `23107f5` |
 | 初回レビュー判定 | 計画修正後に再レビュー |
 | 対象プロジェクト | `onedrive_destination_recommender/` |
-| 状態 | 実装前・Claude Code第3回レビュー待ち |
+| 状態 | 実装前・Claude Code第4回レビュー待ち |
 
 本計画の再レビューが完了するまで、プログラム本体、テスト、依存関係、README、要件定義書は変更しない。
 
@@ -270,6 +270,23 @@ def rank_candidates(
 
 `sender_key`自体は`Candidate.matched_primary_terms`へ含めない。代わりに`Candidate.sender_matched`だけを`True`にし、候補表では生の送信者名ではなく固定文言`送信者一致`を一致理由へ加える。これにより送信者だけで成立した候補も理由を確認でき、送信者表示名をCandidateへ保存しない。
 
+`Candidate.sender_matched`は既定値を持たない必須フィールドとする。全Candidateの単一構築点である`_make_candidate()`へ`inherited_sender_matched: bool | None = None`を追加し、通常候補では`sender_key`から計算した値、兄弟折り畳みで生成する親候補では継承値を設定する。兄弟内に送信者一致候補と一般主検索語だけの候補が混在しても一致理由を失わないよう、`_fold_siblings()`は先頭要素ではなく兄弟全体の論理和を渡す。
+
+```python
+inherited_sender_matched = any(
+    sibling.sender_matched for sibling in siblings
+)
+parent = _make_candidate(
+    folder=parent_folder,
+    primary_terms=primary_terms,
+    auxiliary_terms=auxiliary_terms,
+    inherited_primary_count=first.primary_match_count,
+    inherited_sender_matched=inherited_sender_matched,
+)
+```
+
+この必須フィールドに`False`の既定値を置かない。新しいCandidate構築経路で送信者一致の引き渡しを忘れた場合に、テストまたは型・実行時エラーで検出できる状態を維持する。
+
 `InputState`へ`sender_key: str | None`を追加し、MSG入力中だけ保持する。`select_files()`、カタログ再読込、検索語編集後の再ランキングでは同じキーを渡し、`reset_manual()`または次の入力で破棄する。送信者は本文と同様の自動情報であり、検索欄へ生表示しない。
 
 ### 3.5 検索情報の統合規則
@@ -310,7 +327,7 @@ def rank_candidates(
 
 実装時は`superpowers:using-git-worktrees`でユーザーの通常作業ツリーから分離した実装用worktreeを1つ作り、そのworktreeをCursorで開く。Agents WindowのAgent Tabsを横並びまたはグリッドで表示する。全エージェントが同時に動作する必要はなく、現在動作中の役割が画面で分かることを運用要件とする。Background AgentはLinuxリモート環境であり、クラシックOutlookの実機確認に使えないため採用しない。
 
-1. **Coordinatorタブ**：本計画、Global Constraints、進捗ledgerを読み、Taskを順番に割り当てる。コードは編集しない。
+1. **Coordinatorタブ**：本計画、Global Constraints、進捗ledgerを読み、Taskを順番に割り当てる。コードは編集しない。Task 1のクラシックOutlook実機Go/No-Goは、ledgerに`pending`、`passed`、`failed`のいずれか、実施者、実施日時、観測結果を記録し、`passed`になるまでTask 1を完了扱いにしない。
 2. **Implementerタブ**：Taskごとに新しいタブを使い、RED確認、最小実装、GREEN確認、自己レビュー、Task単位のcommitまで担当する。同じ作業ツリーへ書き込むImplementerは同時に1つだけとする。
 3. **Task Reviewerタブ**：Implementerのcommit差分をread-onlyで確認し、仕様適合とコード品質を別々に判定する。テスト報告を読み、コードや文書は変更しない。
 4. **Fix loop**：重要な指摘は元のImplementerタブへ戻して修正し、同じReviewerタブで差分だけを再確認する。最大5周とし、解消しない構造的問題はユーザーへ報告して停止する。
@@ -379,7 +396,7 @@ assert "dict set _tkdnd2platform DND_Files" in evaluated_scripts
 
 - [ ] **Step 7: クラシックOutlookでGo/No-Go確認する**
 
-機密情報を含まないダミーメール1通とダミー添付1件をD&Dする。Dropイベント発火、返却パス、DragEnter後に離脱した孤児の次回削除を確認する。失敗時はTask 2へ進まず、独自OLE実装を追加せず再レビューする。
+機密情報を含まないダミーメール1通とダミー添付1件をD&Dする。Dropイベント発火、返却パス、DragEnter後に離脱した孤児の次回削除を確認する。Coordinatorは進捗ledgerへ状態、実施者、実施日時、観測結果を記録する。Task Reviewerは状態が`passed`であることを確認するまでTask 1を完了扱いにしない。`failed`の場合はTask 2へ進まず、独自OLE実装を追加せず再レビューする。
 
 - [ ] **Step 8: コミットする**
 
@@ -494,6 +511,8 @@ assert normalize_sender_key("山田太郎") == "山田太郎"
 
 `山田 太郎`フォルダと`山田太郎`フォルダの双方が同じ`sender_key`で一致し、メールアドレス差を入力しないこと、送信者不在では既存順位と同一であることを固定する。一般主検索語が0件でも送信者一致だけで候補が作られ、`primary_match_count == 1`、`matched_primary_terms == ()`、`sender_matched is True`となる`test_sender_match_alone_creates_candidates()`を追加する。
 
+さらに、送信者一致だけで成立した3つの兄弟候補が親候補へ折り畳まれても`sender_matched is True`となるテストと、同じ主一致数を持つ兄弟の一部だけが送信者一致している場合に親候補が論理和で`True`を継承するテストを追加する。先頭要素の値へ依存しないよう、入力順を入れ替えたケースも固定する。
+
 - [ ] **Step 3: セッションの送信者キー保持・破棄テストを書く**
 
 MSG選択、検索語編集、カタログ再読込ではキーが維持され、通常ファイル選択と`reset_manual()`では`None`になることを確認する。
@@ -506,7 +525,7 @@ MSG選択、検索語編集、カタログ再読込ではキーが維持され�
 
 - [ ] **Step 5: 送信者専用照合を最小実装する**
 
-一般主検索語の正規化は変更せず、送信者キーだけを`sender_key_path`へ照合する。一般主検索語の一致数と`int(sender_matched)`を合算してから0件除外を行い、送信者単独一致を候補へ残す。`matched_primary_terms`へ送信者キーを追加せず、`sender_matched`だけをCandidateへ渡す。
+一般主検索語の正規化は変更せず、送信者キーだけを`sender_key_path`へ照合する。一般主検索語の一致数と`int(sender_matched)`を合算してから0件除外を行い、送信者単独一致を候補へ残す。`matched_primary_terms`へ送信者キーを追加せず、必須フィールド`sender_matched`を全Candidateへ渡す。兄弟折り畳みで親Candidateを生成するときは、兄弟全体の`any(sibling.sender_matched for sibling in siblings)`を`inherited_sender_matched`として渡す。
 
 - [ ] **Step 6: 対象テストを通す**
 
@@ -719,6 +738,14 @@ git commit -m "docs: Outlook直接D&Dの検証結果を記録"
 | NA-6 不正確なテスト行番号 | 採用。該当行番号を削除 |
 | 添付だけの複数D&D自動テスト不足 | 採用。Task 5 Step 1へ追加 |
 
+### 8.2 第3回レビュー指摘の反映
+
+| 指摘 | 判定・反映先 |
+|---|---|
+| NC-2 兄弟折り畳みで`sender_matched`が失われる | 採用。ただし先頭要素の値ではなく、兄弟全体の論理和を継承する。§3.4、Task 3 Step 2・5へ追加 |
+| NC-6 `Candidate.sender_matched`へ既定値を付ける | 不採用。全Candidateは`_make_candidate()`だけで構築され、必須フィールドの方が新経路での伝播漏れを検出しやすい。§3.4へ理由を明記 |
+| Cursor実機ゲートのledger記録 | 採用。Coordinatorの責務とTask 1 Step 7へ、状態・実施者・日時・観測結果の記録、`passed`まで完了禁止を追加 |
+
 ## 9. 再レビューで確認してほしい点
 
 1. Tcl辞書補正と`DND_FILES`単独登録が同梱TkDNDで成立するか。
@@ -729,6 +756,7 @@ git commit -m "docs: Outlook直接D&Dの検証結果を記録"
 6. target/parsed、文書warning、メールwarningの境界が部分失敗を正しく表すか。
 7. 生送信者名と一時パスを永続化しない境界に漏れがないか。
 8. 16件の受け入れ条件に不足・重複がないか。
+9. 兄弟折り畳みで送信者一致を論理和継承するだけで十分か。既存の祖先・子孫折り畳みにも送信者一致理由を引き継ぐ必要があるか。
 
 ## 10. 実装開始条件
 

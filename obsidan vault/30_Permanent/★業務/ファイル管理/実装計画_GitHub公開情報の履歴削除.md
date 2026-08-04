@@ -4,7 +4,7 @@
 
 **Goal:** PublicのGitHubリポジトリから私用フォルダ構造・詳細資料を全ブランチ・タグの履歴ごと除去し、ローカル資料は保持したまま再混入を防止する。
 
-**Architecture:** 現在の作業ツリーでは削除対象を未追跡化してignoreし、存続文書から具体的な構造情報を除去する準備コミットを作る。履歴書き換えは作業ツリーではなく新しい使い捨てmirror cloneに対して`git-filter-repo>=2.47`で行い、削除パスと非公開語句を全refから除去する。ローカル検証、リモート無変更確認、ユーザーの最終承認を通過した場合だけ`git push --force --mirror`を実行し、旧cloneは再利用せず隔離する。
+**Architecture:** 対象機能ブランチの作業ツリーと`origin/<default>`基点の分離worktreeで、削除対象を未追跡化してignoreし、存続文書から具体的な構造情報を除去する準備コミットを別々に作る。履歴書き換えは作業ツリーではなく新しい使い捨てmirror cloneに対して`git-filter-repo>=2.47`で行い、削除パスと非公開語句を全refから除去する。ローカル検証、リモート無変更確認、ユーザーの最終承認を通過した場合だけ`git push --force --mirror`を実行し、旧cloneは再利用せず隔離する。
 
 **Tech Stack:** Git、GitHub、GitHub CLI、`git-filter-repo>=2.47`、PowerShell 7。
 
@@ -19,6 +19,7 @@
 - 現在の未コミット変更を上書き、破棄、履歴書き換え対象へ混入させない。
 - force-push前に全remote refsのスナップショットを保存し、開始後のリモート更新を検知した場合は中止する。
 - 対象外パス、コミット作者、コミット日時、一般文書、プログラムコードは変更しない。
+- 既定ブランチへ機能ブランチ全体をfast-forwardまたはmergeしない。既定ブランチには、分離worktreeで作ったプライバシー準備差分だけを通常pushする。
 - ブランチ保護を自動解除しない。保護によりpushできない場合は停止してユーザー判断を求める。
 - fork、第三者clone、GitHubのPR参照・キャッシュはローカル履歴書き換えだけでは消去できないものとして別確認する。
 - 履歴書き換え後、旧cloneから`pull`や`push`を行わない。新しいclean cloneを正本とする。
@@ -32,7 +33,7 @@
 | 対象リポジトリ | `baiputaojiu/amatsuka_argo_5_obsidan_chatgpt_cursor_genspark` |
 | 公開状態 | Publicを維持 |
 | 作成日 | 2026-08-04 |
-| 状態 | 実行前・Claude Code第3回レビュー待ち |
+| 状態 | 実行前・Claude Code第4回レビュー待ち |
 | 履歴書き換え方式 | `git-filter-repo --sensitive-data-removal --invert-paths` |
 | リモート更新方式 | 最終承認後の`git push --force --mirror origin` |
 
@@ -75,12 +76,12 @@ regex:(?<!/)private/local-detail-[^\r\n`/]+\.md==>***REMOVED***
 
 ### 2.2.1 存続コード・テスト内の実名
 
-実フォルダ名・階層断片が存続する設定例、テスト、一般文書は、一律に`***REMOVED***`へ置換しない。最新版の準備コミットで次の規則に従って一般化し、その結果を履歴上の期待内容とする。
+実フォルダ名・階層断片が存続する設定例、テスト、一般文書は、一律に`***REMOVED***`へ置換しない。既定ブランチと対象機能ブランチの最新版は、それぞれ専用の準備コミットで次の規則に従って一般化し、その結果を履歴上の期待内容とする。その他のbranch/tag tipは、Task 1で人が承認した置換規則から機械生成した期待内容と比較し、実行可能性は要求しない。
 
 1. 設定例とテストデータは、実際の年度フォルダ名や階層を示さない合成名へ置換し、テストの期待値も同じ合成名へ更新する。
 2. 一般文書は、実名、件数、具体階層、実例だけを一般表現へ置換し、年度単位の探索、推薦、回帰テストという一般要件は残す。
 3. 変更した存続パスを`allowed-changed-paths.txt`へ列挙し、準備コミットの期待ファイルをリポジトリ外へ保存してSHA-256を記録する。
-4. 準備コミットでアプリの全自動テストとruffを通してから通常pushする。`***REMOVED***`を設定値やテスト入力として使用しない。
+4. 既定ブランチと対象機能ブランチの各準備コミットでアプリの全自動テストとruffを通してから通常pushする。`***REMOVED***`を設定値やテスト入力として使用しない。
 
 ### 2.3 最新版から削除する参照
 
@@ -146,7 +147,11 @@ gh repo view baiputaojiu/amatsuka_argo_5_obsidan_chatgpt_cursor_genspark --json 
 gh pr list --state open --limit 100
 gh api repos/baiputaojiu/amatsuka_argo_5_obsidan_chatgpt_cursor_genspark --jq '{forks_count,open_issues_count}'
 gh api repos/baiputaojiu/amatsuka_argo_5_obsidan_chatgpt_cursor_genspark/branches --paginate --jq '.[] | {name,protected}'
-git ls-remote origin | ForEach-Object { ($_ -split "`t")[1] } | Group-Object { ($_ -split '/')[1] } | Select-Object Count, Name
+git ls-remote origin |
+    ForEach-Object { ($_ -split "`t")[1] } |
+    Where-Object { $_ -like 'refs/*' } |
+    Group-Object { ($_ -split '/')[1] } |
+    Select-Object Count, Name
 ```
 
 Expected: `visibility`は`PUBLIC`。open PR、fork、protected branchに加え、`refs/heads/*`、`refs/tags/*`、`refs/pull/*`、その他refの実数を実行記録へ保存する。
@@ -183,7 +188,7 @@ Expected: 0件。1件以上なら`--replace-message $cleanupReplacements`をTask
 
 - [ ] **Step 5: 存続文書の具体情報を棚卸しする**
 
-削除資料の名称と階層断片を存続ファイルへ照合し、`private-replacements.txt`と、書き換え後検証用のリテラルだけを持つ`private-verification-patterns.txt`を確定する。設定例・テスト・一般文書を§2.2.1に分類し、置換前後のヒット件数を記録して一般語の誤置換が0件であることを人手確認する。パス削除、内容置換、合成名化、`.gitignore`追加によりblob変更を許可するパスだけを`allowed-changed-paths.txt`へ列挙する。
+削除資料の名称と階層断片を存続ファイルへ照合し、`private-replacements.txt`と、書き換え後検証用のリテラルだけを持つ`private-verification-patterns.txt`を確定する。設定例・テスト・一般文書を§2.2.1に分類し、置換前後のヒット件数を記録して一般語の誤置換が0件であることを人手確認する。最新版で手動編集する一般化・合成名化も、その他refの期待内容を機械生成できる決定的な置換規則としてmanifestへ表現し、適用順を固定する。パス削除、内容置換、合成名化、`.gitignore`追加によりblob変更を許可するパスだけを`allowed-changed-paths.txt`へ列挙する。
 
 ### Task 2: ローカル資料と未コミット変更の保護
 
@@ -209,12 +214,13 @@ git ls-files --others --exclude-standard | Set-Content -LiteralPath $cleanupUntr
 
 Expected: 全対象でコピー元とコピー先のSHA-256が一致する。不一致が1件でもあれば停止する。
 
-### Task 3: 最新版の追跡解除と文書一般化
+### Task 3: 既定・対象機能ブランチ最新版の追跡解除と文書一般化
 
 **Files:**
 - Modify: `.gitignore`
 - Modify: 実構造を参照する存続文書、設定例、テスト
 - Untrack, keep on disk: §2.1の4分類
+- Create outside repository: 既定ブランチ専用worktree
 
 - [ ] **Step 1: `.gitignore`の失敗先行確認を行う**
 
@@ -244,6 +250,8 @@ PowerShellまたはGitのglob解釈に依存せず、実行時は`git ls-files`�
 
 一般文書は実名・具体階層・詳細だけを一般表現へ変更する。設定例とテストは実際の命名を示さない合成名へ変更し、期待値も同時に更新する。変更後、`private-verification-patterns.txt`の全リテラルが最新版の追跡ファイルで0件であり、`***REMOVED***`が設定値またはテスト入力へ入っていないことを確認する。
 
+変更した存続ファイルと`.gitignore`は、`allowed-changed-paths.txt`に含まれることを確認してから、`git add -- <exact-path>`で1パスずつstageする。`git add -A`、`git commit -a`は使わない。私用資料のindex削除はStep 3の`git rm --cached`でstage済みの状態を維持する。
+
 - [ ] **Step 5: 最新treeと許可変更パスの期待値を検証する**
 
 ```powershell
@@ -254,18 +262,44 @@ git diff --cached --check
 
 アプリの全自動テストとruffも実行する。Expected: 私用資料は削除予定としてstageされるがローカルには存在し、合成名へ変更した設定例・テストを含めて検査が成功し、無関係なユーザー変更はstageされない。
 
-準備コミット予定内容を一時worktreeへ展開し、`allowed-changed-paths.txt`の各存続ファイルをリポジトリ外の`expected-allowed/`へコピーする。`Get-FileHash -Algorithm SHA256`で`expected-allowed-blobs.tsv`へ`path<TAB>sha256`を記録する。`.gitignore`は必ず含め、期待ファイルは履歴書き換え後の出力から作らない。
+対象機能ブランチの準備コミット予定内容を一時worktreeへ展開し、`allowed-changed-paths.txt`の各存続ファイルをリポジトリ外の`expected-allowed/feature/`へコピーする。`Get-FileHash -Algorithm SHA256`で`expected-allowed-blobs.tsv`へ`ref<TAB>path<TAB>sha256`を記録する。`.gitignore`は必ず含め、期待ファイルは履歴書き換え後の出力から作らない。
 
-- [ ] **Step 6: 準備コミットを作成して通常pushする**
+- [ ] **Step 6: 既定ブランチ専用worktreeでプライバシー準備差分だけを作る**
+
+既定ブランチ名とpush前SHAをGitHubから取得し、対象機能ブランチとは別のリポジトリ外worktreeを`origin/<default>`から作る。既存の同名ローカルブランチまたはworktreeがある場合は自動削除・再利用せず停止する。
+
+```powershell
+$cleanupDefaultBranch = gh repo view baiputaojiu/amatsuka_argo_5_obsidan_chatgpt_cursor_genspark --json defaultBranchRef --jq '.defaultBranchRef.name'
+if (-not $cleanupDefaultBranch) { throw "Default branch was not resolved." }
+$cleanupDefaultRef = "refs/heads/$cleanupDefaultBranch"
+$cleanupDefaultBeforeLine = git ls-remote origin $cleanupDefaultRef | Select-Object -First 1
+if (-not $cleanupDefaultBeforeLine) { throw "Default branch ref was not found." }
+$cleanupDefaultBefore = ($cleanupDefaultBeforeLine -split "`t")[0]
+git worktree add -b codex/privacy-default-prep $cleanupDefaultWorktree "origin/$cleanupDefaultBranch"
+```
+
+このworktree内で、その既定ブランチに存在する対象だけへStep 1〜4と同じignore、追跡解除、一般化、合成名化、1パスずつのstageを適用する。対象機能ブランチの準備commitをcherry-pickせず、機能実装・計画・その他のcommitを既定ブランチへ持ち込まない。`allowed-changed-paths.txt`以外の差分が0件であること、私用資料がworktreeの外に保存済みであること、全自動テストとruffが成功することを確認する。既定ブランチの期待ファイルを`expected-allowed/default/`へ保存し、SHA-256を`expected-allowed-blobs.tsv`へ記録する。
+
+- [ ] **Step 7: 2つの準備差分と検査結果を提示し、通常pushの承認を得る**
+
+対象機能ブランチと既定ブランチ専用worktreeについて、基点SHA、変更パス、削除・一般化内容、対象外差分0件、テスト・ruff結果を提示する。既定ブランチを含む2回の通常pushについてユーザーの明示承認を得るまでcommitとpushへ進まない。
+
+- [ ] **Step 8: 2つの準備コミットを作成して通常pushする**
 
 ```powershell
 git commit -m "privacy: 私用フォルダ資料を公開対象から除外"
 git push origin codex/outlook-direct-dnd-plan
+
+git -C $cleanupDefaultWorktree commit -m "privacy: 私用フォルダ資料を公開対象から除外"
+$cleanupDefaultNowLine = git ls-remote origin $cleanupDefaultRef | Select-Object -First 1
+$cleanupDefaultNow = ($cleanupDefaultNowLine -split "`t")[0]
+if ($cleanupDefaultNow -ne $cleanupDefaultBefore) { throw "Default branch moved during preparation." }
+git -C $cleanupDefaultWorktree push origin "HEAD:$cleanupDefaultRef"
 ```
 
-このpushは最新版を先に非公開化する準備であり、過去履歴はまだ残る。force-pushはTask 6まで行わない。
+これらのpushは既定ブランチと対象機能ブランチの最新版を先に非公開化する準備であり、過去履歴はまだ残る。既定ブランチへのpushはremote SHA不変を再確認したfast-forwardだけを許し、ブランチ保護または競合で失敗した場合は停止する。force-pushはTask 6まで行わない。
 
-- [ ] **Step 7: 準備push後の全remote refsをforce-push基準として保存する**
+- [ ] **Step 9: 両方の準備push後の全remote refsをforce-push基準として保存する**
 
 ```powershell
 git ls-remote origin | Set-Content -LiteralPath $cleanupRemoteRefsForceBaseline -Encoding utf8
@@ -295,7 +329,9 @@ git filter-repo --analyze
 
 各head/tagのtip SHAごとに`git ls-tree -r`を実行し、`allowed-changed-paths.txt`に含まれるパスを除いた`mode type object path`をリポジトリ外の`before-trees/<ref>.txt`へ保存する。ref名と旧tip SHAの対応も保存する。
 
-許可変更パスは除外するだけで終わらせない。各head/tag tipの許可変更パスをリポジトリ外へ展開し、承認済み規則だけを反映した期待ファイルを`expected-allowed/<ref>/`へ作る。変更不要なblobは展開内容をそのまま期待ファイルとし、変更が必要なblobは変換前後の差分を人手確認する。`expected-allowed-blobs.tsv`へ`ref<TAB>path<TAB>sha256`を保存し、default branch tipについてはTask 3で保存した期待ファイルと一致させる。期待ファイルはfilter-repo実行後の出力から作らない。
+許可変更パスは除外するだけで終わらせない。各head/tag tipの許可変更パスをリポジトリ外へ展開し、Task 1 Step 5で人が1回だけ承認した規則を定義順に適用する決定的な変換helperで、filter-repo実行前に期待ファイルを`expected-allowed/<ref>/`へ機械生成する。helperとmanifestはリポジトリ外に置き、`literal:`、`glob:`、`regex:`ごとの合成fixtureで期待どおりのbyte置換になることを検証する。人手確認の対象は規則、適用順、fixture、既定・対象機能ブランチの準備差分であり、各refの変換差分を個別に目視しない。
+
+変更不要なblobは展開内容をそのまま期待ファイルとする。既定ブランチと対象機能ブランチのtipはTask 3で保存した各期待ファイルを正本とし、その他のbranch/tag tipは上記の機械変換結果を正本とする。`expected-allowed-blobs.tsv`へ`ref<TAB>path<TAB>sha256`を保存する。期待ファイルとSHA-256はfilter-repo実行後の出力から作らない。
 
 - [ ] **Step 3: パス除去と内容置換を1回の書き換えで実行する**
 
@@ -303,7 +339,7 @@ git filter-repo --analyze
 git filter-repo --sensitive-data-removal --invert-paths --paths-from-file $cleanupRemovalPaths --replace-text $cleanupReplacements
 ```
 
-Task 1のコミットメッセージ検査が1件以上の場合だけ、同じコマンドへ`--replace-message $cleanupReplacements`を追加する。`--sensitive-data-removal`は実行直前にoriginから全refを再fetchするため、Task 3 Step 7以降のリモート凍結が前提である。実行直前にも`git ls-remote origin`をforce baselineと比較し、差分があればmirrorを破棄して最初からやり直す。
+Task 1のコミットメッセージ検査が1件以上の場合だけ、同じコマンドへ`--replace-message $cleanupReplacements`を追加する。`--sensitive-data-removal`は実行直前にoriginから全refを再fetchするため、Task 3 Step 9以降のリモート凍結が前提である。実行直前にも`git ls-remote origin`をforce baselineと比較し、差分があればmirrorを破棄して最初からやり直す。
 
 - [ ] **Step 4: `origin`を検証する**
 
@@ -332,13 +368,15 @@ Expected: 0件。
 
 - [ ] **Step 2: 置換対象が全refから消えたことを確認する**
 
-`private-verification-patterns.txt`はregex式ではなく、消えるべきリテラルを1行1件で持つ。バイナリ判定による検査漏れを避けるため`-a`で全blobをテキストとして扱い、全heads/tagsを検査する。
+`private-verification-patterns.txt`はregex式ではなく、消えるべきリテラルを1行1件で持つ。バイナリ判定による検査漏れを避けるため`-a`で全blobをテキストとして扱い、tip treeだけでなく`git rev-list --all`が返す全到達可能commitを検査する。
 
 ```powershell
-$cleanupAllRefs = git for-each-ref --format='%(refname)' refs/heads refs/tags
-foreach ($cleanupRef in $cleanupAllRefs) {
-    $cleanupHits = git grep -a -n -F -f $cleanupVerificationPatterns $cleanupRef
-    if ($cleanupHits) { throw "Residual private text in $cleanupRef" }
+$cleanupAllCommits = git rev-list --all
+if (-not $cleanupAllCommits) { throw "No commits were found for verification." }
+foreach ($cleanupCommit in $cleanupAllCommits) {
+    $cleanupHits = git grep -a -n -F -f $cleanupVerificationPatterns $cleanupCommit
+    if ($LASTEXITCODE -gt 1) { throw "git grep failed for commit $cleanupCommit" }
+    if ($cleanupHits) { throw "Residual private text in commit $cleanupCommit" }
 }
 ```
 
@@ -443,7 +481,7 @@ cached view、PR ref、LFS orphanが残り、GitHubが機密情報と判断し�
 1. リポジトリはPublicのまま維持される。
 2. §2.1の対象パスが全remote heads/tagsから消える。
 3. 存続ファイルの実フォルダ名・命名例・階層断片・詳細説明が全remote heads/tagsから消える。
-4. 一般的な要件、実装計画、プログラム、テストは`allowed-changed-paths.txt`に列挙した一般化・合成名化以外の差分なく残り、列挙した最新版の存続ファイルは期待SHA-256と一致する。
+4. 一般的な要件、実装計画、プログラム、テストは`allowed-changed-paths.txt`に列挙した一般化・合成名化以外の差分なく残り、既定・対象機能ブランチ最新版とその他のbranch/tag tipの存続ファイルは各期待SHA-256と一致する。
 5. ローカル私用資料は削除されず、未追跡・ignore状態で利用できる。
 6. 現在のユーザー未コミット変更が保持される。
 7. force-push前後のremote refsと書き換え予定refsが一致する。
@@ -460,19 +498,30 @@ cached view、PR ref、LFS orphanが残り、GitHubが機密情報と判断し�
 - GitHubのPR参照とcached viewはSupport対応が必要な場合があり、非機密データでは対応されない可能性がある。
 - 履歴書き換え後はコミットSHA、署名、PR差分、SHA依存のリンクや自動化が変わる。
 
-## 8. Claude Codeレビューで確認してほしい点
+## 8. Claude Codeレビュー
+
+### 8.1 第3回レビュー指摘の反映
+
+| 指摘 | 判定・反映先 |
+|---|---|
+| NC-1 既定ブランチ最新版が非公開化されない | Blockerとして採用。ただし対象機能ブランチ全体は既定ブランチへ進めず、`origin/<default>`基点の分離worktreeでプライバシー準備差分だけを作り、remote SHA不変確認後に通常pushする。Global Constraints、§2.2.1、Task 3へ反映 |
+| NC-3 tip treeしか残存語句を検査しない | 採用。Task 5 Step 2を`git rev-list --all`の全到達可能commit検査へ変更 |
+| NC-4 全refの期待差分を人が確認する運用負荷 | 採用。人は規則・適用順・合成fixture・2つの最新版準備差分を確認し、その他refの期待内容はfilter-repo実行前に機械生成する。Task 4 Step 2へ反映 |
+| NC-5 `HEAD`行がref集計へ混入する | 採用。Task 1 Step 2で`refs/*`だけに絞ってから集計する |
+
+### 8.2 第4回レビューで確認してほしい点
 
 1. `--paths-from-file`と`--replace-text`を同時使用する方式で削除範囲が過不足なく適用されるか。
 2. path rename、全branch/tag、PR refs、fork、cacheの確認に漏れがないか。
-3. 最新版の追跡解除、履歴書き換え、clean clone移行の順序が再混入を防げるか。
+3. 既定ブランチ専用worktreeでプライバシー差分だけを通常pushし、対象機能ブランチ全体を既定ブランチへ進めない手順がNC-1を安全に解消するか。
 4. 対象外tree一致検証が誤削除を検知するのに十分か。
 5. 現在の未コミット変更とローカル私用資料を保護する手順が十分か。
 6. Public維持という制約下で、force-push前のストップゲートが十分か。
 7. Windows・非ASCIIパスでコマンド例に実行不能または曖昧な箇所がないか。
 8. GitHub Supportへ依頼できない場合の残存リスク表現が正確か。
 9. 設定例・テストを合成名へ変更し、一般的な年度探索要件だけを残す境界が一貫しているか。
-10. 許可変更パスの期待SHA-256比較が、tree比較の除外による検査穴を塞いでいるか。
-11. 全ref一覧、コミットメッセージ、バイナリ扱いblob、`refs/pull/*`の検査と停止条件が十分か。
+10. 承認済み規則からfilter-repo実行前に期待内容を機械生成し、SHA-256比較する方式がtree比較の除外による検査穴を塞いでいるか。
+11. 全commitのblob、コミットメッセージ、バイナリ扱いblob、`refs/pull/*`の検査と停止条件が十分か。
 
 ## 9. 実行開始条件
 
