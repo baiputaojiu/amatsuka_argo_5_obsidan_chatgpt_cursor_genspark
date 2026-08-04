@@ -1,6 +1,6 @@
 # 実装計画：クラシックOutlookからのメール・添付ファイル直接D&D
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan task-by-task, `superpowers:test-driven-development` for each behavior change, and `superpowers:verification-before-completion` before each completion claim.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` to implement this plan task-by-task, `superpowers:test-driven-development` for each behavior change, and `superpowers:verification-before-completion` before each completion claim.
 
 **Goal:** クラシックOutlookからメール1通または添付ファイル群を保存先レコメンダーへ直接D&Dし、送信者表示名を含むメール情報と任意の添付情報を1案件として保存先候補の判定に利用できるようにする。
 
@@ -18,6 +18,7 @@
 - 送信者はOutlookの表示名を使用し、メールアドレスによる同名人物の区別は行わない。
 - 送信者照合ではUnicode空白を除去し、`山田 太郎`と`山田太郎`を同一キーとして扱う。
 - 送信者を今回から推薦へ利用し、候補フォルダとの一致は主検索語1件相当として順位付けする。
+- 一般の主検索語が0件一致でも、送信者が一致すれば主照合1件の候補として表示する。この挙動は意図した要件であり、候補なしの状態へ戻さない。
 - 送信者を取得できない場合も、他の読めたメール情報だけで処理を継続する。
 - 対応する添付本文は`.xlsx`、`.xlsm`、`.docx`、`.pptx`、`.pdf`に限定する。その他はファイル名だけを利用する。
 - 新規の実行時依存を追加しない。既存の`tkinterdnd2`と`pywin32`だけを利用する。
@@ -28,6 +29,7 @@
 - メール本文、添付本文、送信者表示名、検索語全文を`settings.json`、`catalog.json`、`audit.jsonl`、ログへ保存しない。
 - 新しい入力の処理に失敗した場合、直前の入力、検索語、候補、確定パスを維持し、失敗分の一時ファイルだけを削除する。
 - 将来の複数メール対応は、今回作る「メール1通の解析関数」をメールごとに呼ぶ方式とし、今回は複数案件管理、キュー、並列処理、新画面を実装しない。
+- 実装はWindows上のCursor Agents Window / Agent Tabsで行い、複数エージェントを画面上に保持する。ただし同じ作業ツリーへ書き込む実装担当は常に1エージェントとし、レビュー担当はread-onlyで動かす。
 
 ---
 
@@ -43,7 +45,7 @@
 | 初回レビュー対象 | `23107f5` |
 | 初回レビュー判定 | 計画修正後に再レビュー |
 | 対象プロジェクト | `onedrive_destination_recommender/` |
-| 状態 | 実装前・Claude Code再レビュー待ち |
+| 状態 | 実装前・Claude Code第3回レビュー待ち |
 
 本計画の再レビューが完了するまで、プログラム本体、テスト、依存関係、README、要件定義書は変更しない。
 
@@ -82,6 +84,7 @@
 - 同じ表示名から同じ`sender_key`が得られる人物は同一送信者として扱う。
 - `sender_key`はメモリ上の現在入力だけが保持し、入力置換または手動検索復帰で破棄する。
 - 送信者一致は主照合1件相当とし、本文由来の補助照合より先に順位へ影響させる。
+- 一般の主検索語が候補フォルダへ1件も一致しない場合でも、送信者一致だけで候補を作る。
 
 ### 2.3 今回拒否する操作
 
@@ -241,6 +244,17 @@ class PreparedFolder:
     normalized_path: str
     sender_key_path: str
 
+@dataclass(frozen=True, slots=True)
+class Candidate:
+    year: YearScope
+    relative_path: str
+    absolute_path: str
+    primary_match_count: int
+    auxiliary_match_count: int
+    matched_primary_terms: tuple[str, ...]
+    matched_auxiliary_terms: tuple[str, ...]
+    sender_matched: bool
+
 def rank_candidates(
     prepared_folders: Iterable[PreparedFolder],
     settings: Settings,
@@ -252,7 +266,9 @@ def rank_candidates(
 ) -> tuple[Candidate, ...]: ...
 ```
 
-`sender_key_path`は相対パスをNFKC・casefoldした後、Unicode空白だけを除去する。`sender_key`が`sender_key_path`に含まれた場合、主検索語一致数へ1を加える。通常主検索語と補助検索語の正規化、年度優先、祖先・兄弟折り畳みは変更しない。
+`sender_key_path`は相対パスをNFKC・casefoldした後、Unicode空白だけを除去する。`sender_key`が`sender_key_path`に含まれた場合、一般の主検索語一致数が0件でも主検索語一致数へ1を加え、候補として残す。通常主検索語と補助検索語の正規化、年度優先、祖先・兄弟折り畳み、候補件数上限は変更しない。
+
+`sender_key`自体は`Candidate.matched_primary_terms`へ含めない。代わりに`Candidate.sender_matched`だけを`True`にし、候補表では生の送信者名ではなく固定文言`送信者一致`を一致理由へ加える。これにより送信者だけで成立した候補も理由を確認でき、送信者表示名をCandidateへ保存しない。
 
 `InputState`へ`sender_key: str | None`を追加し、MSG入力中だけ保持する。`select_files()`、カタログ再読込、検索語編集後の再ランキングでは同じキーを渡し、`reset_manual()`または次の入力で破棄する。送信者は本文と同様の自動情報であり、検索欄へ生表示しない。
 
@@ -267,7 +283,7 @@ def rank_candidates(
 | メール本文 | 補助検索語 | 既存の`clean_msg_body`を使用 |
 | 対応添付文書本文 | 補助検索語 | 既存の`build_document_terms`を使用 |
 
-主検索語一致0件の候補を除外する既存規則は、送信者一致を主一致1件として含めた後に適用する。
+主検索語一致0件の候補を除外する既存規則は、送信者一致を主一致1件として含めた後に適用する。したがって一般の主検索語一致が0件でも、送信者一致があれば合計1件となり候補へ残る。
 
 ## 4. 変更ファイルと責務
 
@@ -289,6 +305,18 @@ def rank_candidates(
 | `要件定義_OneDrive保存先レコメンダー.md` | 新機能、送信者、受け入れ条件を反映 |
 
 `pyproject.toml`は変更しない。
+
+### 4.1 Cursor Agent Tabsでの実装ループ
+
+実装時は`superpowers:using-git-worktrees`でユーザーの通常作業ツリーから分離した実装用worktreeを1つ作り、そのworktreeをCursorで開く。Agents WindowのAgent Tabsを横並びまたはグリッドで表示する。全エージェントが同時に動作する必要はなく、現在動作中の役割が画面で分かることを運用要件とする。Background AgentはLinuxリモート環境であり、クラシックOutlookの実機確認に使えないため採用しない。
+
+1. **Coordinatorタブ**：本計画、Global Constraints、進捗ledgerを読み、Taskを順番に割り当てる。コードは編集しない。
+2. **Implementerタブ**：Taskごとに新しいタブを使い、RED確認、最小実装、GREEN確認、自己レビュー、Task単位のcommitまで担当する。同じ作業ツリーへ書き込むImplementerは同時に1つだけとする。
+3. **Task Reviewerタブ**：Implementerのcommit差分をread-onlyで確認し、仕様適合とコード品質を別々に判定する。テスト報告を読み、コードや文書は変更しない。
+4. **Fix loop**：重要な指摘は元のImplementerタブへ戻して修正し、同じReviewerタブで差分だけを再確認する。最大5周とし、解消しない構造的問題はユーザーへ報告して停止する。
+5. **Final Reviewerタブ**：全Task後にブランチ全体をレビューする。最終修正は1つのImplementerタブへまとめ、再レビュー後に`superpowers:finishing-a-development-branch`へ進む。
+
+全タブは同じ実装用worktreeのcommit済み状態を参照する。タブごとに別worktreeを作って並行実装する方式は今回使わない。Cursorで実装を始める前に、使用するCursor環境からSuperpowersの各skillを参照できることを確認する。参照できない場合は実装を開始せず、skill導入またはプロンプト受け渡し方法を先に整える。進捗は`superpowers:subagent-driven-development`のplan専用ledgerへ記録し、画面上の会話履歴だけを正本にしない。
 
 ## 5. 実装タスク
 
@@ -364,7 +392,7 @@ git commit -m "feat: Outlook仮想ファイルのD&D受け取りを追加"
 
 **Files:**
 - Modify: `onedrive_destination_recommender/src/onedrive_destination_recommender/msg_reader.py:39`
-- Modify: `onedrive_destination_recommender/tests/unit/test_msg_reader.py:29`
+- Modify: `onedrive_destination_recommender/tests/unit/test_msg_reader.py`
 
 **Interfaces:**
 - Consumes: `MailItem.SenderName`、`Attachment.SaveAsFile()`、`build_document_terms()`
@@ -408,14 +436,15 @@ assert result.attachment_count == 0
 
 ```python
 for module in (msg_reader, terms_module):
-    source = inspect.getsource(module)
-    assert ".write(" not in source
+    source = Path(module.__file__).read_text(encoding="utf-8")
     assert "write_text(" not in source
+    assert ".write(" not in source
+    assert "open(" not in source
     assert "logging" not in source
 
-msg_source = inspect.getsource(msg_reader)
+msg_source = Path(msg_reader.__file__).read_text(encoding="utf-8")
 assert msg_source.count(".SaveAsFile(") == 1
-assert "TemporaryDirectory(" in msg_source
+assert 'TemporaryDirectory(prefix="odr-msg-attachments-")' in msg_source
 ```
 
 - [ ] **Step 5: テスト失敗を確認する**
@@ -451,6 +480,7 @@ git commit -m "feat: メール送信者と任意添付を解析"
 - Produces: `normalize_sender_key(value: str) -> str`
 - Produces: `rank_candidates(..., sender_key: str | None = None)`
 - Produces: `InputState.sender_key: str | None`
+- Produces: `Candidate.sender_matched: bool`
 
 - [ ] **Step 1: 空白差の正規化テストを書く**
 
@@ -462,7 +492,7 @@ assert normalize_sender_key("山田太郎") == "山田太郎"
 
 - [ ] **Step 2: 送信者一致が主照合1件になるランキングテストを書く**
 
-`山田 太郎`フォルダと`山田太郎`フォルダの双方が同じ`sender_key`で一致し、メールアドレス差を入力しないこと、送信者不在では既存順位と同一であることを固定する。
+`山田 太郎`フォルダと`山田太郎`フォルダの双方が同じ`sender_key`で一致し、メールアドレス差を入力しないこと、送信者不在では既存順位と同一であることを固定する。一般主検索語が0件でも送信者一致だけで候補が作られ、`primary_match_count == 1`、`matched_primary_terms == ()`、`sender_matched is True`となる`test_sender_match_alone_creates_candidates()`を追加する。
 
 - [ ] **Step 3: セッションの送信者キー保持・破棄テストを書く**
 
@@ -476,7 +506,7 @@ MSG選択、検索語編集、カタログ再読込ではキーが維持され�
 
 - [ ] **Step 5: 送信者専用照合を最小実装する**
 
-一般主検索語の正規化は変更せず、送信者キーだけを`sender_key_path`へ照合する。
+一般主検索語の正規化は変更せず、送信者キーだけを`sender_key_path`へ照合する。一般主検索語の一致数と`int(sender_matched)`を合算してから0件除外を行い、送信者単独一致を候補へ残す。`matched_primary_terms`へ送信者キーを追加せず、`sender_matched`だけをCandidateへ渡す。
 
 - [ ] **Step 6: 対象テストを通す**
 
@@ -530,7 +560,7 @@ git commit -m "feat: Outlook入力の解析状態と寿命を表示"
 
 **Files:**
 - Modify: `onedrive_destination_recommender/src/onedrive_destination_recommender/app.py:544`
-- Modify: `onedrive_destination_recommender/tests/integration/test_gui.py:352`
+- Modify: `onedrive_destination_recommender/tests/integration/test_gui.py`
 
 **Interfaces:**
 - Consumes: `DropWorkspaceManager`と`RecommenderSession.select_files()`
@@ -539,6 +569,8 @@ git commit -m "feat: Outlook入力の解析状態と寿命を表示"
 - [ ] **Step 1: GUIトランザクションの失敗先行テストを書く**
 
 - D&D入口でイベントにないDragEnter孤児を削除する。
+- Outlook添付だけを複数ドロップした場合、staging内の通常ファイル群が既存規則で1案件になる。
+- 一般主検索語が空でも`sender_key`による候補を描画し、候補状態を「検索語を入力してください」へ戻さず、固定文言`送信者一致`を一致理由へ表示する。
 - D&D成功時だけ`accept_staging()`を呼ぶ。
 - D&D失敗時は`reject_staging()`を呼び、直前状態を維持する。
 - `accept_staging()`自体が失敗しても新stagingを取得・再設定する。
@@ -554,7 +586,7 @@ git commit -m "feat: Outlook入力の解析状態と寿命を表示"
 
 - [ ] **Step 3: `_accept_files()`へ処理を接続する**
 
-セッション処理成功まで`accept_staging()`を呼ばない。workspace操作失敗は直前入力を壊さず、一般警告を表示する。
+セッション処理成功まで`accept_staging()`を呼ばない。workspace操作失敗は直前入力を壊さず、一般警告を表示する。候補状態の空入力判定は`current_primary_terms`だけで決めず、`sender_key`も無い場合に限って「検索語を入力してください」とする。
 
 - [ ] **Step 4: 案内と処理中状態を更新する**
 
@@ -628,14 +660,14 @@ git commit -m "docs: Outlook直接D&Dの検証結果を記録"
 2. 添付なしメールを、送信者表示名を含むメール情報による1案件として処理できる。
 3. 添付ありメールを、メール情報・全添付名・読めた対応文書本文による1案件として処理できる。
 4. Outlook添付だけを単一・複数でD&Dし、既存通常ファイル規則で処理できる。
-5. `山田 太郎`と`山田太郎`を同じ送信者キーとして候補へ主照合1件を加算できる。
+5. `山田 太郎`と`山田太郎`を同じ送信者キーとして候補へ主照合1件を加算でき、一般主検索語が0件でも送信者一致だけで候補を表示できる。
 6. 同じ送信者表示名の別人をメールアドレスで区別しない。
 7. 送信者を取得できなくても他のメール情報で推薦を継続できる。
 8. 日本語、空白、括弧、同名を含む仮想ファイルを内容と順序を壊さず受け取れる。
 9. メール2通以上を拒否し、直前の入力、検索語、候補、確定パスを維持できる。
 10. メール項目または一部添付を読めない場合も、読めた情報で推薦を継続し、状態を表示できる。
 11. D&D初期化に失敗してもアプリを終了せず、Explorer D&Dとファイル選択を利用できる。
-12. DragEnterで生成された未参照実体と、失敗したD&Dの実体だけを削除できる。
+12. DragEnterで生成された未参照実体を次のD&D処理開始時またはアプリ終了時までに削除し、失敗したD&Dの実体を失敗時に削除できる。
 13. 入力置換、手動復帰、終了時に所有するOutlook一時実体を削除できる。
 14. D&DだけではOneDrive、Audit、クリップボード、確定パスを変更しない。
 15. メール本文、添付本文、送信者表示名、検索語全文がランタイムファイルとログへ残らない。
@@ -651,6 +683,7 @@ git commit -m "docs: Outlook直接D&Dの検証結果を記録"
 | `accept_staging()`失敗後に次の入力が混在する | 失敗時も空の新stagingを必ず作りTkDNDへ再設定する |
 | 対応添付の保存失敗が母数から消える | targetを保存前、parsedを文書解析後に確定する |
 | 送信者空白正規化が一般検索へ誤一致を増やす | 一般検索語と分離した`sender_key_path`だけで照合する |
+| 送信者単独一致で候補が多数になる | 送信者単独候補を許可する要件は維持し、既存の候補件数上限と祖先・兄弟折り畳みを適用する |
 | 送信者情報が永続化される | 生表示名を公開型へ出さず、キーもInputStateの現在入力だけに保持する |
 | 一時MSG・添付を相談時に見失う | 次の入力前に添付する案内とREADMEの寿命説明を追加する |
 | 異常終了時に一時ファイルが残る | 正常終了cleanupを必須とし、起動時の古いtemp掃除は別計画とする |
@@ -674,6 +707,18 @@ git commit -m "docs: Outlook直接D&Dの検証結果を記録"
 | L-2 app.py対象行 | Task 5で`app.py:544`へ修正 |
 | L-3 一時MSGの存在 | Global Constraints、Task 6、README更新 |
 
+### 8.1 第2回レビュー指摘の反映
+
+| 指摘 | 判定・反映先 |
+|---|---|
+| NA-1 送信者単独候補 | 不採用。ユーザー要件として一般主検索語0件でも候補を表示する。Global Constraints、§2.2、§3.4、Task 3、受け入れ条件5へ明記 |
+| NA-2 `open(`安全制約の脱落 | 採用。Task 2 Step 4を現行4項目へ戻す |
+| NA-3 一致理由の表示 | 採用。生の送信者名を持たない`Candidate.sender_matched`と固定表示を§3.4、Task 3へ追加 |
+| NA-4 DragEnter孤児の削除時期 | 採用。受け入れ条件12を次回D&D開始時または終了時までと明記 |
+| NA-5 `inspect.getsource`への不要変更 | 採用。現行の`Path.read_text()`を維持 |
+| NA-6 不正確なテスト行番号 | 採用。該当行番号を削除 |
+| 添付だけの複数D&D自動テスト不足 | 採用。Task 5 Step 1へ追加 |
+
 ## 9. 再レビューで確認してほしい点
 
 1. Tcl辞書補正と`DND_FILES`単独登録が同梱TkDNDで成立するか。
@@ -691,6 +736,8 @@ git commit -m "docs: Outlook直接D&Dの検証結果を記録"
 - クラシックOutlook、Python 3.12、`tkinterdnd2==0.6.2`の実行環境を利用できる。
 - 実装前のpytest、Windows GUI結合テスト、ruffの基準値を記録している。
 - Global Constraintsと受け入れ条件に未解決の矛盾がない。
+- Cursorから本計画が要求するSuperpowers skillを参照できる。
+- ユーザーの通常作業ツリーから分離した実装用worktreeをCursorで開き、Coordinator、Implementer、Task Reviewer、Final ReviewerのAgent Tabsを表示できる。
 
 ## 11. 参考資料
 
@@ -698,3 +745,5 @@ git commit -m "docs: Outlook直接D&Dの検証結果を記録"
 - Microsoft Learn: [MailItem.SenderName property](https://learn.microsoft.com/en-us/office/vba/api/outlook.mailitem.sendername)
 - Microsoft Learn: [IDropTarget interface](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nn-oleidl-idroptarget)
 - PyPI: [tkinterdnd2](https://pypi.org/project/tkinterdnd2/)
+- Cursor: [Agents Window and Agent Tabs](https://cursor.com/changelog/3-0)
+- Cursor: [Best practices for coding with agents](https://cursor.com/blog/agent-best-practices)

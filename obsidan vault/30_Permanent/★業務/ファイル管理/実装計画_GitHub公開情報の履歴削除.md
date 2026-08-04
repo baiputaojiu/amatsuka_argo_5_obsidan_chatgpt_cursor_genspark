@@ -14,6 +14,7 @@
 - フォルダ構造一覧、生成詳細ページ、生成目次、生成スクリプトを全履歴から除去する。
 - 存続文書に含まれる実際のフォルダ名・階層・詳細内容・削除対象への参照も全履歴から除去または一般表現へ置換する。
 - 「全階層を検索する」等、実構造を明かさない一般要件とプログラム本体は残す。
+- 実際の年度フォルダ名、命名例、階層断片は非公開情報として除去する。年度単位で探索する一般機能は公開対象として残し、設定例とテストデータは実名ではない合成名へ置換する。
 - ローカルの私用資料は削除せず、元の配置で未追跡・ignore状態として保持する。
 - 現在の未コミット変更を上書き、破棄、履歴書き換え対象へ混入させない。
 - force-push前に全remote refsのスナップショットを保存し、開始後のリモート更新を検知した場合は中止する。
@@ -31,7 +32,7 @@
 | 対象リポジトリ | `baiputaojiu/amatsuka_argo_5_obsidan_chatgpt_cursor_genspark` |
 | 公開状態 | Publicを維持 |
 | 作成日 | 2026-08-04 |
-| 状態 | 実行前・Claude Codeレビュー待ち |
+| 状態 | 実行前・Claude Code第3回レビュー待ち |
 | 履歴書き換え方式 | `git-filter-repo --sensitive-data-removal --invert-paths` |
 | リモート更新方式 | 最終承認後の`git push --force --mirror origin` |
 
@@ -49,6 +50,8 @@ glob:private/local-detail-*.md
 literal:private/local-file-management.md
 literal:private/local-page-generator.py
 ```
+
+`glob:`の`*`は`/`を跨いで一致し得るため、Task 1で全履歴の一致パスを列挙する。想定ディレクトリ直下以外へ1件でも一致する場合は、この`glob:`を使用せず、確認済みの各パスを`literal:`で個別列挙する。
 
 同じ資料が過去に別パス・別名で存在した場合は、`git log --all --name-status --follow`と`git filter-repo --analyze`の結果から旧パスを同ファイルへ追加する。旧パスが0件である場合は、その確認結果を実行記録へ残す。
 
@@ -69,6 +72,15 @@ regex:(?<!/)private/local-detail-[^\r\n`/]+\.md==>***REMOVED***
 ```
 
 実フォルダ名の規則は、削除対象資料と存続文書の共通語をローカルで抽出して作る。ファイル自体はリポジトリ外に置き、内容を画面出力、Audit、コミットへ含めない。短い一般語、年度表現、製品名等まで過剰置換しないよう、各規則を`git grep`で事前確認する。書き換え後の`.gitignore`を期待ファイルとbyte比較し、固定規則または実フォルダ名規則がignore行を変更していないことをforce-push前に確認する。
+
+### 2.2.1 存続コード・テスト内の実名
+
+実フォルダ名・階層断片が存続する設定例、テスト、一般文書は、一律に`***REMOVED***`へ置換しない。最新版の準備コミットで次の規則に従って一般化し、その結果を履歴上の期待内容とする。
+
+1. 設定例とテストデータは、実際の年度フォルダ名や階層を示さない合成名へ置換し、テストの期待値も同じ合成名へ更新する。
+2. 一般文書は、実名、件数、具体階層、実例だけを一般表現へ置換し、年度単位の探索、推薦、回帰テストという一般要件は残す。
+3. 変更した存続パスを`allowed-changed-paths.txt`へ列挙し、準備コミットの期待ファイルをリポジトリ外へ保存してSHA-256を記録する。
+4. 準備コミットでアプリの全自動テストとruffを通してから通常pushする。`***REMOVED***`を設定値やテスト入力として使用しない。
 
 ### 2.3 最新版から削除する参照
 
@@ -97,6 +109,7 @@ regex:(?<!/)private/local-detail-[^\r\n`/]+\.md==>***REMOVED***
 - open PR、fork、ブランチ保護、共同利用者の有無を確認できない。
 - 現在の未コミット変更をリポジトリ外へバックアップできない。
 - 削除パスまたは置換語句の一覧に未確認項目がある。
+- 許可変更パスの期待ファイルとSHA-256をリポジトリ外へ保存できない。
 - mirror cloneの検証で対象外ファイルのtree差分が発生する。
 - force-push直前のremote refsが開始時スナップショットと異なる。
 - ユーザーからforce-push直前の明示承認を得ていない。
@@ -111,7 +124,9 @@ regex:(?<!/)private/local-detail-[^\r\n`/]+\.md==>***REMOVED***
 - Create outside repository: `remote-refs-force-baseline.txt`
 - Create outside repository: `private-removal-paths.txt`
 - Create outside repository: `private-replacements.txt`
+- Create outside repository: `private-verification-patterns.txt`
 - Create outside repository: `allowed-changed-paths.txt`
+- Create outside repository: `expected-allowed-blobs.tsv`と期待ファイル群
 
 - [ ] **Step 1: ツールと認証を確認する**
 
@@ -131,14 +146,15 @@ gh repo view baiputaojiu/amatsuka_argo_5_obsidan_chatgpt_cursor_genspark --json 
 gh pr list --state open --limit 100
 gh api repos/baiputaojiu/amatsuka_argo_5_obsidan_chatgpt_cursor_genspark --jq '{forks_count,open_issues_count}'
 gh api repos/baiputaojiu/amatsuka_argo_5_obsidan_chatgpt_cursor_genspark/branches --paginate --jq '.[] | {name,protected}'
+git ls-remote origin | ForEach-Object { ($_ -split "`t")[1] } | Group-Object { ($_ -split '/')[1] } | Select-Object Count, Name
 ```
 
-Expected: `visibility`は`PUBLIC`。open PR、fork、protected branchの実数を実行記録へ保存する。
+Expected: `visibility`は`PUBLIC`。open PR、fork、protected branchに加え、`refs/heads/*`、`refs/tags/*`、`refs/pull/*`、その他refの実数を実行記録へ保存する。
 
 - [ ] **Step 3: 準備開始前のremote refsをリポジトリ外へ保存する**
 
 ```powershell
-git ls-remote --heads --tags origin | Set-Content -LiteralPath $cleanupRemoteRefs -Encoding utf8
+git ls-remote origin | Set-Content -LiteralPath $cleanupRemoteRefs -Encoding utf8
 ```
 
 `$cleanupRemoteRefs`はタスク専用一時ディレクトリ内の絶対パスとし、リポジトリ内へ作らない。この一覧は監査用であり、Task 5の同時更新判定には準備push後の別一覧を使う。
@@ -152,9 +168,22 @@ git filter-repo --analyze
 
 分析結果から改名・移動履歴を確認し、§2.1のmanifestを確定する。分析出力はコミットしない。
 
+詳細ページの`glob:`が想定ディレクトリ直下以外へ一致しないことも確認する。該当があれば`glob:`を廃止し、確認済みパスを`literal:`で列挙する。
+
+コミットメッセージは`--replace-text`の対象外なので、`private-verification-patterns.txt`の各リテラルを全コミットメッセージへ照合する。
+
+```powershell
+$cleanupPrivateLiterals = Get-Content -LiteralPath $cleanupVerificationPatterns | Where-Object { $_.Length -gt 0 }
+if (-not $cleanupPrivateLiterals) { throw "Verification patterns are empty." }
+$cleanupMessageText = git log --all --format='%H%n%B%n--END--'
+$cleanupMessageHits = $cleanupMessageText | Select-String -SimpleMatch -Pattern $cleanupPrivateLiterals
+```
+
+Expected: 0件。1件以上なら`--replace-message $cleanupReplacements`をTask 4 Step 3へ追加し、書き換え後にも同じ検査を行う。
+
 - [ ] **Step 5: 存続文書の具体情報を棚卸しする**
 
-削除資料の名称と階層断片を存続文書へ照合し、`private-replacements.txt`を確定する。置換前後のヒット件数を記録し、一般語の誤置換が0件であることを人手確認する。パス削除、内容置換、`.gitignore`追加によりblob変更を許可するパスだけを`allowed-changed-paths.txt`へ列挙する。
+削除資料の名称と階層断片を存続ファイルへ照合し、`private-replacements.txt`と、書き換え後検証用のリテラルだけを持つ`private-verification-patterns.txt`を確定する。設定例・テスト・一般文書を§2.2.1に分類し、置換前後のヒット件数を記録して一般語の誤置換が0件であることを人手確認する。パス削除、内容置換、合成名化、`.gitignore`追加によりblob変更を許可するパスだけを`allowed-changed-paths.txt`へ列挙する。
 
 ### Task 2: ローカル資料と未コミット変更の保護
 
@@ -184,7 +213,7 @@ Expected: 全対象でコピー元とコピー先のSHA-256が一致する。不
 
 **Files:**
 - Modify: `.gitignore`
-- Modify: 実構造を参照する存続文書
+- Modify: 実構造を参照する存続文書、設定例、テスト
 - Untrack, keep on disk: §2.1の4分類
 
 - [ ] **Step 1: `.gitignore`の失敗先行確認を行う**
@@ -211,9 +240,11 @@ foreach ($cleanupTrackedDetail in $cleanupTrackedDetails) {
 
 PowerShellまたはGitのglob解釈に依存せず、実行時は`git ls-files`で得た各パスを個別に`git rm --cached -- <exact-path>`へ渡す。
 
-- [ ] **Step 4: 存続文書から実構造情報を一般化する**
+- [ ] **Step 4: 存続ファイルから実構造情報を一般化する**
 
-- [ ] **Step 5: 最新treeを検証する**
+一般文書は実名・具体階層・詳細だけを一般表現へ変更する。設定例とテストは実際の命名を示さない合成名へ変更し、期待値も同時に更新する。変更後、`private-verification-patterns.txt`の全リテラルが最新版の追跡ファイルで0件であり、`***REMOVED***`が設定値またはテスト入力へ入っていないことを確認する。
+
+- [ ] **Step 5: 最新treeと許可変更パスの期待値を検証する**
 
 ```powershell
 git check-ignore -v --no-index -- "private/local-structure.txt"
@@ -221,7 +252,9 @@ git diff --cached --name-status
 git diff --cached --check
 ```
 
-Expected: 私用資料は削除予定としてstageされるがローカルには存在し、無関係なユーザー変更はstageされない。
+アプリの全自動テストとruffも実行する。Expected: 私用資料は削除予定としてstageされるがローカルには存在し、合成名へ変更した設定例・テストを含めて検査が成功し、無関係なユーザー変更はstageされない。
+
+準備コミット予定内容を一時worktreeへ展開し、`allowed-changed-paths.txt`の各存続ファイルをリポジトリ外の`expected-allowed/`へコピーする。`Get-FileHash -Algorithm SHA256`で`expected-allowed-blobs.tsv`へ`path<TAB>sha256`を記録する。`.gitignore`は必ず含め、期待ファイルは履歴書き換え後の出力から作らない。
 
 - [ ] **Step 6: 準備コミットを作成して通常pushする**
 
@@ -235,7 +268,7 @@ git push origin codex/outlook-direct-dnd-plan
 - [ ] **Step 7: 準備push後の全remote refsをforce-push基準として保存する**
 
 ```powershell
-git ls-remote --heads --tags origin | Set-Content -LiteralPath $cleanupRemoteRefsForceBaseline -Encoding utf8
+git ls-remote origin | Set-Content -LiteralPath $cleanupRemoteRefsForceBaseline -Encoding utf8
 ```
 
 以後、Task 6完了まで通常pushを含む全リモート更新を凍結する。
@@ -262,23 +295,26 @@ git filter-repo --analyze
 
 各head/tagのtip SHAごとに`git ls-tree -r`を実行し、`allowed-changed-paths.txt`に含まれるパスを除いた`mode type object path`をリポジトリ外の`before-trees/<ref>.txt`へ保存する。ref名と旧tip SHAの対応も保存する。
 
+許可変更パスは除外するだけで終わらせない。各head/tag tipの許可変更パスをリポジトリ外へ展開し、承認済み規則だけを反映した期待ファイルを`expected-allowed/<ref>/`へ作る。変更不要なblobは展開内容をそのまま期待ファイルとし、変更が必要なblobは変換前後の差分を人手確認する。`expected-allowed-blobs.tsv`へ`ref<TAB>path<TAB>sha256`を保存し、default branch tipについてはTask 3で保存した期待ファイルと一致させる。期待ファイルはfilter-repo実行後の出力から作らない。
+
 - [ ] **Step 3: パス除去と内容置換を1回の書き換えで実行する**
 
 ```powershell
 git filter-repo --sensitive-data-removal --invert-paths --paths-from-file $cleanupRemovalPaths --replace-text $cleanupReplacements
 ```
 
-- [ ] **Step 4: filter-repoが削除した`origin`を検証付きで戻す**
+Task 1のコミットメッセージ検査が1件以上の場合だけ、同じコマンドへ`--replace-message $cleanupReplacements`を追加する。`--sensitive-data-removal`は実行直前にoriginから全refを再fetchするため、Task 3 Step 7以降のリモート凍結が前提である。実行直前にも`git ls-remote origin`をforce baselineと比較し、差分があればmirrorを破棄して最初からやり直す。
+
+- [ ] **Step 4: `origin`を検証する**
 
 ```powershell
 $cleanupExpectedRemote = "https://github.com/baiputaojiu/amatsuka_argo_5_obsidan_chatgpt_cursor_genspark.git"
-if (-not (git remote)) {
-    git remote add origin $cleanupExpectedRemote
-}
 if ((git remote get-url origin) -ne $cleanupExpectedRemote) {
     throw "Unexpected origin URL after history rewrite."
 }
 ```
+
+`--sensitive-data-removal`ではoriginが保持されることを前提とし、存在とURL一致だけを確認する。originが無い、またはURLが異なる場合は自動追加・変更せず停止する。
 
 - [ ] **Step 5: `changed-refs`とfirst changed commitを保存する**
 
@@ -296,11 +332,25 @@ Expected: 0件。
 
 - [ ] **Step 2: 置換対象が全refから消えたことを確認する**
 
-全heads/tagsへ`git grep -I`を実行し、`private-replacements.txt`の左辺が0件であることを確認する。`***REMOVED***`の出現は許容する。
+`private-verification-patterns.txt`はregex式ではなく、消えるべきリテラルを1行1件で持つ。バイナリ判定による検査漏れを避けるため`-a`で全blobをテキストとして扱い、全heads/tagsを検査する。
+
+```powershell
+$cleanupAllRefs = git for-each-ref --format='%(refname)' refs/heads refs/tags
+foreach ($cleanupRef in $cleanupAllRefs) {
+    $cleanupHits = git grep -a -n -F -f $cleanupVerificationPatterns $cleanupRef
+    if ($cleanupHits) { throw "Residual private text in $cleanupRef" }
+}
+```
+
+`***REMOVED***`の出現は許容する。Task 1でコミットメッセージに該当があった場合は、書き換え後の`git log --all --format='%B'`にも同じリテラル検査を行う。
 
 - [ ] **Step 3: 対象外treeの一致を機械比較する**
 
 commit mapの実パスを`git rev-parse --git-path filter-repo/commit-map`で取得し、旧tip SHAに対応する新tip SHAを求める。書き換え前に保存した`before-trees/<ref>.txt`と、新tipの`git ls-tree -r`から`allowed-changed-paths.txt`を除いた結果を比較する。差分が1件でもあればforce-pushしない。
+
+- [ ] **Step 3-2: 許可変更パスを期待ファイルと比較する**
+
+書き換え後の各head/tag tipを一時領域へ展開し、`allowed-changed-paths.txt`の各存続ファイルについて`Get-FileHash -Algorithm SHA256`を実行する。Task 4で確定した`expected-allowed-blobs.tsv`の`ref/path`ごとのSHA-256と1件ずつ比較し、default branchの`.gitignore`を含む全件が一致することを確認する。期待側に存在しない追加パス、期待側から欠落したパス、hash不一致が1件でもあればforce-pushしない。
 
 - [ ] **Step 4: アプリの基準検査をclean work cloneで行う**
 
@@ -320,7 +370,7 @@ py -3.12 -m venv .venv
 - [ ] **Step 5: force-push直前にremote無変更を確認する**
 
 ```powershell
-git ls-remote --heads --tags origin | Set-Content -LiteralPath $cleanupRemoteRefsNow -Encoding utf8
+git ls-remote origin | Set-Content -LiteralPath $cleanupRemoteRefsNow -Encoding utf8
 Compare-Object (Get-Content -LiteralPath $cleanupRemoteRefsForceBaseline) (Get-Content -LiteralPath $cleanupRemoteRefsNow)
 ```
 
@@ -338,7 +388,7 @@ Expected: 0件。差分があれば停止してmirror cloneからやり直す。
 git push --force --mirror origin
 ```
 
-Expected: `refs/pull/*`以外の予定refが更新される。branch protection等で他refが失敗した場合は停止し、部分成功状態を報告する。
+GitHub公式手順どおりmirror pushを維持する。`refs/pull/*`はread-onlyのため失敗し得るので、該当refと影響PR数を記録してTask 8のSupport判断へ渡す。`refs/pull/*`以外で1件でも失敗した場合は停止し、追加pushを行わず部分成功状態を報告する。
 
 - [ ] **Step 2: remote refsを再取得して予定値と比較する**
 
@@ -392,8 +442,8 @@ cached view、PR ref、LFS orphanが残り、GitHubが機密情報と判断し�
 
 1. リポジトリはPublicのまま維持される。
 2. §2.1の対象パスが全remote heads/tagsから消える。
-3. 存続文書の実フォルダ名・階層断片・詳細説明が全remote heads/tagsから消える。
-4. 一般的な要件、実装計画、プログラム、テストは対象外差分なく残る。
+3. 存続ファイルの実フォルダ名・命名例・階層断片・詳細説明が全remote heads/tagsから消える。
+4. 一般的な要件、実装計画、プログラム、テストは`allowed-changed-paths.txt`に列挙した一般化・合成名化以外の差分なく残り、列挙した最新版の存続ファイルは期待SHA-256と一致する。
 5. ローカル私用資料は削除されず、未追跡・ignore状態で利用できる。
 6. 現在のユーザー未コミット変更が保持される。
 7. force-push前後のremote refsと書き換え予定refsが一致する。
@@ -420,6 +470,9 @@ cached view、PR ref、LFS orphanが残り、GitHubが機密情報と判断し�
 6. Public維持という制約下で、force-push前のストップゲートが十分か。
 7. Windows・非ASCIIパスでコマンド例に実行不能または曖昧な箇所がないか。
 8. GitHub Supportへ依頼できない場合の残存リスク表現が正確か。
+9. 設定例・テストを合成名へ変更し、一般的な年度探索要件だけを残す境界が一貫しているか。
+10. 許可変更パスの期待SHA-256比較が、tree比較の除外による検査穴を塞いでいるか。
+11. 全ref一覧、コミットメッセージ、バイナリ扱いblob、`refs/pull/*`の検査と停止条件が十分か。
 
 ## 9. 実行開始条件
 
