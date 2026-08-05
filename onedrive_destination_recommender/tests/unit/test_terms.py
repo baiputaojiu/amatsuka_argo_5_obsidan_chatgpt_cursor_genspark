@@ -14,7 +14,7 @@ from onedrive_destination_recommender.terms import (
 def test_normalize_terms_applies_nfkc_casefold_boundaries_and_deduplication() -> None:
     terms = normalize_terms("ＡＢＣ分類 20XX0101_定例資料_サンプル.pptx A abc")
 
-    assert terms == ("abc", "分類", "20260804", "週報", "秋田")
+    assert terms == ("abc", "分類", "20xx0101", "定例資料", "サンプル")
 
 
 def test_normalize_terms_drops_short_terms_but_keeps_short_numbers_for_primary() -> None:
@@ -38,9 +38,9 @@ def test_initial_terms_from_multiple_file_names_does_not_read_files() -> None:
     assert initial_terms_from_file_names(
         ["20XX0101_定例資料_サンプル.pptx", "Camera-Layout.PDF", "archive.tar.7z"]
     ) == (
-        "20260804",
-        "週報",
-        "秋田",
+        "20xx0101",
+        "定例資料",
+        "サンプル",
         "camera",
         "layout",
         "archive",

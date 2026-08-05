@@ -4,7 +4,7 @@
 
 **Goal:** PublicのGitHubリポジトリから私用フォルダ構造・詳細資料を全ブランチ・タグの履歴ごと除去し、ローカル資料は保持したまま再混入を防止する。
 
-**Architecture:** 対象機能ブランチの作業ツリーと`origin/<default>`基点の分離worktreeで、削除対象を未追跡化してignoreし、存続文書から具体的な構造情報を除去する準備コミットを別々に作る。履歴書き換えは作業ツリーではなく新しい使い捨てmirror cloneに対して`git-filter-repo>=2.47`で行い、削除パスと非公開語句を全refから除去する。ローカル検証、リモート無変更確認、ユーザーの最終承認を通過した場合だけ`git push --force --mirror`を実行し、旧cloneは再利用せず隔離する。
+**Architecture:** 対象機能ブランチの作業ツリーと`origin/<default>`基点の分離worktreeで、削除対象を未追跡化してignoreし、存続文書から具体的な構造情報を除去する準備コミットを別々に作る。履歴書き換えは作業ツリーではなく新しい使い捨てmirror cloneに対して`git-filter-repo>=2.47`で行い、削除パスと非公開語句を全refから除去する。内容置換は`--file-info-callback`から`value.apply_replace_text()`を呼び、ルート直下の`.gitignore`だけ元blobを返して公開済みの再混入防止規則を保持する。ローカル検証、リモート無変更確認、ユーザーの最終承認を通過した場合だけ`git push --force --mirror`を実行し、旧cloneは再利用せず隔離する。
 
 **Tech Stack:** Git、GitHub、GitHub CLI、`git-filter-repo>=2.47`、PowerShell 7。
 
@@ -33,11 +33,11 @@
 | 対象リポジトリ | `baiputaojiu/amatsuka_argo_5_obsidan_chatgpt_cursor_genspark` |
 | 公開状態 | Publicを維持 |
 | 作成日 | 2026-08-04 |
-| 状態 | Claude Code第6回レビュー承認済み・実行環境ゲート確認中 |
+| 状態 | Task 3の2準備差分完成・file-info callback追補レビュー／通常push承認待ち |
 | 履歴書き換え方式 | `git-filter-repo --sensitive-data-removal --invert-paths` |
 | リモート更新方式 | 最終承認後の`git push --force --mirror origin` |
 
-本計画はClaude Code第6回レビューで実行着手可と判定された。§4と§9の実行環境ゲートを満たすまでは、追跡解除、`.gitignore`変更、履歴書き換え、force-push、GitHub設定変更を行わない。
+本計画はClaude Code第6回レビューで実行着手可と判定され、§4と§9の外部環境ゲート、Task 1の棚卸し、Task 2のSHA-256バックアップ検証まで完了した。Task 3の準備中に、計画書内のignore例と本物のルート`.gitignore`が同じ文字列になる境界条件を検出したため、Task 4へパス別callbackを追補した。この追補と2つの準備差分を再レビュー・承認するまで、準備commit、通常push、履歴書き換え、force-pushを行わない。
 
 ## 2. 削除範囲
 
@@ -46,10 +46,10 @@
 実行時にリポジトリ外の`private-removal-paths.txt`へ次の規則をUTF-8で保存する。
 
 ```text
-literal:private/local-structure.txt
-glob:private/local-detail-*.md
-literal:private/local-file-management.md
-literal:private/local-page-generator.py
+literal:***REMOVED***
+glob:***REMOVED***
+literal:***REMOVED***
+literal:***REMOVED***
 ```
 
 `glob:`の`*`は`/`を跨いで一致し得るため、Task 1で全履歴の一致パスを列挙する。想定ディレクトリ直下以外へ1件でも一致する場合は、この`glob:`を使用せず、確認済みの各パスを`literal:`で個別列挙する。
@@ -63,7 +63,7 @@ literal:private/local-page-generator.py
 1. 削除対象ファイル名・参照名を一般表現へ置換する規則。
 2. 存続文書に現れる実フォルダ名・階層断片・詳細説明を`***REMOVED***`へ置換する規則。
 
-固定規則は、行頭`/`を持つ`.gitignore`を壊さないよう、リポジトリ相対パスの直前が`/`ではない文書参照だけを対象にする。
+固定規則には、文書参照だけでなく、計画書のコードブロック内にある行頭`/`付きignore例も含める。ルート直下の`.gitignore`を文字列規則だけで識別することはできないため、Task 4の`--file-info-callback`で`filename == b'.gitignore'`の場合だけ元blobを返す。ネストした`.gitignore`とその他の全テキストblobには`value.apply_replace_text()`を適用する。
 
 ```text
 regex:(?<!/)private/local-structure\.txt==>***REMOVED***
@@ -72,7 +72,7 @@ regex:(?<!/)private/local-page-generator\.py==>***REMOVED***
 regex:(?<!/)private/local-detail-[^\r\n`/]+\.md==>***REMOVED***
 ```
 
-実フォルダ名の規則は、削除対象資料と存続文書の共通語をローカルで抽出して作る。ファイル自体はリポジトリ外に置き、内容を画面出力、Audit、コミットへ含めない。短い一般語、年度表現、製品名等まで過剰置換しないよう、各規則を`git grep`で事前確認する。書き換え後の`.gitignore`を期待ファイルとbyte比較し、固定規則または実フォルダ名規則がignore行を変更していないことをforce-push前に確認する。
+実フォルダ名の規則は、削除対象資料と存続文書の共通語をローカルで抽出して作る。ファイル自体はリポジトリ外に置き、内容を画面出力、Audit、コミットへ含めない。短い一般語、年度表現、製品名等まで過剰置換しないよう、各規則を`git grep`で事前確認する。callbackの合成fixtureで、ルート`.gitignore`はbyte不変、同じ文字列を持つ一般文書とネストした`.gitignore`は置換されることを確認する。書き換え後のルート`.gitignore`は各tipの期待ファイルともbyte比較し、変更されていないことをforce-push前に確認する。
 
 §3の再混入防止規則は、`private-verification-patterns.txt`に含まれる削除対象パスをリポジトリルート直下の`.gitignore`内へ意図的に保持する。固定文字列検査は行頭`/`の有無を区別できないため、最新版検査と全commit検査ではルート直下の`.gitignore` 1ファイルだけをパススペック`:(exclude).gitignore`で除外する。ネストした`.gitignore`は検査対象のまま残す。この除外はユーザーが明示的に承認した境界であり、ルート直下の`.gitignore`の正しさは既定・対象機能ブランチを含む各head/tag tipについて、filter-repo実行前に生成した期待ファイルとのSHA-256比較で担保する。
 
@@ -224,23 +224,23 @@ Expected: 全対象でコピー元とコピー先のSHA-256が一致する。不
 - Untrack, keep on disk: §2.1の4分類
 - Create outside repository: 既定ブランチ専用worktree
 
-- [ ] **Step 1: `.gitignore`の失敗先行確認を行う**
+- [x] **Step 1: `.gitignore`の失敗先行確認を行う**
 
 ```powershell
-git check-ignore -v -- "private/local-structure.txt"
+git check-ignore -v -- "***REMOVED***"
 ```
 
 Expected before edit: ignore規則がないため非0終了。
 
-- [ ] **Step 2: §3のignore規則を追加する**
+- [x] **Step 2: §3のignore規則を追加する**
 
-- [ ] **Step 3: 私用資料をディスクに残して追跡だけ解除する**
+- [x] **Step 3: 私用資料をディスクに残して追跡だけ解除する**
 
 ```powershell
-git rm --cached -- "private/local-structure.txt"
-git rm --cached -- "private/local-file-management.md"
-git rm --cached -- "private/local-page-generator.py"
-$cleanupTrackedDetails = git -c core.quotepath=false ls-files -- "private/local-detail-*.md"
+git rm --cached -- "***REMOVED***"
+git rm --cached -- "***REMOVED***"
+git rm --cached -- "***REMOVED***"
+$cleanupTrackedDetails = git -c core.quotepath=false ls-files -- "***REMOVED***"
 foreach ($cleanupTrackedDetail in $cleanupTrackedDetails) {
     git rm --cached -- $cleanupTrackedDetail
 }
@@ -248,7 +248,7 @@ foreach ($cleanupTrackedDetail in $cleanupTrackedDetails) {
 
 PowerShellまたはGitのglob解釈に依存せず、実行時は`git ls-files`で得た各パスを個別に`git rm --cached -- <exact-path>`へ渡す。
 
-- [ ] **Step 4: 存続ファイルから実構造情報を一般化する**
+- [x] **Step 4: 存続ファイルから実構造情報を一般化する**
 
 一般文書は実名・具体階層・詳細だけを一般表現へ変更する。設定例とテストは実際の命名を示さない合成名へ変更し、期待値も同時に更新する。変更後、ルート直下の`.gitignore`を除く最新版の全追跡ファイルで`private-verification-patterns.txt`の全リテラルが0件であり、`***REMOVED***`が設定値またはテスト入力へ入っていないことを確認する。
 
@@ -262,10 +262,10 @@ if ($cleanupLatestHits) { throw "Residual private text in the prepared worktree.
 
 変更した存続ファイルと`.gitignore`は、`allowed-changed-paths.txt`に含まれることを確認してから、`git add -- <exact-path>`で1パスずつstageする。`git add -A`、`git commit -a`は使わない。私用資料のindex削除はStep 3の`git rm --cached`でstage済みの状態を維持する。
 
-- [ ] **Step 5: 最新treeと許可変更パスの期待値を検証する**
+- [x] **Step 5: 最新treeと許可変更パスの期待値を検証する**
 
 ```powershell
-git check-ignore -v --no-index -- "private/local-structure.txt"
+git check-ignore -v --no-index -- "***REMOVED***"
 git diff --cached --name-status
 git diff --cached --check
 ```
@@ -274,7 +274,7 @@ git diff --cached --check
 
 対象機能ブランチの準備コミット予定内容を一時worktreeへ展開し、`allowed-changed-paths.txt`の各存続ファイルをリポジトリ外の`expected-allowed/feature/`へコピーする。`Get-FileHash -Algorithm SHA256`で`expected-allowed-blobs.tsv`へ`ref<TAB>path<TAB>sha256`を記録する。`.gitignore`は必ず含め、期待ファイルは履歴書き換え後の出力から作らない。
 
-- [ ] **Step 6: 既定ブランチ専用worktreeでプライバシー準備差分だけを作る**
+- [x] **Step 6: 既定ブランチ専用worktreeでプライバシー準備差分だけを作る**
 
 既定ブランチ名とpush前SHAをGitHubから取得し、対象機能ブランチとは別のリポジトリ外worktreeを`origin/<default>`から作る。既存の同名ローカルブランチまたはworktreeがある場合は自動削除・再利用せず停止する。
 
@@ -329,7 +329,7 @@ git ls-remote origin | Set-Content -LiteralPath $cleanupRemoteRefsForceBaseline 
 
 **Files:**
 - Create outside repository: fresh mirror clone
-- Consume outside repository: `private-removal-paths.txt`、`private-replacements.txt`
+- Consume outside repository: `private-removal-paths.txt`、`private-replacements.txt`、`preserve-root-gitignore-callback.py`
 
 - [ ] **Step 1: 新しい空ディレクトリへmirror cloneする**
 
@@ -347,17 +347,31 @@ git filter-repo --analyze
 
 各head/tagのtip SHAごとに`git ls-tree -r`を実行し、`allowed-changed-paths.txt`に含まれるパスを除いた`mode type object path`をリポジトリ外の`before-trees/<ref>.txt`へ保存する。ref名と旧tip SHAの対応も保存する。
 
-許可変更パスは除外するだけで終わらせない。各head/tag tipの許可変更パスをリポジトリ外へ展開し、Task 1 Step 5で人が1回だけ承認した規則を定義順に適用する決定的な変換helperで、filter-repo実行前に期待ファイルを`expected-allowed/<ref>/`へ機械生成する。helperとmanifestはリポジトリ外に置き、`literal:`、`glob:`、`regex:`ごとの合成fixtureで期待どおりのbyte置換になることを検証する。人手確認の対象は規則、適用順、fixture、既定・対象機能ブランチの準備差分であり、各refの変換差分を個別に目視しない。
+許可変更パスは除外するだけで終わらせない。各head/tag tipの許可変更パスをリポジトリ外へ展開し、Task 1 Step 5で人が1回だけ承認した規則を定義順に適用する決定的な変換helperで、filter-repo実行前に期待ファイルを`expected-allowed/<ref>/`へ機械生成する。helperとmanifestはリポジトリ外に置き、`literal:`、`glob:`、`regex:`ごとの合成fixtureで期待どおりのbyte置換になることを検証する。さらにルート`.gitignore`、同一文字列を含む一般文書、ネストした`.gitignore`の3 fixtureを用意し、callbackがルート1ファイルだけを不変にすることを確認する。人手確認の対象は規則、適用順、fixture、既定・対象機能ブランチの準備差分であり、各refの変換差分を個別に目視しない。
 
 変更不要なblobは展開内容をそのまま期待ファイルとする。既定ブランチと対象機能ブランチのtipはTask 3で保存した各期待ファイルを正本とし、その他のbranch/tag tipは上記の機械変換結果を正本とする。`expected-allowed-blobs.tsv`へ`ref<TAB>path<TAB>sha256`を保存する。期待ファイルとSHA-256はfilter-repo実行後の出力から作らない。
 
 - [ ] **Step 3: パス除去と内容置換を1回の書き換えで実行する**
 
 ```powershell
-git filter-repo --sensitive-data-removal --invert-paths --paths-from-file $cleanupRemovalPaths --replace-text $cleanupReplacements
+git filter-repo --sensitive-data-removal --invert-paths --paths-from-file $cleanupRemovalPaths --replace-text $cleanupReplacements --file-info-callback $cleanupFileInfoCallback
 ```
 
-Task 1のコミットメッセージ検査が1件以上の場合だけ、同じコマンドへ`--replace-message $cleanupReplacements`を追加する。`--sensitive-data-removal`は実行直前にoriginから全refを再fetchするため、Task 3 Step 9以降のリモート凍結が前提である。実行直前にも`git ls-remote origin`をforce baselineと比較し、差分があればmirrorを破棄して最初からやり直す。
+`$cleanupFileInfoCallback`はリポジトリ外の絶対パスとし、内容は次の関数本体に固定する。
+
+```python
+if filename == b".gitignore":
+    return (filename, mode, blob_id)
+contents = value.get_contents_by_identifier(blob_id)
+if value.is_binary(contents):
+    return (filename, mode, blob_id)
+new_contents = value.apply_replace_text(contents)
+if new_contents != contents:
+    blob_id = value.insert_file_with_contents(new_contents)
+return (filename, mode, blob_id)
+```
+
+`filename == b'.gitignore'`はリポジトリルートの1ファイルだけに一致し、`sub/.gitignore`には一致しない。Task 1のコミットメッセージ検査が1件以上の場合だけ、同じコマンドへ`--replace-message $cleanupReplacements`を追加する。`--sensitive-data-removal`は実行直前にoriginから全refを再fetchするため、Task 3 Step 9以降のリモート凍結が前提である。実行直前にも`git ls-remote origin`をforce baselineと比較し、差分があればmirrorを破棄して最初からやり直す。
 
 - [ ] **Step 4: `origin`を検証する**
 
@@ -470,8 +484,8 @@ git ls-remote --heads --tags origin
 
 ```powershell
 git status --short
-git check-ignore -v --no-index -- "private/local-structure.txt"
-git log --all -- "private/local-structure.txt"
+git check-ignore -v --no-index -- "***REMOVED***"
+git log --all -- "***REMOVED***"
 ```
 
 Expected: 私用資料はstatusへ現れず、履歴は0件。復元したユーザー変更だけが意図どおり表示される。
@@ -552,7 +566,14 @@ cached view、PR ref、LFS orphanが残り、GitHubが機密情報と判断し�
 | 総評 | 実行着手可。NE-1〜NE-3は解消済みで、新規Blocker・High・Mediumなし |
 | NF-1 Task 3 Step 4の除外対象表現 | Lowとして採用。「ルート直下の`.gitignore`を除く」へ修正し、コード例と後続説明へ統一 |
 | NF-2 §8.2の旧表現 | Lowとして採用。ND-1の記録を「ルート直下の`.gitignore` 1ファイル」へ修正 |
-| 実行環境 | PowerShell 7.5.5とGitHub CLI 2.96.0を確認済み。`gh auth status`の再認証と`git-filter-repo>=2.47`の導入が未完了 |
+| 実行環境 | PowerShell 7.5.5、GitHub CLI 2.96.0、`gh auth status`成功、`git-filter-repo` 2.47.0を確認済み |
+
+### 8.5 実行時追補
+
+| 項目 | 判定・反映先 |
+|---|---|
+| ルート`.gitignore`と計画書内ignore例の同一文字列 | 単純な`--replace-text`では両方が変更されるため、Task 4へ`--file-info-callback`を追加。ルート`.gitignore`だけ元blobを返し、一般文書とネストした`.gitignore`にはmanifestを適用する |
+| 追補後の停止条件 | callbackの合成fixture、対象機能ブランチと既定ブランチの準備差分、全検証結果を再レビューするまでcommit・通常push・履歴書き換えへ進まない |
 
 ## 9. 実行開始条件
 

@@ -357,7 +357,7 @@ def test_build_document_terms_merges_every_supported_input(tmp_path: Path) -> No
     assert result.parsed_count == 2
     assert result.target_count == 2
     assert result.warning is None
-    assert "週報" in result.auxiliary_terms
+    assert "定例" in result.auxiliary_terms
     assert "巻き取りカメラ" in result.auxiliary_terms
 
 
@@ -388,7 +388,7 @@ def test_build_document_terms_reports_partial_failure(tmp_path: Path) -> None:
     assert result.parsed_count == 1
     assert result.target_count == 2
     assert result.warning == "一部のファイルの本文を利用できませんでした。"
-    assert "週報" in result.auxiliary_terms
+    assert "定例" in result.auxiliary_terms
 
 
 def test_build_document_terms_reports_total_failure_without_raising(tmp_path: Path) -> None:

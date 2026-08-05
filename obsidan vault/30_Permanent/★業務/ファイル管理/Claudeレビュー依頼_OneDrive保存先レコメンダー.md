@@ -55,8 +55,8 @@ OneDrive年度別業務フォルダ向け「保存先レコメンダー」の要
 対象ブランチの`337679f`を参照し、次の順に読んでください。
 
 1. `obsidan vault/30_Permanent/★業務/ファイル管理/提案書_OneDrive保存先レコメンダー.md`
-2. `private/local-file-management.md`
-3. `private/local-detail-010_FY_PREVIOUS.md`
+2. 非公開資料（ローカルのみ）
+3. 非公開資料（ローカルのみ）
 4. `outlook_google_sync/docs/SYSTEM_ARCHITECTURE.md`
 5. `obsidan vault/30_Permanent/★業務/ファイル管理/要件定義_OneDrive保存先レコメンダー.md`
 
