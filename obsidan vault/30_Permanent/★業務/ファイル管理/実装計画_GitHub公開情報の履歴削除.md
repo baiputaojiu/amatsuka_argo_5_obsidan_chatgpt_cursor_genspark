@@ -33,11 +33,11 @@
 | 対象リポジトリ | `baiputaojiu/amatsuka_argo_5_obsidan_chatgpt_cursor_genspark` |
 | 公開状態 | Publicを維持 |
 | 作成日 | 2026-08-04 |
-| 状態 | 実行前・Claude Code第6回レビュー待ち |
+| 状態 | Claude Code第6回レビュー承認済み・実行環境ゲート確認中 |
 | 履歴書き換え方式 | `git-filter-repo --sensitive-data-removal --invert-paths` |
 | リモート更新方式 | 最終承認後の`git push --force --mirror origin` |
 
-本計画のレビュー完了までは、追跡解除、`.gitignore`変更、履歴書き換え、force-push、GitHub設定変更を行わない。
+本計画はClaude Code第6回レビューで実行着手可と判定された。§4と§9の実行環境ゲートを満たすまでは、追跡解除、`.gitignore`変更、履歴書き換え、force-push、GitHub設定変更を行わない。
 
 ## 2. 削除範囲
 
@@ -250,7 +250,7 @@ PowerShellまたはGitのglob解釈に依存せず、実行時は`git ls-files`�
 
 - [ ] **Step 4: 存続ファイルから実構造情報を一般化する**
 
-一般文書は実名・具体階層・詳細だけを一般表現へ変更する。設定例とテストは実際の命名を示さない合成名へ変更し、期待値も同時に更新する。変更後、`.gitignore`を除く最新版の全追跡ファイルで`private-verification-patterns.txt`の全リテラルが0件であり、`***REMOVED***`が設定値またはテスト入力へ入っていないことを確認する。
+一般文書は実名・具体階層・詳細だけを一般表現へ変更する。設定例とテストは実際の命名を示さない合成名へ変更し、期待値も同時に更新する。変更後、ルート直下の`.gitignore`を除く最新版の全追跡ファイルで`private-verification-patterns.txt`の全リテラルが0件であり、`***REMOVED***`が設定値またはテスト入力へ入っていないことを確認する。
 
 ```powershell
 $cleanupLatestHits = git grep -a -n -F -f $cleanupVerificationPatterns -- . ':(exclude).gitignore'
@@ -534,7 +534,7 @@ cached view、PR ref、LFS orphanが残り、GitHubが機密情報と判断し�
 
 | 指摘 | 判定・反映先 |
 |---|---|
-| ND-1 `.gitignore`が検証リテラルへ必ず一致する | Highとして採用。ユーザー判断により`.gitignore`全体を最新版・全commitの固定文字列検査から除外し、各head/tag tipの期待SHA-256比較で担保する。§2.2、Task 3 Step 4、Task 5 Step 2・3-2へ反映 |
+| ND-1 `.gitignore`が検証リテラルへ必ず一致する | Highとして採用。ユーザー判断によりルート直下の`.gitignore` 1ファイルを最新版・全commitの固定文字列検査から除外し、各head/tag tipの期待SHA-256比較で担保する。§2.2、Task 3 Step 4、Task 5 Step 2・3-2へ反映 |
 | ND-3 一時worktreeとブランチの後処理が未定義 | 採用。ignore済みローカル資料を保護するため自動削除せず、絶対パス・旧SHA・状態を記録して旧cloneとともに隔離する。削除はSHA再確認と別途承認を必須とする。Task 7 Step 4へ反映 |
 
 ### 8.3 第5回レビュー指摘の反映
@@ -545,21 +545,14 @@ cached view、PR ref、LFS orphanが残り、GitHubが機密情報と判断し�
 | NE-2 既定ブランチworktreeの検査対象が曖昧 | 採用。Task 3 Step 6へ`git -C $cleanupDefaultWorktree grep ...`の完全なコマンドと停止条件を追加 |
 | NE-3 `.gitignore`除外範囲の表現が広すぎる | 採用。ルート直下の1ファイルだけを除外し、ネストした`.gitignore`は検査対象に残す実挙動へ§2.2、Task 3、Task 5の表現を統一 |
 
-### 8.4 第6回レビューで確認してほしい点
+### 8.4 第6回レビュー結果
 
-1. `--paths-from-file`と`--replace-text`を同時使用する方式で削除範囲が過不足なく適用されるか。
-2. path rename、全branch/tag、PR refs、fork、cacheの確認に漏れがないか。
-3. 既定ブランチ専用worktreeでプライバシー差分だけを通常pushし、対象機能ブランチ全体を既定ブランチへ進めない手順がNC-1を安全に解消するか。
-4. 対象外tree一致検証が誤削除を検知するのに十分か。
-5. 現在の未コミット変更とローカル私用資料を保護する手順が十分か。
-6. Public維持という制約下で、force-push前のストップゲートが十分か。
-7. Windows・非ASCIIパスでコマンド例に実行不能または曖昧な箇所がないか。
-8. GitHub Supportへ依頼できない場合の残存リスク表現が正確か。
-9. 設定例・テストを合成名へ変更し、一般的な年度探索要件だけを残す境界が一貫しているか。
-10. 承認済み規則からfilter-repo実行前に期待内容を機械生成し、SHA-256比較する方式がtree比較の除外による検査穴を塞いでいるか。
-11. ルート直下の`.gitignore` 1ファイルだけを全commitのリテラル検査から除外し、各head/tag tipの期待SHA-256で担保するユーザー承認済み境界に実行上の矛盾がないか。
-12. 既定ブランチ準備用worktreeを自動削除せず、旧cloneと同じ隔離対象として記録する手順がローカル資料と旧履歴の再混入防止を両立するか。
-13. 受け入れ条件3、§7、Task 8 Step 3が、ルート直下の`.gitignore`へ公開状態で残るパス・名称を一貫して扱っているか。
+| 項目 | 判定・反映先 |
+|---|---|
+| 総評 | 実行着手可。NE-1〜NE-3は解消済みで、新規Blocker・High・Mediumなし |
+| NF-1 Task 3 Step 4の除外対象表現 | Lowとして採用。「ルート直下の`.gitignore`を除く」へ修正し、コード例と後続説明へ統一 |
+| NF-2 §8.2の旧表現 | Lowとして採用。ND-1の記録を「ルート直下の`.gitignore` 1ファイル」へ修正 |
+| 実行環境 | PowerShell 7.5.5とGitHub CLI 2.96.0を確認済み。`gh auth status`の再認証と`git-filter-repo>=2.47`の導入が未完了 |
 
 ## 9. 実行開始条件
 
