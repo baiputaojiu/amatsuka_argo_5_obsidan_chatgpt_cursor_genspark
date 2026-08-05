@@ -239,7 +239,7 @@
 |---|---|
 | ファイル地図（目次） | `private/local-file-management.md` |
 | トップフォルダ詳細 | 同フォルダ `private-detail.md` |
-| private-structure | 同フォルダ `private-structure.txt` |
+| 非公開構造資料 | 同フォルダ `private-structure.txt` |
 | フル一覧（ファイル名込み） | OneDrive 上 `private-file-list.txt`（Vault 外参照） |
 | 参考実装 | `outlook_google_sync/`（GUI・Preview・Audit・Connector 分離） |
 

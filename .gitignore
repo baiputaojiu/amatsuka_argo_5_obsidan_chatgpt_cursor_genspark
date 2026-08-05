@@ -23,3 +23,9 @@ pytest-cache-files-*/
 settings.json
 catalog.json
 audit.jsonl
+
+# Private local folder documentation must never be published.
+/obsidan vault/30_Permanent/★業務/ファイル管理/フォルダ階層のみ.txt
+/obsidan vault/30_Permanent/★業務/ファイル管理/詳細_*.md
+/obsidan vault/30_Permanent/★業務/ファイル管理/★ファイル管理.md
+/obsidan vault/30_Permanent/★業務/ファイル管理/_generate_pages.py

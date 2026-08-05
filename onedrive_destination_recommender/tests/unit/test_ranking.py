@@ -119,20 +119,20 @@ def test_three_equal_siblings_fold_to_parent_and_recalculate_display_terms(
     parent = "（Output）定例成果物"
     folders = [
         _folder(settings.previous_year_root, parent),
-        _folder(settings.previous_year_root, f"{parent}/20250401_週報_秋田_特別"),
-        _folder(settings.previous_year_root, f"{parent}/20250408_週報_秋田"),
-        _folder(settings.previous_year_root, f"{parent}/20250415_週報_秋田"),
+        _folder(settings.previous_year_root, f"{parent}/20XX0101_定例_サンプル_特別"),
+        _folder(settings.previous_year_root, f"{parent}/20XX0108_定例_サンプル"),
+        _folder(settings.previous_year_root, f"{parent}/20XX0115_定例_サンプル"),
     ]
 
-    ranked = _rank(folders, settings, ["週報", "秋田"], ["特別", "月報"])
+    ranked = _rank(folders, settings, ["定例", "サンプル"], ["特別", "成果物"])
 
     assert len(ranked) == 1
     folded = ranked[0]
     assert folded.relative_path == parent
     assert folded.primary_match_count == 2
-    assert folded.matched_primary_terms == ("週報",)
+    assert folded.matched_primary_terms == ("定例",)
     assert folded.auxiliary_match_count == 1
-    assert folded.matched_auxiliary_terms == ("月報",)
+    assert folded.matched_auxiliary_terms == ("成果物",)
 
 
 def test_two_nested_siblings_are_not_folded(tmp_path: Path) -> None:
@@ -172,7 +172,7 @@ def test_same_relative_path_in_both_years_is_not_deduplicated(tmp_path: Path) ->
             _folder(settings.previous_year_root, relative),
         ],
         settings,
-        ["週報"],
+        ["定例"],
     )
 
     assert [(candidate.year, candidate.relative_path) for candidate in ranked] == [
@@ -181,16 +181,16 @@ def test_same_relative_path_in_both_years_is_not_deduplicated(tmp_path: Path) ->
     ]
 
 
-def test_weekly_report_scenario_prefers_current_destination(tmp_path: Path) -> None:
+def test_synthetic_report_scenario_prefers_current_destination(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     output = "（Output）定例成果物"
     folders = [_folder(settings.current_year_root, output)]
     folders.extend(
-        _folder(settings.previous_year_root, f"{output}/{date}_週報_秋田")
-        for date in ("20250401", "20250408", "20250415")
+        _folder(settings.previous_year_root, f"{output}/{date}_定例_サンプル")
+        for date in ("20XX0101", "20XX0108", "20XX0115")
     )
 
-    ranked = _rank(folders, settings, ["20260804", "週報", "秋田"])
+    ranked = _rank(folders, settings, ["20XX0201", "定例", "サンプル"])
 
     assert ranked[0].year is YearScope.CURRENT
     assert ranked[0].relative_path == output
