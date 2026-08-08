@@ -1,4 +1,5 @@
-from collections.abc import Iterable
+import os
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, tzinfo
 from enum import StrEnum
@@ -16,6 +17,10 @@ from onedrive_destination_recommender.catalog import Catalog
 from onedrive_destination_recommender.codex_prompt import (
     CodexConsultation,
     build_codex_consultation,
+)
+from onedrive_destination_recommender.document_reader import (
+    DocumentSearchTerms,
+    build_document_terms,
 )
 from onedrive_destination_recommender.msg_reader import (
     MsgSearchTerms,
@@ -40,6 +45,7 @@ __all__ = [
     "InputState",
     "RecommenderSession",
     "format_scanned_at",
+    "open_folder",
 ]
 
 
@@ -94,10 +100,37 @@ def format_scanned_at(value: str, target_timezone: tzinfo | None = None) -> str:
     return localized.strftime("%Y-%m-%d %H:%M:%S")
 
 
+def open_folder(
+    path: str | Path,
+    *,
+    launcher: Callable[[str], None] | None = None,
+) -> None:
+    """Open one existing folder with the Windows shell."""
+    folder = Path(path)
+    if not folder.is_dir():
+        raise FileNotFoundError(folder)
+
+    if launcher is None:
+        try:
+            launcher = os.startfile
+        except AttributeError as exc:
+            raise OSError("WindowsのExplorer起動機能を利用できません。") from exc
+    launcher(str(folder))
+
+
 def _msg_status(result: MsgSearchTerms) -> str:
     if result.warning:
         return result.warning
     return "MSG解析完了"
+
+
+def _document_status(result: DocumentSearchTerms) -> str:
+    if result.target_count == 0:
+        return "ファイル名のみ使用（本文解析なし）"
+    status = f"本文を利用：{result.parsed_count}/{result.target_count}件"
+    if result.warning:
+        return f"{status}（{result.warning}）"
+    return status
 
 
 class RecommenderSession:
@@ -138,6 +171,10 @@ class RecommenderSession:
         paths = tuple(Path(path).resolve() for path in selected_paths)
         if not paths:
             raise InputSelectionError("ファイルを1件以上選択してください。")
+        if any(not path.is_file() for path in paths):
+            raise InputSelectionError(
+                "フォルダや存在しないファイルは投入できません。ファイルだけを選択してください。"
+            )
 
         msg_count = sum(is_msg_file(path) for path in paths)
         if msg_count and len(paths) != 1:
@@ -156,13 +193,14 @@ class RecommenderSession:
             )
         else:
             primary_terms = initial_terms_from_file_names(path.name for path in paths)
+            document_result = build_document_terms(paths)
             state = InputState(
                 kind=InputKind.FILES,
                 file_paths=paths,
                 initial_primary_terms=primary_terms,
                 current_primary_terms=primary_terms,
-                auxiliary_terms=(),
-                msg_status="ファイル名のみ使用（本文解析なし）",
+                auxiliary_terms=document_result.auxiliary_terms,
+                msg_status=_document_status(document_result),
                 automatic_terms_zero_candidates=None,
             )
 
@@ -217,7 +255,7 @@ class RecommenderSession:
             raise ValueError("候補選択または保存先未定には確定パスが必要です。")
 
         auxiliary_changed = None
-        if self.input_state.kind is InputKind.MSG:
+        if self.input_state.kind is not InputKind.MANUAL:
             auxiliary_changed = did_auxiliary_change_top_ten(
                 self.prepared_folders,
                 self.settings,

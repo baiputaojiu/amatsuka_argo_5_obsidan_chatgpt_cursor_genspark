@@ -1,10 +1,25 @@
+import builtins
 import json
 import sys
+import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 pytestmark = pytest.mark.integration
+
+_DOCX_DOCUMENT_XML = (
+    '<?xml version="1.0"?>'
+    '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+    "<w:body><w:p><w:r><w:t>設備 秋田</w:t></w:r></w:p></w:body></w:document>"
+)
+
+
+def _write_docx(path: Path) -> Path:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("word/document.xml", _DOCX_DOCUMENT_XML)
+    return path
 
 
 def _temporary_runtime(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
@@ -13,7 +28,7 @@ def _temporary_runtime(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     current = tmp_path / "020_FY_CURRENT"
     previous = tmp_path / "010_FY_PREVIOUS"
     pending = current / "（Pending）未分類"
-    destination = current / "設備"
+    destination = current / "設備_絶対パス全文表示を確認するための長い候補フォルダ名"
     pending.mkdir(parents=True)
     previous.mkdir()
     destination.mkdir()
@@ -49,21 +64,90 @@ def _change_setting(settings_path: Path, key: str, value: str) -> None:
     settings_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
 
+@pytest.fixture(scope="module")
+def shared_tk_root():
+    if sys.platform != "win32":
+        pytest.skip("Tkinter Windows GUI test")
+    import tkinter as tk
+
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        yield root
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Tkinter Windows GUI test")
+def test_document_input_reports_status_without_adding_screen_elements(
+    tmp_path: Path,
+    shared_tk_root,
+) -> None:
+    from onedrive_destination_recommender.app import RecommenderApp
+
+    settings_path, catalog_path, audit_path, _destination = _temporary_runtime(tmp_path)
+    root = shared_tk_root
+    existing_widgets = set(root.winfo_children())
+    app = RecommenderApp(
+        root,
+        settings_path=settings_path,
+        catalog_path=catalog_path,
+        audit_path=audit_path,
+    )
+
+    try:
+        root.update_idletasks()
+        assert app.session is not None
+        widgets_before = len(root.winfo_children())
+        columns_before = len(app.candidate_tree["columns"])
+
+        app.session.select_files([_write_docx(tmp_path / "設備仕様.docx")])
+        app._render_all()
+        root.update_idletasks()
+
+        assert app.msg_status_var.get() == "本文を利用：1/1件"
+        assert app.auxiliary_status_var.get().startswith("ファイル本文の補助照合")
+        assert "秋田" in str(app.session.input_state.auxiliary_terms)
+        assert "秋田" not in app.search_var.get()
+
+        text_path = tmp_path / "メモ.txt"
+        text_path.touch()
+        app.session.select_files([text_path])
+        app._render_all()
+        root.update_idletasks()
+
+        assert app.msg_status_var.get() == "ファイル名のみ使用（本文解析なし）"
+        assert app.auxiliary_status_var.get() == "ファイル本文の補助検索語：なし"
+
+        assert len(root.winfo_children()) == widgets_before
+        assert len(app.candidate_tree["columns"]) == columns_before
+    finally:
+        for widget in root.winfo_children():
+            if widget not in existing_widgets:
+                widget.destroy()
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Tkinter Windows GUI test")
 def test_step5_window_connects_search_confirmation_audit_and_codex(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    shared_tk_root,
 ) -> None:
-    import tkinter as tk
-
-    from onedrive_destination_recommender.app import APP_TITLE, RecommenderApp
+    from onedrive_destination_recommender import app as app_module
+    from onedrive_destination_recommender.app import (
+        APP_TITLE,
+        CANDIDATE_PATH_HORIZONTAL_PADDING,
+        CANDIDATE_PATH_MIN_WIDTH,
+        SELECTED_CANDIDATE_PATH_GUIDANCE,
+        RecommenderApp,
+    )
+    from onedrive_destination_recommender.ranking import RankingError
 
     settings_path, catalog_path, audit_path, destination = _temporary_runtime(tmp_path)
-    root = tk.Tk()
-    root.withdraw()
+    root = shared_tk_root
     clipboard: list[str] = []
-    root.clipboard_clear = clipboard.clear  # type: ignore[method-assign]
-    root.clipboard_append = clipboard.append  # type: ignore[method-assign]
+    monkeypatch.setattr(root, "clipboard_clear", clipboard.clear)
+    monkeypatch.setattr(root, "clipboard_append", clipboard.append)
     app = RecommenderApp(
         root,
         settings_path=settings_path,
@@ -82,7 +166,107 @@ def test_step5_window_connects_search_confirmation_audit_and_codex(
 
         app.search_var.set("設備")
         assert len(app.session.candidates) == 1
+        assert app.selected_candidate_path_var.get() == SELECTED_CANDIDATE_PATH_GUIDANCE
+        before_path_display = (
+            audit_path.read_bytes() if audit_path.exists() else None,
+            tuple(clipboard),
+            app.confirmed_path_var.get(),
+            app.search_var.get(),
+            app.session.input_state,
+            app.session.candidates,
+            tuple(app.candidate_tree.get_children()),
+        )
         app.candidate_tree.selection_set("0")
+        app._candidate_selection_changed()
+        assert app.selected_candidate_path_var.get() == str(destination)
+        assert int(app.selected_candidate_path_label.cget("wraplength")) == 620
+        tree_font = app_module.ttk.Style(root).lookup("Treeview", "font") or "TkDefaultFont"
+        measured_path_width = int(root.tk.call("font", "measure", tree_font, str(destination)))
+        assert int(app.candidate_tree.column("path", "width")) >= (
+            measured_path_width + CANDIDATE_PATH_HORIZONTAL_PADDING
+        )
+        assert app.candidate_tree.column("path", "stretch") in (False, 0, "0")
+        assert (
+            audit_path.read_bytes() if audit_path.exists() else None,
+            tuple(clipboard),
+            app.confirmed_path_var.get(),
+            app.search_var.get(),
+            app.session.input_state,
+            app.session.candidates,
+            tuple(app.candidate_tree.get_children()),
+        ) == before_path_display
+
+        def reject_search(_text: str) -> None:
+            raise RankingError("synthetic catalog mismatch")
+
+        with monkeypatch.context() as catalog_mismatch:
+            catalog_mismatch.setattr(app.session, "apply_search_text", reject_search)
+            app.search_var.set("設備 不一致")
+            assert app.candidate_tree.get_children() == ()
+            assert app.selected_candidate_path_var.get() == SELECTED_CANDIDATE_PATH_GUIDANCE
+            assert int(app.candidate_tree.column("path", "width")) == CANDIDATE_PATH_MIN_WIDTH
+
+        app.search_var.set("設備")
+        assert len(app.session.candidates) == 1
+        app.candidate_tree.selection_set("0")
+        app._candidate_selection_changed()
+
+        opened: list[str] = []
+        monkeypatch.setattr(app_module, "open_folder", opened.append)
+        hit = {"region": "cell", "row": "0"}
+        monkeypatch.setattr(
+            app.candidate_tree,
+            "identify_region",
+            lambda _x, _y: hit["region"],
+        )
+        monkeypatch.setattr(
+            app.candidate_tree,
+            "identify_row",
+            lambda _y: hit["row"],
+        )
+        before_preview = (
+            audit_path.read_bytes() if audit_path.exists() else None,
+            tuple(clipboard),
+            app.confirmed_path_var.get(),
+            app.search_var.get(),
+            app.session.input_state,
+            app.session.candidates,
+            tuple(app.candidate_tree.get_children()),
+            app.selected_candidate_path_var.get(),
+        )
+
+        assert app.candidate_tree.bind("<Double-1>")
+        assert app.candidate_tree.bind("<Return>")
+        assert app.candidate_tree.bind("<<TreeviewSelect>>")
+        app._open_candidate_by_click(SimpleNamespace(x=1, y=1))
+        assert opened == [str(destination)]
+        assert app.selected_candidate_path_var.get() == str(destination)
+        assert (
+            audit_path.read_bytes() if audit_path.exists() else None,
+            tuple(clipboard),
+            app.confirmed_path_var.get(),
+            app.search_var.get(),
+            app.session.input_state,
+            app.session.candidates,
+            tuple(app.candidate_tree.get_children()),
+            app.selected_candidate_path_var.get(),
+        ) == before_preview
+
+        app._open_selected_candidate()
+        assert opened == [str(destination), str(destination)]
+
+        hit["region"] = "heading"
+        app._open_candidate_by_click(SimpleNamespace(x=1, y=1))
+        hit.update(region="cell", row="")
+        app._open_candidate_by_click(SimpleNamespace(x=1, y=1))
+        app.candidate_tree.selection_remove("0")
+        app._candidate_selection_changed()
+        assert app.selected_candidate_path_var.get() == SELECTED_CANDIDATE_PATH_GUIDANCE
+        app._open_selected_candidate()
+        assert opened == [str(destination), str(destination)]
+
+        app.candidate_tree.selection_set("0")
+        app._candidate_selection_changed()
         app._confirm_candidate()
 
         assert clipboard == [str(destination)]
@@ -91,14 +275,13 @@ def test_step5_window_connects_search_confirmation_audit_and_codex(
 
         app.search_var.set("設備 追加")
         assert app.confirmed_path_var.get() == ""
+        assert app.selected_candidate_path_var.get() == SELECTED_CANDIDATE_PATH_GUIDANCE
 
         clipboard.clear()
         app._copy_codex_prompt()
         assert app.consultation is not None
         assert clipboard == [app.consultation.prompt]
         assert app.consultation.attachment_guidance not in clipboard[0]
-
-        from onedrive_destination_recommender import app as app_module
 
         messages: list[str] = []
         monkeypatch.setattr(
@@ -159,5 +342,164 @@ def test_step5_window_connects_search_confirmation_audit_and_codex(
             for widget in root.winfo_children():
                 if widget not in original_widgets:
                     widget.destroy()
+    finally:
+        for widget in root.winfo_children():
+            widget.destroy()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Tkinter Windows GUI test")
+def test_drop_splits_single_and_multiple_paths_without_changing_them(
+    tmp_path: Path,
+    shared_tk_root,
+) -> None:
+    import tkinter as tk
+
+    from onedrive_destination_recommender.app import RecommenderApp
+
+    settings_path, catalog_path, audit_path, _destination = _temporary_runtime(tmp_path)
+    root = tk.Toplevel(shared_tk_root)
+    root.withdraw()
+    app = RecommenderApp(
+        root,
+        settings_path=settings_path,
+        catalog_path=catalog_path,
+        audit_path=audit_path,
+    )
+    single = (tmp_path / "カメラ 仕様書（秋田）.docx",)
+    multiple = (tmp_path / "図面 [Rev1].pdf", tmp_path / "設備 写真（正面）.png")
+    for path in (*single, *multiple):
+        path.touch()
+    accepted: list[tuple[str, ...]] = []
+    app._accept_files = lambda paths: accepted.append(tuple(paths))
+
+    try:
+        assert app.input_list.dnd_bind("<<Drop>>")
+        for expected in (single, multiple):
+            event_data = root.tk.call("list", *(str(path) for path in expected))
+            app._on_drop(SimpleNamespace(data=event_data))
+
+        assert accepted == [
+            tuple(str(path) for path in single),
+            tuple(str(path) for path in multiple),
+        ]
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Tkinter Windows GUI test")
+def test_drop_and_file_selection_produce_the_same_result_without_finalizing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    shared_tk_root,
+) -> None:
+    import tkinter as tk
+
+    from onedrive_destination_recommender import app as app_module
+    from onedrive_destination_recommender.app import RecommenderApp
+
+    settings_path, catalog_path, audit_path, _destination = _temporary_runtime(tmp_path)
+    input_paths = (tmp_path / "設備 仕様書（秋田）.pdf", tmp_path / "設備 [Rev1].docx")
+    for path in input_paths:
+        path.touch()
+    root = tk.Toplevel(shared_tk_root)
+    root.withdraw()
+    clipboard: list[str] = []
+    root.clipboard_clear = clipboard.clear  # type: ignore[method-assign]
+    root.clipboard_append = clipboard.append  # type: ignore[method-assign]
+    app = RecommenderApp(
+        root,
+        settings_path=settings_path,
+        catalog_path=catalog_path,
+        audit_path=audit_path,
+    )
+    monkeypatch.setattr(
+        app_module.filedialog,
+        "askopenfilenames",
+        lambda **_kwargs: tuple(str(path) for path in input_paths),
+    )
+
+    try:
+        app._select_files()
+        assert app.session is not None
+        selected_result = (
+            app.session.input_state,
+            app.session.search_text,
+            app.session.candidates,
+        )
+
+        app._reset_manual()
+        before_drop_effects = (
+            audit_path.read_bytes() if audit_path.exists() else None,
+            tuple(clipboard),
+            app.confirmed_path_var.get(),
+        )
+        event_data = root.tk.call("list", *(str(path) for path in input_paths))
+        app._on_drop(SimpleNamespace(data=event_data))
+
+        assert (
+            app.session.input_state,
+            app.session.search_text,
+            app.session.candidates,
+        ) == selected_result
+        assert (
+            audit_path.read_bytes() if audit_path.exists() else None,
+            tuple(clipboard),
+            app.confirmed_path_var.get(),
+        ) == before_drop_effects
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Tkinter Windows GUI test")
+def test_dnd_initialization_failure_keeps_file_selection_available(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    shared_tk_root,
+) -> None:
+    import tkinter as tk
+
+    from onedrive_destination_recommender import app as app_module
+    from onedrive_destination_recommender.app import RecommenderApp
+
+    settings_path, catalog_path, audit_path, _destination = _temporary_runtime(tmp_path)
+    input_path = tmp_path / "設備.pdf"
+    input_path.touch()
+    root = tk.Toplevel(shared_tk_root)
+    root.withdraw()
+    attempted_imports: list[str] = []
+    real_import = builtins.__import__
+
+    def reject_dnd_import(
+        name: str,
+        globals: dict[str, object] | None = None,
+        locals: dict[str, object] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> object:
+        if name == "tkinterdnd2":
+            attempted_imports.append(name)
+            raise ImportError("synthetic tkinterdnd2 failure")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", reject_dnd_import)
+    try:
+        app = RecommenderApp(
+            root,
+            settings_path=settings_path,
+            catalog_path=catalog_path,
+            audit_path=audit_path,
+        )
+        assert attempted_imports == ["tkinterdnd2"]
+        monkeypatch.setattr(builtins, "__import__", real_import)
+        monkeypatch.setattr(
+            app_module.filedialog,
+            "askopenfilenames",
+            lambda **_kwargs: (str(input_path),),
+        )
+
+        app._select_files()
+
+        assert app.session is not None
+        assert app.session.input_state.file_paths == (input_path.resolve(),)
     finally:
         root.destroy()

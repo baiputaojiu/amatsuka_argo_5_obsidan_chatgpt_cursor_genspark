@@ -1,4 +1,7 @@
+import pytest
+
 from onedrive_destination_recommender.terms import (
+    clean_document_text,
     clean_msg_body,
     initial_terms_from_file_names,
     is_inline_image_attachment,
@@ -81,6 +84,42 @@ Join the meeting now
 
 def test_clean_msg_body_limits_result_after_cleaning() -> None:
     assert clean_msg_body("A" * 2100) == "A" * 2000
+
+
+def test_clean_document_text_removes_urls_addresses_and_phone_numbers() -> None:
+    text = "定例 サンプル\n連絡先 user@example.com https://example.com 03-1234-5678"
+
+    cleaned = clean_document_text(text)
+
+    assert "定例 サンプル" in cleaned
+    assert "連絡先" in cleaned
+    assert "example" not in cleaned
+    assert "03-1234-5678" not in cleaned
+
+
+def test_clean_document_text_keeps_email_specific_noise_that_documents_may_use() -> None:
+    text = "> 引用に見える行\nMicrosoft Teams 検討会\n---\n設備一覧\nFrom: 部署名"
+
+    cleaned = clean_document_text(text)
+
+    assert "引用に見える行" in cleaned
+    assert "Microsoft Teams 検討会" in cleaned
+    assert "設備一覧" in cleaned
+    assert "From: 部署名" in cleaned
+
+
+def test_clean_document_text_limits_result_after_cleaning() -> None:
+    assert clean_document_text("A" * 2100) == "A" * 2000
+
+
+def test_clean_document_text_rejects_non_positive_limits() -> None:
+    with pytest.raises(ValueError, match="limit"):
+        clean_document_text("週報", limit=0)
+
+
+def test_clean_msg_body_still_rejects_non_positive_limits() -> None:
+    with pytest.raises(ValueError, match="limit"):
+        clean_msg_body("本文", limit=0)
 
 
 def test_inline_image_attachment_pattern_uses_name_and_supported_extension() -> None:

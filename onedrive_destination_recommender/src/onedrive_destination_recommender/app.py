@@ -1,4 +1,6 @@
+import sys
 import tkinter as tk
+from collections.abc import Iterable
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -23,6 +25,7 @@ from onedrive_destination_recommender.session import (
     InputSelectionError,
     RecommenderSession,
     format_scanned_at,
+    open_folder,
 )
 from onedrive_destination_recommender.settings import (
     SETTINGS_FILE_NAME,
@@ -34,6 +37,9 @@ from onedrive_destination_recommender.settings import (
 
 APP_TITLE = "OneDrive保存先レコメンダー"
 README_PATH = Path(__file__).resolve().parents[2] / "README.md"
+SELECTED_CANDIDATE_PATH_GUIDANCE = "候補を選択すると絶対パスを全文表示します。"
+CANDIDATE_PATH_MIN_WIDTH = 480
+CANDIDATE_PATH_HORIZONTAL_PADDING = 24
 
 
 class RecommenderApp:
@@ -60,6 +66,7 @@ class RecommenderApp:
         self._changing_search = False
 
         self._build_widgets()
+        self._initialize_dnd()
         self._load_runtime()
 
     def _build_widgets(self) -> None:
@@ -176,6 +183,10 @@ class RecommenderApp:
         )
         input_scrollbar.grid(row=0, column=1, sticky="ns")
         self.input_list.configure(yscrollcommand=input_scrollbar.set)
+        ttk.Label(
+            list_frame,
+            text="デスクトップまたはExplorerからファイルをここへドロップできます",
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         self.msg_status_var = tk.StringVar(value="手動検索のみ")
         ttk.Label(area, textvariable=self.msg_status_var).grid(
@@ -222,7 +233,12 @@ class RecommenderApp:
         self.candidate_tree.heading("path", text="絶対パス")
         self.candidate_tree.column("primary", width=145, stretch=False)
         self.candidate_tree.column("auxiliary", width=145, stretch=False)
-        self.candidate_tree.column("path", width=480, stretch=True)
+        self.candidate_tree.column(
+            "path",
+            width=CANDIDATE_PATH_MIN_WIDTH,
+            minwidth=CANDIDATE_PATH_MIN_WIDTH,
+            stretch=False,
+        )
         self.candidate_tree.grid(row=0, column=0, sticky="nsew")
 
         vertical = ttk.Scrollbar(area, orient="vertical", command=self.candidate_tree.yview)
@@ -237,6 +253,12 @@ class RecommenderApp:
             yscrollcommand=vertical.set,
             xscrollcommand=horizontal.set,
         )
+        self.candidate_tree.bind("<Double-1>", self._open_candidate_by_click)
+        self.candidate_tree.bind("<Return>", self._open_selected_candidate)
+        self.candidate_tree.bind(
+            "<<TreeviewSelect>>",
+            self._candidate_selection_changed,
+        )
 
         self.candidate_status_var = tk.StringVar(value="検索語を入力してください。")
         ttk.Label(area, textvariable=self.candidate_status_var).grid(
@@ -245,6 +267,33 @@ class RecommenderApp:
             sticky="w",
             pady=(4, 0),
         )
+
+        selected_path_area = ttk.Frame(area)
+        selected_path_area.grid(row=3, column=0, sticky="ew", pady=(2, 0))
+        selected_path_area.columnconfigure(1, weight=1)
+        ttk.Label(selected_path_area, text="選択中の絶対パス：").grid(
+            row=0,
+            column=0,
+            sticky="nw",
+        )
+        self.selected_candidate_path_var = tk.StringVar(value=SELECTED_CANDIDATE_PATH_GUIDANCE)
+        self.selected_candidate_path_label = ttk.Label(
+            selected_path_area,
+            textvariable=self.selected_candidate_path_var,
+            wraplength=620,
+            justify="left",
+            anchor="w",
+        )
+        self.selected_candidate_path_label.grid(row=0, column=1, sticky="ew")
+
+        ttk.Label(
+            area,
+            text=(
+                "候補をダブルクリックするとExplorerで確認できます。"
+                "開くだけでは保存先は確定されません。"
+            ),
+            wraplength=760,
+        ).grid(row=4, column=0, sticky="w", pady=(2, 0))
 
     def _build_action_area(self, parent: ttk.Frame) -> None:
         area = ttk.Frame(parent)
@@ -462,6 +511,18 @@ class RecommenderApp:
         finally:
             self.update_button.state(["!disabled"])
 
+    def _initialize_dnd(self) -> None:
+        if sys.platform != "win32":
+            return
+        try:
+            from tkinterdnd2 import DND_FILES, TkinterDnD
+
+            TkinterDnD.require(self.root)
+            self.input_list.drop_target_register(DND_FILES)
+            self.input_list.dnd_bind("<<Drop>>", self._on_drop)
+        except Exception:
+            return
+
     def _select_files(self) -> None:
         if self.session is None:
             return
@@ -471,6 +532,17 @@ class RecommenderApp:
             filetypes=(("すべてのファイル", "*.*"), ("Outlook MSG", "*.msg")),
         )
         if not selected:
+            return
+        self._accept_files(selected)
+
+    def _on_drop(self, event: tk.Event) -> None:
+        selected = self.root.tk.splitlist(event.data)
+        if not selected:
+            return
+        self._accept_files(selected)
+
+    def _accept_files(self, selected: Iterable[str | Path]) -> None:
+        if self.session is None:
             return
         try:
             self.session.select_files(selected)
@@ -548,12 +620,37 @@ class RecommenderApp:
         self.msg_status_var.set(state.msg_status)
 
     def _clear_candidates(self) -> None:
+        self.selected_candidate_path_var.set(SELECTED_CANDIDATE_PATH_GUIDANCE)
+        self.candidate_tree.column("path", width=CANDIDATE_PATH_MIN_WIDTH)
         for item in self.candidate_tree.get_children():
             self.candidate_tree.delete(item)
+
+    def _candidate_path_column_width(self) -> int:
+        assert self.session is not None
+        tree_font = ttk.Style(self.root).lookup("Treeview", "font") or "TkDefaultFont"
+        longest_path_width = max(
+            (
+                int(
+                    self.root.tk.call(
+                        "font",
+                        "measure",
+                        tree_font,
+                        candidate.absolute_path,
+                    )
+                )
+                for candidate in self.session.candidates
+            ),
+            default=0,
+        )
+        return max(
+            CANDIDATE_PATH_MIN_WIDTH,
+            longest_path_width + CANDIDATE_PATH_HORIZONTAL_PADDING,
+        )
 
     def _render_candidates(self) -> None:
         assert self.session is not None
         self._clear_candidates()
+        self.candidate_tree.column("path", width=self._candidate_path_column_width())
         for index, candidate in enumerate(self.session.candidates):
             self.candidate_tree.insert(
                 "",
@@ -578,20 +675,21 @@ class RecommenderApp:
     def _render_auxiliary_status(self) -> None:
         assert self.session is not None
         state = self.session.input_state
-        if state.kind is not InputKind.MSG:
+        if state.kind is InputKind.MANUAL:
             self.auxiliary_status_var.set("補助照合：使用なし")
             return
+        source = "MSG本文" if state.kind is InputKind.MSG else "ファイル本文"
         if not state.auxiliary_terms:
-            self.auxiliary_status_var.set("MSG本文の補助検索語：なし")
+            self.auxiliary_status_var.set(f"{source}の補助検索語：なし")
             return
         matched = any(candidate.auxiliary_match_count for candidate in self.session.candidates)
         if matched:
             self.auxiliary_status_var.set(
-                f"MSG本文の補助照合：使用（{len(state.auxiliary_terms)}語、候補に一致あり）"
+                f"{source}の補助照合：使用（{len(state.auxiliary_terms)}語、候補に一致あり）"
             )
         else:
             self.auxiliary_status_var.set(
-                f"MSG本文の補助照合：{len(state.auxiliary_terms)}語生成、候補への一致なし"
+                f"{source}の補助照合：{len(state.auxiliary_terms)}語生成、候補への一致なし"
             )
 
     def _set_prompt_text(self, text: str) -> None:
@@ -617,6 +715,37 @@ class RecommenderApp:
             return self.session.candidates[index].absolute_path
         except (ValueError, IndexError):
             return None
+
+    def _candidate_selection_changed(self, _event: tk.Event | None = None) -> None:
+        path = self._selected_candidate_path()
+        self.selected_candidate_path_var.set(
+            path if path is not None else SELECTED_CANDIDATE_PATH_GUIDANCE
+        )
+
+    def _open_candidate_by_click(self, event: tk.Event) -> None:
+        if self.candidate_tree.identify_region(event.x, event.y) != "cell":
+            return
+        row = self.candidate_tree.identify_row(event.y)
+        if not row:
+            return
+        self.candidate_tree.selection_set(row)
+        self._candidate_selection_changed()
+        self._open_selected_candidate()
+
+    def _open_selected_candidate(self, _event: tk.Event | None = None) -> None:
+        path = self._selected_candidate_path()
+        if path is None:
+            return
+        try:
+            open_folder(path)
+        except FileNotFoundError:
+            self.operation_status_var.set(
+                "候補フォルダが見つかりません。フォルダ構成を更新してください。"
+            )
+        except OSError:
+            self.operation_status_var.set(
+                "候補フォルダをExplorerで開けませんでした。パスを確認して再度お試しください。"
+            )
 
     def _confirm_candidate(self) -> None:
         path = self._selected_candidate_path()
